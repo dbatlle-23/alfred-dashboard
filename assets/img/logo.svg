@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="60" viewBox="0 0 200 60">
+  <style>
+    .logo-text { font-family: Arial, sans-serif; font-weight: bold; }
+    .primary { fill: #0d6efd; }
+    .secondary { fill: #6c757d; }
+  </style>
+  <g transform="translate(10, 40)">
+    <text class="logo-text primary" font-size="30">Alfred</text>
+    <text class="logo-text secondary" x="95" font-size="30">Dashboard</text>
+  </g>
+</svg> 

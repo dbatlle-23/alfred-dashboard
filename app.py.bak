@@ -1,0 +1,75 @@
+import dash
+from dash import html, dcc
+import dash_bootstrap_components as dbc
+import logging
+import os
+
+# Configurar logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Importar componentes
+from components.sidebar import create_sidebar
+
+# Inicializar la aplicación
+app = dash.Dash(
+    __name__,
+    external_stylesheets=[dbc.themes.BOOTSTRAP, 'https://use.fontawesome.com/releases/v5.15.4/css/all.css'],
+    suppress_callback_exceptions=True
+)
+
+# Definir el layout principal
+app.layout = html.Div([
+    dcc.Location(id="url", refresh=False),
+    dbc.Row([
+        # Sidebar
+        dbc.Col(create_sidebar(), width=2, className="sidebar-container"),
+        # Contenido principal
+        dbc.Col(html.Div(id="page-content"), width=10, className="content-container"),
+    ])
+])
+
+# Importar callbacks (después de definir app)
+from callbacks.db_explorer import register_callbacks
+from callbacks.db_config import register_config_callbacks
+
+# Registrar todos los callbacks
+register_callbacks(app)
+register_config_callbacks(app)
+
+# Callback para cambiar el contenido de la página
+@app.callback(
+    dash.dependencies.Output("page-content", "children"),
+    [dash.dependencies.Input("url", "pathname")]
+)
+def display_page(pathname):
+    # Importar layouts aquí para evitar importaciones circulares
+    from layouts.home import layout as home_layout
+    from layouts.db_config import layout as db_config_layout
+    from layouts.db_explorer import layout as db_explorer_layout
+    
+    logger.info(f"Navegando a la ruta: {pathname}")
+    
+    if pathname == "/database-explorer":
+        return db_explorer_layout
+    elif pathname == "/db-config":
+        return db_config_layout
+    else:
+        return home_layout
+
+# Ejecutar la aplicación
+if __name__ == "__main__":
+    # Asegurarse de que existe el directorio de configuración
+    os.makedirs("config", exist_ok=True)
+    
+    logger.info("Iniciando la aplicación Alfred Dashboard")
+    
+    # Obtener host y puerto del entorno (útil para Docker)
+    host = os.getenv('HOST', '0.0.0.0')
+    port = int(os.getenv('PORT', 8050))
+    debug = os.getenv('DASH_DEBUG', 'false').lower() == 'true'
+    
+    app.run_server(host=host, port=port, debug=debug)
