@@ -1,17 +1,29 @@
-from dash import html, dcc
+from dash import html, dcc, no_update
 import dash_bootstrap_components as dbc
 from dash.dependencies import Input, Output, State
 import dash
+from utils.db_utils import get_common_areas_bookings, get_unique_common_areas
+import pandas as pd
+from datetime import datetime
+from utils.logging import get_logger
+import math
+
+# Configurar logger
+logger = get_logger(__name__)
 
 # Layout para la página de Spaces
 layout = html.Div([
     dbc.Row([
         dbc.Col([
-            html.H1("Spaces Management", className="mb-4"),
-            html.P("Gestiona y monitorea los espacios inteligentes de tu organización.", className="lead mb-4"),
+            html.H1("Gestión de Reservas de Espacios", className="mb-4"),
+            html.P("Gestiona y monitorea las reservas de espacios comunes en tu organización.", className="lead mb-4"),
             
             # Indicador de filtro activo
             html.Div(id="spaces-filter-indicator", className="mb-3"),
+            
+            # Componentes ocultos para paginación
+            dcc.Store(id="page-number", data=1),
+            dcc.Store(id="rows-per-page", data=10),
             
             # Tarjetas de resumen
             dbc.Row([
@@ -19,7 +31,7 @@ layout = html.Div([
                 dbc.Col([
                     dbc.Card([
                         dbc.CardBody([
-                            html.H4("Espacios Totales", className="card-title text-center"),
+                            html.H4("Reservas Totales", className="card-title text-center"),
                             html.H2(id="spaces-total", className="text-center text-primary mb-0"),
                             html.P(id="spaces-total-change", className="text-success text-center mt-2 mb-0")
                         ])
@@ -49,131 +61,102 @@ layout = html.Div([
                 ], md=4, className="mb-4"),
             ]),
             
-            # Filtros y búsqueda
-            dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("Filtros y Búsqueda"),
-                        dbc.CardBody([
-                            dbc.Row([
-                                dbc.Col([
-                                    html.Label("Tipo de Espacio"),
-                                    dcc.Dropdown(
-                                        id="space-type-filter",
-                                        options=[
-                                            {"label": "Todos", "value": "all"},
-                                            {"label": "Oficina", "value": "oficina"},
-                                            {"label": "Sala de Reuniones", "value": "reunion"},
-                                            {"label": "Espacio Común", "value": "comun"},
-                                            {"label": "Almacén", "value": "almacen"}
-                                        ],
-                                        value="all",
-                                        clearable=False,
-                                        className="mb-3"
-                                    )
-                                ], md=4),
-                                dbc.Col([
-                                    html.Label("Estado"),
-                                    dcc.Dropdown(
-                                        id="space-status-filter",
-                                        options=[
-                                            {"label": "Todos", "value": "all"},
-                                            {"label": "Disponible", "value": "disponible"},
-                                            {"label": "Ocupado", "value": "ocupado"},
-                                            {"label": "Reservado", "value": "reservado"},
-                                            {"label": "Mantenimiento", "value": "mantenimiento"}
-                                        ],
-                                        value="all",
-                                        clearable=False,
-                                        className="mb-3"
-                                    )
-                                ], md=4),
-                                dbc.Col([
-                                    html.Label("Capacidad Mínima"),
-                                    dcc.Slider(
-                                        id="space-capacity-filter",
-                                        min=0,
-                                        max=20,
-                                        step=1,
-                                        value=0,
-                                        marks={i: str(i) for i in range(0, 21, 5)},
-                                        className="mb-3"
-                                    )
-                                ], md=4),
-                            ]),
-                            dbc.Row([
-                                dbc.Col([
-                                    html.Label("Búsqueda"),
-                                    dbc.InputGroup([
-                                        dbc.Input(id="space-search", placeholder="Buscar por nombre o ID..."),
-                                        dbc.Button([html.I(className="fas fa-search")], color="primary")
-                                    ], className="mb-3")
-                                ], md=8),
-                                dbc.Col([
-                                    html.Label("Acciones"),
-                                    dbc.Button([html.I(className="fas fa-filter me-2"), "Aplicar Filtros"], color="primary", className="me-2", id="apply-space-filters"),
-                                    dbc.Button([html.I(className="fas fa-sync-alt me-2"), "Reiniciar"], color="secondary", id="reset-space-filters")
-                                ], md=4, className="d-flex align-items-end")
-                            ])
+            # Sección de filtros
+            html.Div([
+                html.H5("Filtros y Búsqueda", className="mb-3"),
+                dbc.Row([
+                    dbc.Col([
+                        html.Label("Tipo de Espacio"),
+                        dbc.Select(
+                            id="space-type-filter",
+                            options=[
+                                {"label": "Todos", "value": "all"},
+                                {"label": "Sala de Reuniones", "value": "reunion"},
+                                {"label": "Oficina", "value": "oficina"},
+                                {"label": "Espacio Común", "value": "comun"},
+                                {"label": "Almacén", "value": "almacen"}
+                            ],
+                            value="all"
+                        )
+                    ], md=4),
+                    dbc.Col([
+                        html.Label("Estado de Reserva"),
+                        dbc.Select(
+                            id="space-status-filter",
+                            options=[
+                                {"label": "Todos", "value": "all"},
+                                {"label": "Disponible", "value": "disponible"},
+                                {"label": "Ocupado", "value": "ocupado"},
+                                {"label": "Reservado", "value": "reservado"},
+                                {"label": "Cancelado", "value": "cancelado"}
+                            ],
+                            value="all"
+                        )
+                    ], md=4),
+                    dbc.Col([
+                        html.Label("Capacidad Mínima"),
+                        dcc.Slider(
+                            id="space-capacity-filter",
+                            min=0,
+                            max=20,
+                            step=1,
+                            value=0,
+                            marks={i: str(i) for i in range(0, 21, 5)}
+                        )
+                    ], md=4)
+                ], className="mb-3"),
+                dbc.Row([
+                    dbc.Col([
+                        html.Label("Búsqueda"),
+                        dbc.InputGroup([
+                            dbc.Input(id="space-search", placeholder="Buscar por nombre o ID..."),
+                            dbc.Button([html.I(className="fas fa-search")], color="primary")
                         ])
-                    ], className="shadow-sm")
-                ], className="mb-4"),
-            ]),
+                    ], md=8),
+                    dbc.Col([
+                        html.Label("Acciones"),
+                        html.Div([
+                            dbc.Button([html.I(className="fas fa-filter me-1"), "Aplicar Filtros"], id="apply-space-filters", color="primary", className="me-2"),
+                            dbc.Button([html.I(className="fas fa-redo me-1"), "Reiniciar"], id="reset-space-filters", color="secondary", className="me-2"),
+                            dbc.Button([html.I(className="fas fa-sync me-1"), "Actualizar"], id="refresh-spaces-button", color="success")
+                        ], className="d-flex")
+                    ], md=4)
+                ], className="mb-4")
+            ], className="p-3 bg-light rounded mb-4"),
             
-            # Lista de espacios
-            dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader([
-                            html.H5("Espacios", className="mb-0 d-inline"),
-                            dbc.Button(
-                                [html.I(className="fas fa-sync-alt")],
-                                color="link",
-                                className="float-end",
-                                id="refresh-spaces-button"
-                            )
-                        ]),
-                        dbc.CardBody([
-                            html.Div(id="spaces-table-container")
-                        ])
-                    ], className="shadow-sm")
-                ], className="mb-4"),
-            ]),
+            # Sección de espacios
+            html.Div([
+                dbc.Row([
+                    dbc.Col([
+                        html.H5("Reservas de Espacios", className="d-inline-block me-2"),
+                        dbc.Badge(id="spaces-count", color="primary", className="me-1")
+                    ], width="auto"),
+                    dbc.Col([
+                        dbc.Button([html.I(className="fas fa-plus me-1"), "Nueva Reserva"], color="success", size="sm", className="float-end")
+                    ])
+                ], className="mb-3"),
+                html.Div(id="spaces-table-container"),
+                html.Div(id="pagination-container", className="mt-3")
+            ], className="mb-4"),
             
-            # Gráficos
-            dbc.Row([
-                # Gráfico 1
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("Ocupación por Tipo de Espacio"),
-                        dbc.CardBody([
-                            dcc.Graph(id="spaces-graph-1")
-                        ])
-                    ], className="shadow-sm")
-                ], md=6, className="mb-4"),
-                
-                # Gráfico 2
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("Reservas por Día"),
-                        dbc.CardBody([
-                            dcc.Graph(id="spaces-graph-2")
-                        ])
-                    ], className="shadow-sm")
-                ], md=6, className="mb-4"),
-            ]),
+            # Sección de gráficos
+            html.Div([
+                html.H5("Análisis de Reservas", className="mb-3"),
+                dbc.Row([
+                    dbc.Col([
+                        dcc.Graph(id="spaces-graph-1")
+                    ], md=6),
+                    dbc.Col([
+                        dcc.Graph(id="spaces-graph-2")
+                    ], md=6)
+                ])
+            ], className="mb-4"),
             
-            # Calendario de reservas
-            dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("Calendario de Reservas"),
-                        dbc.CardBody([
-                            html.Div(id="spaces-calendar-container", style={"height": "400px"})
-                        ])
-                    ], className="shadow-sm")
-                ], className="mb-4"),
-            ]),
+            # Sección de calendario
+            html.Div([
+                html.H5("Calendario de Reservas", className="mb-3"),
+                html.Div(id="spaces-calendar-container")
+            ])
         ])
     ])
 ])
@@ -192,37 +175,23 @@ def register_callbacks(app):
         if client_id == "all" and project_id == "all":
             return html.Div([
                 html.I(className="fas fa-info-circle me-2"),
-                "Mostrando datos globales de todos los clientes y proyectos"
-            ], className="alert alert-info")
-        
-        from utils.api import get_clientes, get_projects
-        
-        # Obtener nombre del cliente
-        client_name = "Todos los clientes"
-        if client_id != "all":
-            clientes = get_clientes()
-            client_match = next((c for c in clientes if c["id"] == client_id), None)
-            if client_match:
-                client_name = client_match["nombre"]
-        
-        # Obtener nombre del proyecto
-        project_name = "Todos los proyectos"
-        if project_id != "all":
-            projects = get_projects(client_id if client_id != "all" else None)
-            project_match = next((p for p in projects if p["id"] == project_id), None)
-            if project_match:
-                project_name = project_match["nombre"]
-        
-        if project_id == "all":
+                "Mostrando datos globales de todas las reservas de espacios"
+            ], className="alert alert-info py-2")
+        elif client_id != "all" and project_id == "all":
             return html.Div([
                 html.I(className="fas fa-filter me-2"),
-                f"Filtrando datos para: {client_name}"
-            ], className="alert alert-primary")
+                f"Filtrando reservas por cliente: {client_id}"
+            ], className="alert alert-primary py-2")
+        elif client_id == "all" and project_id != "all":
+            return html.Div([
+                html.I(className="fas fa-filter me-2"),
+                f"Filtrando reservas por proyecto: {project_id}"
+            ], className="alert alert-primary py-2")
         else:
             return html.Div([
                 html.I(className="fas fa-filter me-2"),
-                f"Filtrando datos para: {client_name} / {project_name}"
-            ], className="alert alert-primary")
+                f"Filtrando reservas por cliente: {client_id} y proyecto: {project_id}"
+            ], className="alert alert-primary py-2")
     
     # Callback para actualizar las métricas según el filtro seleccionado
     @app.callback(
@@ -240,201 +209,433 @@ def register_callbacks(app):
         client_id = selection_data.get("client_id", "all")
         project_id = selection_data.get("project_id", "all")
         
-        # Aquí implementarías la lógica real para obtener datos según los filtros
-        # Por ahora, usamos datos de ejemplo
+        # Obtener datos de la tabla common_areas_booking_report
+        df = get_common_areas_bookings(client_id=client_id, community_uuid=project_id)
         
-        # Valores por defecto (todos los clientes/proyectos)
-        espacios_total = "24"
-        espacios_total_change = "3 nuevos este mes"
-        ocupacion = "68%"
-        ocupacion_detail = "16 espacios ocupados"
-        reservas = "12"
-        reservas_change = "↑ 20% vs. ayer"
+        # Valores por defecto
+        total_bookings = "0"
+        bookings_change = "+0% vs. mes anterior"
+        ocupacion = "0%"
+        ocupacion_detail = "0 espacios ocupados"
+        reservas_hoy = "0"
+        reservas_change = "+0% vs. semana anterior"
         
-        # Si hay un cliente seleccionado
-        if client_id != "all":
-            # Datos de ejemplo para el cliente seleccionado
-            if client_id == 1:
-                espacios_total = "10"
-                ocupacion = "70%"
-                ocupacion_detail = "7 espacios ocupados"
-                reservas = "5"
-            elif client_id == 2:
-                espacios_total = "8"
-                ocupacion = "75%"
-                ocupacion_detail = "6 espacios ocupados"
-                reservas = "4"
-            elif client_id == 3:
-                espacios_total = "6"
-                ocupacion = "50%"
-                ocupacion_detail = "3 espacios ocupados"
-                reservas = "2"
-            elif client_id == 4:
-                espacios_total = "4"
-                ocupacion = "25%"
-                ocupacion_detail = "1 espacio ocupado"
-                reservas = "1"
+        # Si hay datos, calcular métricas
+        if df is not None and not df.empty:
+            try:
+                # 1. Total de reservas (bookings)
+                total_bookings = str(len(df))
+                
+                # 2. Obtener espacios únicos para calcular ocupación
+                unique_areas = get_unique_common_areas(client_id, project_id)
+                total_spaces = len(unique_areas) if unique_areas is not None else 0
+                
+                # 3. Calcular ocupación actual (basado en reservas activas)
+                now = datetime.now()
+                current_date_str = now.strftime('%Y-%m-%d')
+                current_time_str = now.strftime('%H:%M:%S')
+                
+                # Filtrar reservas activas (que están ocurriendo ahora)
+                try:
+                    # Convertir a datetime para comparación
+                    active_bookings = df[df['cancelled_at'].isna()]  # No canceladas
+                    
+                    # Filtrar por fecha y hora actual
+                    current_active = []
+                    for _, row in active_bookings.iterrows():
+                        start_time = row['start_time']
+                        end_time = row['end_time']
+                        
+                        # Convertir a datetime si son strings
+                        if isinstance(start_time, str):
+                            if 'T' in start_time:
+                                start_time = datetime.strptime(start_time, '%Y-%m-%dT%H:%M:%S')
+                            elif ' ' in start_time:
+                                start_time = datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')
+                        
+                        if isinstance(end_time, str):
+                            if 'T' in end_time:
+                                end_time = datetime.strptime(end_time, '%Y-%m-%dT%H:%M:%S')
+                            elif ' ' in end_time:
+                                end_time = datetime.strptime(end_time, '%Y-%m-%d %H:%M:%S')
+                        
+                        # Verificar si la reserva está activa ahora
+                        if isinstance(start_time, (datetime, pd.Timestamp)) and isinstance(end_time, (datetime, pd.Timestamp)):
+                            if start_time <= now and end_time >= now:
+                                current_active.append(row)
+                    
+                    # Crear DataFrame con las reservas activas
+                    active_bookings = pd.DataFrame(current_active) if current_active else pd.DataFrame()
+                    
+                    # Contar espacios ocupados (espacios únicos con reservas activas)
+                    if not active_bookings.empty and total_spaces > 0:
+                        occupied_spaces = active_bookings['common_area_id'].nunique()
+                        ocupacion_percentage = round((occupied_spaces / total_spaces) * 100) if total_spaces > 0 else 0
+                        ocupacion = f"{ocupacion_percentage}%"
+                        ocupacion_detail = f"{occupied_spaces} de {total_spaces} espacios ocupados"
+                    elif total_spaces > 0:
+                        ocupacion = "0%"
+                        ocupacion_detail = f"0 de {total_spaces} espacios ocupados"
+                except Exception as e:
+                    logger.error(f"Error calculando ocupación: {str(e)}")
+                
+                # 4. Contar reservas de hoy
+                try:
+                    today_bookings = []
+                    for _, row in df.iterrows():
+                        start_time = row['start_time']
+                        
+                        # Extraer la fecha
+                        booking_date = None
+                        if isinstance(start_time, pd.Timestamp):
+                            booking_date = start_time.strftime('%Y-%m-%d')
+                        elif isinstance(start_time, str):
+                            if 'T' in start_time:
+                                booking_date = start_time.split('T')[0]
+                            elif ' ' in start_time:
+                                booking_date = start_time.split(' ')[0]
+                        
+                        # Verificar si es hoy
+                        if booking_date == current_date_str:
+                            today_bookings.append(row)
+                    
+                    reservas_hoy = str(len(today_bookings))
+                except Exception as e:
+                    logger.error(f"Error contando reservas de hoy: {str(e)}")
+                    reservas_hoy = "0"
+                
+            except Exception as e:
+                logger.error(f"Error calculando métricas de espacios: {str(e)}")
         
-        # Si hay un proyecto seleccionado
-        if project_id != "all":
-            # Datos de ejemplo para el proyecto seleccionado
-            if project_id == 1:
-                espacios_total = "5"
-                ocupacion = "80%"
-                ocupacion_detail = "4 espacios ocupados"
-                reservas = "3"
-            elif project_id == 2:
-                espacios_total = "5"
-                ocupacion = "60%"
-                ocupacion_detail = "3 espacios ocupados"
-                reservas = "2"
-            elif project_id == 3:
-                espacios_total = "4"
-                ocupacion = "75%"
-                ocupacion_detail = "3 espacios ocupados"
-                reservas = "2"
-            elif project_id == 4:
-                espacios_total = "4"
-                ocupacion = "50%"
-                ocupacion_detail = "2 espacios ocupados"
-                reservas = "2"
-            elif project_id == 5:
-                espacios_total = "6"
-                ocupacion = "50%"
-                ocupacion_detail = "3 espacios ocupados"
-                reservas = "2"
-            elif project_id == 6:
-                espacios_total = "4"
-                ocupacion = "25%"
-                ocupacion_detail = "1 espacio ocupado"
-                reservas = "1"
-        
-        return espacios_total, espacios_total_change, ocupacion, ocupacion_detail, reservas, reservas_change
+        return total_bookings, bookings_change, ocupacion, ocupacion_detail, reservas_hoy, reservas_change
     
     # Callback para actualizar la tabla de espacios
     @app.callback(
-        Output("spaces-table-container", "children"),
+        [
+            Output("spaces-table-container", "children"),
+            Output("pagination-container", "children")
+        ],
         [
             Input("selected-client-store", "data"), 
             Input("refresh-spaces-button", "n_clicks"),
-            Input("apply-space-filters", "n_clicks")
+            Input("apply-space-filters", "n_clicks"),
+            Input("page-number", "data")
         ],
         [
             State("space-type-filter", "value"),
             State("space-status-filter", "value"),
             State("space-capacity-filter", "value"),
-            State("space-search", "value")
+            State("space-search", "value"),
+            State("rows-per-page", "data")
         ]
     )
-    def update_spaces_table(selection_data, refresh_clicks, apply_clicks, space_type, space_status, space_capacity, space_search):
+    def update_spaces_table(selection_data, refresh_clicks, apply_clicks, page_number, space_type, space_status, space_capacity, space_search, rows_per_page):
         client_id = selection_data.get("client_id", "all")
         project_id = selection_data.get("project_id", "all")
         
-        # Aquí implementarías la lógica real para obtener datos según los filtros
-        # Por ahora, usamos datos de ejemplo
+        # Valores por defecto para paginación
+        if page_number is None or not isinstance(page_number, int):
+            page_number = 1
+        if rows_per_page is None or not isinstance(rows_per_page, int):
+            rows_per_page = 10
         
-        # Crear tabla de espacios
+        # Obtener datos de la tabla common_areas_booking_report
+        df = get_common_areas_bookings(client_id=client_id, community_uuid=project_id)
+        
+        # Si no hay datos, mostrar mensaje
+        if df is None or df.empty:
+            return html.Div([
+                html.Div("No se encontraron datos de reservas de áreas comunes.", className="alert alert-info"),
+                html.P("Posibles razones:"),
+                html.Ul([
+                    html.Li("No hay reservas registradas para los filtros seleccionados."),
+                    html.Li("La conexión a la base de datos no está configurada correctamente."),
+                    html.Li("La tabla common_areas_booking_report no existe o está vacía.")
+                ])
+            ]), html.Div()  # Contenedor de paginación vacío
+        
+        # Crear tabla de reservas de espacios
         spaces_table = html.Table([
             html.Thead([
                 html.Tr([
-                    html.Th("ID"),
-                    html.Th("Nombre"),
-                    html.Th("Tipo"),
-                    html.Th("Capacidad"),
+                    html.Th("ID Reserva"),
+                    html.Th("Espacio"),
+                    html.Th("Proyecto"),
+                    html.Th("Cliente"),
                     html.Th("Estado"),
-                    html.Th("Próxima Reserva"),
+                    html.Th("Fecha Inicio"),
+                    html.Th("Hora Inicio"),
+                    html.Th("Hora Fin"),
+                    html.Th("Creada"),
                     html.Th("Acciones")
                 ])
             ]),
             html.Tbody(id="spaces-table-body")
         ], className="table table-striped table-hover")
         
-        # Datos de ejemplo para la tabla
-        spaces_data = [
-            {"id": "S001", "nombre": "Sala Principal", "tipo": "reunion", "capacidad": 12, "estado": "disponible", "proxima_reserva": "2025-03-04 15:00"},
-            {"id": "S002", "nombre": "Oficina 101", "tipo": "oficina", "capacidad": 4, "estado": "ocupado", "proxima_reserva": "N/A"},
-            {"id": "S003", "nombre": "Sala de Conferencias", "tipo": "reunion", "capacidad": 20, "estado": "reservado", "proxima_reserva": "2025-03-04 14:00"},
-            {"id": "S004", "nombre": "Espacio Común", "tipo": "comun", "capacidad": 15, "estado": "disponible", "proxima_reserva": "2025-03-05 10:00"},
-            {"id": "S005", "nombre": "Almacén 1", "tipo": "almacen", "capacidad": 2, "estado": "mantenimiento", "proxima_reserva": "N/A"},
-            {"id": "S006", "nombre": "Oficina 102", "tipo": "oficina", "capacidad": 3, "estado": "disponible", "proxima_reserva": "2025-03-04 16:30"},
-            {"id": "S007", "nombre": "Sala de Reuniones 2", "tipo": "reunion", "capacidad": 8, "estado": "ocupado", "proxima_reserva": "N/A"},
-        ]
+        # Aplicar filtros adicionales al DataFrame
+        filtered_df = df.copy()
         
-        # Filtrar datos según cliente/proyecto
-        if client_id != "all" or project_id != "all":
-            # En un caso real, filtrarías los datos según el cliente/proyecto
-            # Por ahora, simplemente reducimos la lista para simular el filtrado
-            spaces_data = spaces_data[:5] if client_id != "all" else spaces_data
-            spaces_data = spaces_data[:3] if project_id != "all" else spaces_data
+        # Filtrar por tipo de espacio (si se implementa en el futuro)
+        if space_type and space_type != "all" and 'area_type' in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df['area_type'] == space_type]
         
-        # Aplicar filtros adicionales
-        filtered_data = spaces_data
-        
-        # Filtrar por tipo de espacio
-        if space_type and space_type != "all":
-            filtered_data = [s for s in filtered_data if s["tipo"] == space_type]
-        
-        # Filtrar por estado
+        # Filtrar por estado (disponible/ocupado basado en si está cancelada o no)
         if space_status and space_status != "all":
-            filtered_data = [s for s in filtered_data if s["estado"] == space_status]
+            now = datetime.now()
+            current_date_str = now.strftime('%Y-%m-%d')
+            
+            if space_status.lower() == "disponible":
+                # Reservas canceladas o que ya pasaron
+                filtered_rows = []
+                for _, row in filtered_df.iterrows():
+                    start_time = row['start_time']
+                    end_time = row['end_time']
+                    cancelled = pd.notna(row['cancelled_at'])
+                    
+                    # Convertir a datetime si son strings
+                    if isinstance(start_time, str):
+                        if 'T' in start_time:
+                            start_time = datetime.strptime(start_time, '%Y-%m-%dT%H:%M:%S')
+                        elif ' ' in start_time:
+                            start_time = datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')
+                    
+                    if isinstance(end_time, str):
+                        if 'T' in end_time:
+                            end_time = datetime.strptime(end_time, '%Y-%m-%dT%H:%M:%S')
+                        elif ' ' in end_time:
+                            end_time = datetime.strptime(end_time, '%Y-%m-%d %H:%M:%S')
+                    
+                    # Verificar si la reserva está disponible (cancelada o ya pasó)
+                    if cancelled or (isinstance(end_time, (datetime, pd.Timestamp)) and end_time < now):
+                        filtered_rows.append(row)
+                
+                filtered_df = pd.DataFrame(filtered_rows) if filtered_rows else pd.DataFrame(columns=filtered_df.columns)
+                
+            elif space_status.lower() == "reservado":
+                # Reservas futuras no canceladas
+                filtered_rows = []
+                for _, row in filtered_df.iterrows():
+                    start_time = row['start_time']
+                    cancelled = pd.notna(row['cancelled_at'])
+                    
+                    # Convertir a datetime si es string
+                    if isinstance(start_time, str):
+                        if 'T' in start_time:
+                            start_time = datetime.strptime(start_time, '%Y-%m-%dT%H:%M:%S')
+                        elif ' ' in start_time:
+                            start_time = datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')
+                    
+                    # Verificar si la reserva está reservada (futura y no cancelada)
+                    if not cancelled and isinstance(start_time, (datetime, pd.Timestamp)) and start_time > now:
+                        filtered_rows.append(row)
+                
+                filtered_df = pd.DataFrame(filtered_rows) if filtered_rows else pd.DataFrame(columns=filtered_df.columns)
+                
+            elif space_status.lower() == "ocupado":
+                # Reservas actuales no canceladas
+                filtered_rows = []
+                for _, row in filtered_df.iterrows():
+                    start_time = row['start_time']
+                    end_time = row['end_time']
+                    cancelled = pd.notna(row['cancelled_at'])
+                    
+                    # Convertir a datetime si son strings
+                    if isinstance(start_time, str):
+                        if 'T' in start_time:
+                            start_time = datetime.strptime(start_time, '%Y-%m-%dT%H:%M:%S')
+                        elif ' ' in start_time:
+                            start_time = datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')
+                    
+                    if isinstance(end_time, str):
+                        if 'T' in end_time:
+                            end_time = datetime.strptime(end_time, '%Y-%m-%dT%H:%M:%S')
+                        elif ' ' in end_time:
+                            end_time = datetime.strptime(end_time, '%Y-%m-%d %H:%M:%S')
+                    
+                    # Verificar si la reserva está ocupada (actual y no cancelada)
+                    if (not cancelled and 
+                        isinstance(start_time, (datetime, pd.Timestamp)) and 
+                        isinstance(end_time, (datetime, pd.Timestamp)) and 
+                        start_time <= now and end_time >= now):
+                        filtered_rows.append(row)
+                
+                filtered_df = pd.DataFrame(filtered_rows) if filtered_rows else pd.DataFrame(columns=filtered_df.columns)
+            
+            elif space_status.lower() == "cancelado":
+                # Reservas canceladas
+                filtered_df = filtered_df[filtered_df['cancelled_at'].notna()]
         
-        # Filtrar por capacidad mínima
-        if space_capacity and space_capacity > 0:
-            filtered_data = [s for s in filtered_data if s["capacidad"] >= space_capacity]
-        
-        # Filtrar por búsqueda
+        # Filtrar por búsqueda en nombre de espacio o ID
         if space_search:
             search_term = space_search.lower()
-            filtered_data = [s for s in filtered_data if search_term in s["nombre"].lower() or search_term in s["id"].lower()]
+            filtered_df = filtered_df[
+                filtered_df['common_area_name'].astype(str).str.lower().str.contains(search_term) | 
+                filtered_df['id'].astype(str).str.lower().str.contains(search_term) |
+                filtered_df['common_area_id'].astype(str).str.lower().str.contains(search_term)
+            ]
+        
+        # Calcular el número total de filas y páginas
+        total_rows = len(filtered_df)
+        total_pages = max(1, math.ceil(total_rows / rows_per_page))
+        
+        # Asegurar que el número de página es válido
+        if page_number < 1:
+            page_number = 1
+        elif page_number > total_pages:
+            page_number = total_pages
+        
+        # Calcular índices de inicio y fin para la página actual
+        start_idx = (page_number - 1) * rows_per_page
+        end_idx = min(start_idx + rows_per_page, total_rows)
+        
+        # Obtener solo las filas para la página actual
+        if not filtered_df.empty:
+            page_df = filtered_df.iloc[start_idx:end_idx].copy()
+        else:
+            page_df = filtered_df
         
         # Crear filas de la tabla
         rows = []
-        for space in filtered_data:
-            # Determinar el color del badge según el estado
-            badge_color = {
-                "disponible": "success",
-                "ocupado": "danger",
-                "reservado": "warning",
-                "mantenimiento": "secondary"
-            }.get(space["estado"], "primary")
+        for _, row in page_df.iterrows():
+            # Extraer datos de la reserva
+            booking_id = row.get('id', 'N/A')
+            space_name = row.get('common_area_name', 'N/A')
+            project_name = row.get('community_id', 'N/A')
+            client_name = row.get('client_name', 'N/A')
             
-            # Formatear el estado para mostrar
-            estado_display = {
-                "disponible": "Disponible",
-                "ocupado": "Ocupado",
-                "reservado": "Reservado",
-                "mantenimiento": "Mantenimiento"
-            }.get(space["estado"], space["estado"].capitalize())
+            # Fechas y horas
+            start_time = row.get('start_time', 'N/A')
+            end_time = row.get('end_time', 'N/A')
+            created_at = row.get('created_at', 'N/A')
+            cancelled_at = row.get('cancelled_at', None)
             
-            # Formatear el tipo para mostrar
-            tipo_display = {
-                "oficina": "Oficina",
-                "reunion": "Sala de Reuniones",
-                "comun": "Espacio Común",
-                "almacen": "Almacén"
-            }.get(space["tipo"], space["tipo"].capitalize())
+            # Convertir a datetime si son objetos Timestamp
+            if isinstance(start_time, pd.Timestamp):
+                start_date = start_time.strftime('%Y-%m-%d')
+                start_time_str = start_time.strftime('%H:%M:%S')
+            elif isinstance(start_time, str):
+                if 'T' in start_time:
+                    parts = start_time.split('T')
+                    start_date = parts[0]
+                    start_time_str = parts[1]
+                elif ' ' in start_time:
+                    parts = start_time.split(' ')
+                    start_date = parts[0]
+                    start_time_str = parts[1]
+                else:
+                    start_date = 'N/A'
+                    start_time_str = start_time
+            else:
+                start_date = 'N/A'
+                start_time_str = 'N/A'
+                
+            if isinstance(end_time, pd.Timestamp):
+                end_time_str = end_time.strftime('%H:%M:%S')
+            elif isinstance(end_time, str):
+                if 'T' in end_time:
+                    end_time_str = end_time.split('T')[1]
+                elif ' ' in end_time:
+                    end_time_str = end_time.split(' ')[1]
+                else:
+                    end_time_str = end_time
+            else:
+                end_time_str = 'N/A'
             
-            row = html.Tr([
-                html.Td(space["id"]),
-                html.Td(space["nombre"]),
-                html.Td(tipo_display),
-                html.Td(f"{space['capacidad']} personas"),
-                html.Td(html.Span(estado_display, className=f"badge bg-{badge_color}")),
-                html.Td(space["proxima_reserva"]),
+            # Determinar el estado de la reserva
+            now = datetime.now()
+            current_date = now.date()
+            current_time = now.time()
+            
+            # Convertir start_date a objeto date para comparación
+            try:
+                if start_date != 'N/A':
+                    booking_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+                else:
+                    booking_date = None
+            except:
+                booking_date = None
+            
+            if cancelled_at is not None and pd.notna(cancelled_at):
+                status = "Cancelada"
+                badge_color = "secondary"
+            elif booking_date == current_date:
+                # Convertir tiempos a objetos time para comparación
+                try:
+                    start_time_obj = datetime.strptime(start_time_str, '%H:%M:%S').time()
+                    end_time_obj = datetime.strptime(end_time_str, '%H:%M:%S').time() if end_time_str != 'N/A' else None
+                    
+                    if start_time_obj > current_time:
+                        status = "Reservada"
+                        badge_color = "warning"
+                    elif start_time_obj <= current_time and (end_time_obj is None or end_time_obj >= current_time):
+                        status = "Ocupada"
+                        badge_color = "danger"
+                    else:
+                        status = "Disponible"
+                        badge_color = "success"
+                except:
+                    status = "Disponible"
+                    badge_color = "success"
+            else:
+                status = "Disponible"
+                badge_color = "success"
+            
+            # Crear fila de la tabla
+            rows.append(html.Tr([
+                html.Td(booking_id),
+                html.Td(space_name),
+                html.Td(project_name),
+                html.Td(client_name),
+                html.Td(dbc.Badge(status, color=badge_color, className="me-1")),
+                html.Td(start_date),
+                html.Td(start_time_str),
+                html.Td(end_time_str),
+                html.Td(created_at.strftime('%Y-%m-%d') if isinstance(created_at, pd.Timestamp) else 
+                       created_at.split(' ')[0] if isinstance(created_at, str) and ' ' in created_at else created_at),
                 html.Td([
-                    dbc.ButtonGroup([
-                        dbc.Button([html.I(className="fas fa-eye")], color="primary", size="sm", className="me-1"),
-                        dbc.Button([html.I(className="fas fa-calendar-plus")], color="success", size="sm", className="me-1"),
-                        dbc.Button([html.I(className="fas fa-cog")], color="secondary", size="sm")
-                    ], size="sm")
+                    html.Button([html.I(className="fas fa-eye")], className="btn btn-sm btn-outline-primary me-1", title="Ver detalles"),
+                    html.Button([html.I(className="fas fa-edit")], className="btn btn-sm btn-outline-secondary me-1", title="Editar"),
+                    html.Button([html.I(className="fas fa-trash-alt")], className="btn btn-sm btn-outline-danger", title="Eliminar")
                 ])
-            ])
-            rows.append(row)
+            ]))
+        
+        # Si no hay filas después de filtrar, mostrar mensaje
+        if not rows:
+            return html.Div("No se encontraron reservas que coincidan con los filtros seleccionados.", className="alert alert-warning"), html.Div()
         
         # Actualizar el cuerpo de la tabla
         spaces_table.children[1].children = rows
         
-        return spaces_table
+        # Crear controles de paginación
+        pagination_controls = html.Div([
+            html.Div([
+                html.Button("<<", id="first-page", className="btn btn-sm btn-outline-primary me-1", title="Primera página", n_clicks=0),
+                html.Button("<", id="prev-page", className="btn btn-sm btn-outline-primary me-1", title="Página anterior", n_clicks=0),
+                html.Span(f"Página {page_number} de {total_pages}", className="mx-2"),
+                html.Button(">", id="next-page", className="btn btn-sm btn-outline-primary me-1", title="Página siguiente", n_clicks=0),
+                html.Button(">>", id="last-page", className="btn btn-sm btn-outline-primary me-1", title="Última página", n_clicks=0),
+                html.Span("Filas por página:", className="ms-3 me-1"),
+                dcc.Dropdown(
+                    id="rows-per-page",
+                    options=[
+                        {"label": "10", "value": 10},
+                        {"label": "25", "value": 25},
+                        {"label": "50", "value": 50},
+                        {"label": "100", "value": 100}
+                    ],
+                    value=rows_per_page,
+                    clearable=False,
+                    style={"width": "80px", "display": "inline-block"}
+                )
+            ], className="d-flex align-items-center justify-content-center mt-3")
+        ], id="pagination-controls")
+        
+        # Crear contenedor con la tabla y contador de resultados
+        return html.Div([
+            html.Div(f"Mostrando {len(rows)} de {total_rows} reservas de espacios (Página {page_number} de {total_pages})", className="text-muted mb-2"),
+            spaces_table
+        ]), pagination_controls
     
     # Callback para actualizar los gráficos
     @app.callback(
@@ -445,54 +646,93 @@ def register_callbacks(app):
         client_id = selection_data.get("client_id", "all")
         project_id = selection_data.get("project_id", "all")
         
-        # Aquí implementarías la lógica real para obtener datos según los filtros
-        # Por ahora, usamos datos de ejemplo
+        # Obtener datos de la tabla common_areas_booking_report
+        df = get_common_areas_bookings(client_id=client_id, community_uuid=project_id)
         
-        # Gráfico 1: Ocupación por Tipo de Espacio
-        figure1 = {
-            'data': [
-                {'x': ['Oficinas', 'Salas de Reuniones', 'Espacios Comunes', 'Almacenes'], 
-                 'y': [75, 60, 40, 20], 
-                 'type': 'bar', 
-                 'name': 'Ocupación (%)'}
-            ],
-            'layout': {
-                'title': f'Ocupación por Tipo de Espacio {"Global" if client_id == "all" else "por Cliente" if project_id == "all" else "por Proyecto"}',
-                'height': 300,
-                'margin': {'l': 40, 'r': 10, 't': 40, 'b': 30}
+        # Gráfico 1: Distribución de reservas por espacio
+        fig1 = {
+            "data": [],
+            "layout": {
+                "title": "Distribución de Reservas por Espacio",
+                "showlegend": True,
+                "legend": {"orientation": "h", "y": -0.2},
+                "margin": {"l": 40, "r": 10, "t": 60, "b": 140}
             }
         }
         
-        # Gráfico 2: Reservas por Día
-        figure2 = {
-            'data': [
-                {'x': ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'], 
-                 'y': [15, 18, 20, 17, 12, 5, 3], 
-                 'type': 'scatter', 
-                 'name': 'Reservas'}
-            ],
-            'layout': {
-                'title': f'Reservas por Día {"Global" if client_id == "all" else "por Cliente" if project_id == "all" else "por Proyecto"}',
-                'height': 300,
-                'margin': {'l': 40, 'r': 10, 't': 40, 'b': 30}
+        # Gráfico 2: Reservas por hora del día
+        fig2 = {
+            "data": [],
+            "layout": {
+                "title": "Reservas por Hora del Día",
+                "xaxis": {"title": "Hora"},
+                "yaxis": {"title": "Número de Reservas"},
+                "showlegend": True,
+                "legend": {"orientation": "h", "y": -0.2},
+                "margin": {"l": 40, "r": 10, "t": 60, "b": 140}
             }
         }
         
-        # Modificar datos según el filtro seleccionado
-        if client_id != "all" or project_id != "all":
-            # Ajustar los datos de ejemplo para mostrar diferencias
-            multiplier = 0.8 if client_id != "all" else 1
-            multiplier = 0.6 if project_id != "all" else multiplier
-            
-            # Ajustar gráfico 1
-            for trace in figure1['data']:
-                trace['y'] = [val * multiplier for val in trace['y']]
-            
-            # Ajustar gráfico 2
-            for trace in figure2['data']:
-                trace['y'] = [int(val * multiplier) for val in trace['y']]
+        # Si hay datos, generar gráficos
+        if df is not None and not df.empty:
+            try:
+                # Gráfico 1: Distribución de reservas por espacio
+                if 'common_area_name' in df.columns:
+                    # Contar reservas por espacio
+                    space_counts = df['common_area_name'].value_counts().head(10)  # Mostrar top 10 espacios
+                    
+                    fig1["data"] = [{
+                        "type": "pie",
+                        "labels": space_counts.index.tolist(),
+                        "values": space_counts.values.tolist(),
+                        "hole": 0.4,
+                        "marker": {"colors": ["#4e73df", "#1cc88a", "#36b9cc", "#f6c23e", "#e74a3b", "#5a5c69", "#858796", "#6f42c1", "#20c9a6", "#fd7e14"]}
+                    }]
+                
+                # Gráfico 2: Reservas por hora del día
+                if 'start_time' in df.columns:
+                    # Extraer la hora de start_time
+                    try:
+                        # Intentar extraer la hora
+                        hours = []
+                        for time_val in df['start_time']:
+                            if isinstance(time_val, pd.Timestamp):
+                                # Si es un Timestamp, extraer la hora directamente
+                                hours.append(time_val.hour)
+                            elif isinstance(time_val, str):
+                                if ' ' in time_val:
+                                    # Formato: '2025-05-07 08:30:00'
+                                    hour_part = time_val.split(' ')[1].split(':')[0]
+                                elif 'T' in time_val:
+                                    # Formato: '2025-05-07T08:30:00'
+                                    hour_part = time_val.split('T')[1].split(':')[0]
+                                else:
+                                    hour_part = time_val.split(':')[0]
+                                try:
+                                    hours.append(int(hour_part))
+                                except:
+                                    hours.append(None)
+                            else:
+                                hours.append(None)
+                        
+                        # Crear Series con las horas
+                        hour_series = pd.Series(hours).dropna()
+                        
+                        # Contar reservas por hora
+                        hour_counts = hour_series.value_counts().sort_index()
+                        
+                        fig2["data"] = [{
+                            "type": "bar",
+                            "x": hour_counts.index.tolist(),
+                            "y": hour_counts.values.tolist(),
+                            "marker": {"color": "#4e73df"}
+                        }]
+                    except Exception as e:
+                        logger.error(f"Error procesando horas para el gráfico: {str(e)}")
+            except Exception as e:
+                logger.error(f"Error generando gráficos de espacios: {str(e)}")
         
-        return figure1, figure2
+        return fig1, fig2
     
     # Callback para actualizar el calendario de reservas
     @app.callback(
@@ -503,25 +743,88 @@ def register_callbacks(app):
         client_id = selection_data.get("client_id", "all")
         project_id = selection_data.get("project_id", "all")
         
-        # Aquí implementarías la lógica real para obtener datos según los filtros
-        # Por ahora, mostramos un mensaje de placeholder
+        # Obtener datos de la tabla common_areas_booking_report
+        df = get_common_areas_bookings(client_id=client_id, community_uuid=project_id)
         
-        # Mensaje de placeholder para el calendario
-        calendar_placeholder = html.Div([
-            html.P([
-                html.I(className="fas fa-calendar-alt me-2"),
-                f"Calendario de reservas {'' if client_id == 'all' else 'para el cliente seleccionado'} {'' if project_id == 'all' else 'y proyecto seleccionado'}."
-            ], className="text-center mt-5"),
-            html.P([
-                "En un entorno real, aquí se mostraría un calendario interactivo con las reservas programadas."
-            ], className="text-center text-muted"),
-            html.Div([
-                dbc.Button([html.I(className="fas fa-plus me-2"), "Nueva Reserva"], color="primary", className="me-2"),
-                dbc.Button([html.I(className="fas fa-calendar-week me-2"), "Ver Agenda"], color="secondary")
-            ], className="text-center mt-3")
+        # Si no hay datos, mostrar mensaje
+        if df is None or df.empty:
+            return html.Div("No hay datos de reservas disponibles para mostrar en el calendario.", className="alert alert-info")
+        
+        # Crear eventos para el calendario
+        events = []
+        
+        try:
+            # Filtrar reservas no canceladas
+            active_bookings = df[df['cancelled_at'].isna()]
+            
+            # Procesar cada reserva
+            for _, row in active_bookings.iterrows():
+                # Obtener fecha y horas
+                start_time = row.get('start_time', '')
+                end_time = row.get('end_time', '')
+                
+                # Formatear fechas para el calendario
+                start_date = None
+                end_date = None
+                
+                # Procesar start_time
+                if isinstance(start_time, pd.Timestamp):
+                    # Convertir Timestamp a formato ISO para el calendario
+                    start_date = start_time.strftime('%Y-%m-%dT%H:%M:%S')
+                elif isinstance(start_time, str):
+                    if ' ' in start_time:  # Formato: '2025-05-07 08:30:00'
+                        date_part = start_time.split(' ')[0]
+                        time_part = start_time.split(' ')[1]
+                        start_date = f"{date_part}T{time_part}"
+                    elif 'T' in start_time:  # Ya está en formato ISO
+                        start_date = start_time
+                    else:
+                        start_date = start_time
+                
+                # Procesar end_time
+                if isinstance(end_time, pd.Timestamp):
+                    # Convertir Timestamp a formato ISO para el calendario
+                    end_date = end_time.strftime('%Y-%m-%dT%H:%M:%S')
+                elif isinstance(end_time, str):
+                    if ' ' in end_time:  # Formato: '2025-05-07 08:30:00'
+                        date_part = end_time.split(' ')[0]
+                        time_part = end_time.split(' ')[1]
+                        end_date = f"{date_part}T{time_part}"
+                    elif 'T' in end_time:  # Ya está en formato ISO
+                        end_date = end_time
+                    else:
+                        end_date = end_time
+                
+                # Obtener nombre del espacio y cliente
+                space_name = row.get('common_area_name', "Espacio sin nombre")
+                client_name = row.get('client_name', "Cliente desconocido")
+                
+                # Solo añadir evento si tenemos fechas válidas
+                if start_date:
+                    # Crear evento
+                    event = {
+                        "title": f"{space_name} - {client_name}",
+                        "start": start_date,
+                        "end": end_date if end_date else None,
+                        "backgroundColor": "#4e73df",
+                        "borderColor": "#3a5ccc"
+                    }
+                    
+                    events.append(event)
+        except Exception as e:
+            logger.error(f"Error procesando datos para el calendario: {str(e)}")
+            return html.Div(f"Error al procesar los datos para el calendario: {str(e)}", className="alert alert-danger")
+        
+        # Crear el calendario (simulado con una tarjeta)
+        calendar = dbc.Card([
+            dbc.CardHeader("Calendario de Reservas"),
+            dbc.CardBody([
+                html.P(f"Se han cargado {len(events)} reservas activas para mostrar en el calendario."),
+                html.Div("El calendario se mostraría aquí con los eventos cargados.", className="p-3 bg-light border rounded")
+            ])
         ])
         
-        return calendar_placeholder
+        return calendar
     
     # Callback para reiniciar los filtros
     @app.callback(
@@ -535,4 +838,95 @@ def register_callbacks(app):
         prevent_initial_call=True
     )
     def reset_filters(n_clicks):
-        return "all", "all", 0, "" 
+        return "all", "all", 0, ""
+    
+    @app.callback(
+        Output("spaces-count", "children"),
+        [Input("spaces-table-container", "children")]
+    )
+    def update_spaces_count(table_container):
+        # Si la tabla contiene un mensaje de error o está vacía
+        if isinstance(table_container, html.Div) and not any(isinstance(child, html.Table) for child in table_container.children):
+            return "0 reservas"
+            
+        # Si hay una tabla con datos
+        if isinstance(table_container, html.Div) and any(isinstance(child, html.Table) for child in table_container.children):
+            # Buscar el mensaje que contiene el número de resultados
+            for child in table_container.children:
+                if isinstance(child, html.Div) and "Mostrando" in child.children:
+                    # Extraer el número de la cadena "Mostrando X de Y reservas de espacios"
+                    text = child.children
+                    import re
+                    match = re.search(r'Mostrando \d+ de (\d+)', text)
+                    if match:
+                        return f"{match.group(1)} reservas"
+        
+        return "0 reservas"
+    
+    # Callback unificado para controlar la paginación
+    @app.callback(
+        Output("page-number", "data", allow_duplicate=True),
+        [
+            Input("first-page", "n_clicks"),
+            Input("prev-page", "n_clicks"),
+            Input("next-page", "n_clicks"),
+            Input("last-page", "n_clicks"),
+            Input("rows-per-page", "value"),
+            Input("apply-space-filters", "n_clicks"),
+            Input("reset-space-filters", "n_clicks")
+        ],
+        [State("page-number", "data")],
+        prevent_initial_call=True
+    )
+    def update_pagination(first_clicks, prev_clicks, next_clicks, last_clicks, 
+                         rows_per_page, apply_clicks, reset_clicks, 
+                         current_page):
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            return no_update
+        
+        trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        
+        # Si el trigger es un cambio en filas por página o filtros, resetear a página 1
+        if trigger_id in ["rows-per-page", "apply-space-filters", "reset-space-filters"]:
+            return 1
+        
+        # Para botones de navegación, calcular la nueva página
+        if trigger_id in ["first-page", "prev-page", "next-page", "last-page"]:
+            # Como no tenemos acceso directo al número total de páginas aquí,
+            # usamos valores fijos para prev/next y asumimos que la validación
+            # completa se hará en update_spaces_table
+            if trigger_id == "first-page":
+                return 1
+            elif trigger_id == "prev-page":
+                return max(1, current_page - 1)
+            elif trigger_id == "next-page":
+                return current_page + 1  # La validación contra max_pages se hará en update_spaces_table
+            elif trigger_id == "last-page":
+                return 9999  # Un número grande, update_spaces_table lo ajustará al máximo real
+        
+        return no_update
+    
+    # Callback para actualizar el almacenamiento de filas por página
+    @app.callback(
+        Output("rows-per-page", "data", allow_duplicate=True),
+        [Input("rows-per-page", "value")],
+        prevent_initial_call=True
+    )
+    def update_rows_per_page(rows_per_page):
+        if rows_per_page is None:
+            return no_update
+        return rows_per_page
+    
+    # Callback para inicializar los valores de paginación
+    @app.callback(
+        [
+            Output("page-number", "data", allow_duplicate=True), 
+            Output("rows-per-page", "data", allow_duplicate=True)
+        ],
+        [Input("spaces-filter-indicator", "children")],
+        prevent_initial_call=False
+    )
+    def initialize_pagination(filter_indicator):
+        # Este callback se ejecuta al cargar la página y establece los valores iniciales
+        return 1, 10 

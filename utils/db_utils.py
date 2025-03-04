@@ -158,7 +158,7 @@ def execute_query(query, params=None):
     
     Args:
         query (str): Consulta SQL a ejecutar
-        params (tuple, optional): Parámetros para la consulta. Por defecto None.
+        params (tuple, optional): Parámetros para la consulta como una tupla. Por defecto None.
         
     Returns:
         DataFrame: Resultados de la consulta o None si hay un error
@@ -251,12 +251,18 @@ def get_table_preview(table_name, limit=10):
         DataFrame: Vista previa de los datos o None si hay un error
     """
     try:
-        query = f"""
-        SELECT * FROM "{table_name}"
-        LIMIT {limit}
-        """
+        # Usar %s como marcador de posición para el límite
+        query = f'SELECT * FROM "{table_name}" LIMIT %s'
         
-        return execute_query(query)
+        # Obtener la conexión
+        engine = get_db_connection()
+        if engine is None:
+            return None
+            
+        # Ejecutar la consulta con los parámetros
+        df = pd.read_sql_query(query, engine, params=(limit,))
+        
+        return df
     except Exception as e:
         logger.error(f"Error obteniendo vista previa de {table_name}: {str(e)}")
         return None
@@ -278,3 +284,103 @@ def get_reservations_from_db():
 def get_consumption_from_db():
     # Implementar según sea necesario
     pass
+
+def get_common_areas_bookings(client_id=None, community_uuid=None):
+    """
+    Obtiene los datos de reservas de áreas comunes desde la tabla common_areas_booking_report.
+    
+    Esta tabla contiene registros de reservas (bookings) de espacios comunes, no los espacios en sí.
+    Cada registro representa una reserva individual de un espacio común.
+    
+    Args:
+        client_id (str, optional): ID del cliente para filtrar. Por defecto None.
+        community_uuid (str, optional): UUID de la comunidad/proyecto para filtrar. Por defecto None.
+        
+    Returns:
+        DataFrame: Resultados de la consulta o None si hay un error
+    """
+    try:
+        # Construir la consulta base
+        query = "SELECT * FROM common_areas_booking_report"
+        
+        # Añadir filtros si se proporcionan
+        conditions = []
+        params = []
+        
+        if client_id and client_id != "all":
+            conditions.append("client_id = %s")
+            params.append(client_id)
+            
+        if community_uuid and community_uuid != "all":
+            conditions.append("community_uuid = %s")
+            params.append(community_uuid)
+            
+        # Añadir condiciones a la consulta
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        
+        # Obtener la conexión
+        engine = get_db_connection()
+        if engine is None:
+            return None
+            
+        # Ejecutar la consulta con los parámetros
+        if params:
+            df = pd.read_sql_query(query, engine, params=tuple(params))
+        else:
+            df = pd.read_sql_query(query, engine)
+        
+        return df
+    except Exception as e:
+        logger.error(f"Error obteniendo datos de common_areas_booking_report: {str(e)}")
+        return None
+
+def get_unique_common_areas(client_id=None, community_uuid=None):
+    """
+    Obtiene los espacios comunes únicos basados en los registros de reservas.
+    
+    Args:
+        client_id (str, optional): ID del cliente para filtrar. Por defecto None.
+        community_uuid (str, optional): UUID de la comunidad/proyecto para filtrar. Por defecto None.
+        
+    Returns:
+        DataFrame: DataFrame con los espacios comunes únicos o None si hay un error
+    """
+    try:
+        # Construir la consulta base
+        query = """
+        SELECT DISTINCT common_area_id, common_area_name, community_uuid, community_id, client_id, client_name 
+        FROM common_areas_booking_report
+        """
+        
+        # Añadir filtros si se proporcionan
+        conditions = []
+        params = []
+        
+        if client_id and client_id != "all":
+            conditions.append("client_id = %s")
+            params.append(client_id)
+            
+        if community_uuid and community_uuid != "all":
+            conditions.append("community_uuid = %s")
+            params.append(community_uuid)
+            
+        # Añadir condiciones a la consulta
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        
+        # Obtener la conexión
+        engine = get_db_connection()
+        if engine is None:
+            return None
+            
+        # Ejecutar la consulta con los parámetros
+        if params:
+            df = pd.read_sql_query(query, engine, params=tuple(params))
+        else:
+            df = pd.read_sql_query(query, engine)
+        
+        return df
+    except Exception as e:
+        logger.error(f"Error obteniendo espacios comunes únicos: {str(e)}")
+        return None
