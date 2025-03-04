@@ -169,6 +169,28 @@ class AuthService:
         """Obtiene los datos del usuario autenticado"""
         return self.user_data if self.is_authenticated() else {}
     
+    def get_token(self):
+        """
+        Obtiene el token de autenticación actual
+        
+        Returns:
+            str: Token de autenticación o None si no está autenticado
+        """
+        if not self.is_authenticated():
+            return None
+        return str(self.token) if self.token is not None else None
+    
+    def get_current_token(self):
+        """
+        Método alternativo para obtener el token de autenticación actual
+        
+        Returns:
+            str: Token de autenticación o None si no está autenticado
+        """
+        if not self.is_authenticated():
+            return None
+        return str(self.token) if self.token is not None else None
+    
     def has_permission(self, permission):
         """
         Verifica si el usuario tiene un permiso específico
@@ -187,58 +209,70 @@ class AuthService:
     
     def make_api_request(self, method, endpoint, data=None, params=None):
         """
-        Realiza una petición a la API con autenticación
+        Realiza una solicitud a la API con autenticación
         
         Args:
             method: Método HTTP (GET, POST, PUT, DELETE)
-            endpoint: Endpoint de la API
-            data: Datos para enviar en la petición
-            params: Parámetros de la URL
+            endpoint: Endpoint de la API (sin la URL base)
+            data: Datos para enviar en el cuerpo de la solicitud (para POST/PUT)
+            params: Parámetros de consulta (para GET)
             
         Returns:
-            dict: Respuesta de la API
+            dict: Respuesta de la API en formato JSON
         """
-        if not self.is_authenticated():
-            return {"success": False, "message": "No autenticado"}
-        
         try:
-            url = f"{API_BASE_URL}{endpoint}"
-            headers = {
-                "Content-Type": "application/json",
-                "Accept": "application/json, text/plain, */*",
-                "Accept-version": "1",
-                **self.get_auth_headers()
-            }
+            # Verificar autenticación
+            if not self.is_authenticated():
+                logger.error("No hay una sesión activa para realizar la solicitud a la API")
+                return {"error": "No autenticado"}
             
-            if method.upper() == "GET":
-                response = requests.get(url, headers=headers, params=params)
-            elif method.upper() == "POST":
-                response = requests.post(url, json=data, headers=headers, params=params)
-            elif method.upper() == "PUT":
-                response = requests.put(url, json=data, headers=headers, params=params)
-            elif method.upper() == "DELETE":
-                response = requests.delete(url, headers=headers, params=params)
-            else:
-                return {"success": False, "message": f"Método no soportado: {method}"}
+            # Obtener los headers de autenticación
+            headers = self.get_auth_headers()
+            headers["Content-Type"] = "application/json"
             
-            if response.status_code in [200, 201, 204]:
-                try:
-                    return {"success": True, "data": response.json()}
-                except:
-                    return {"success": True, "data": None}
+            # Asegurarse de que el endpoint no comience con /
+            if endpoint.startswith("/"):
+                endpoint = endpoint[1:]
+            
+            # Construir la URL completa
+            from utils.api import BASE_URL
+            url = f"{BASE_URL}/{endpoint}"
+            
+            logger.debug(f"Realizando solicitud {method} a {url}")
+            
+            # Realizar la solicitud según el método
+            method = method.upper()
+            if method == "GET":
+                response = requests.get(url, params=params, headers=headers)
+            elif method == "POST":
+                response = requests.post(url, json=data, headers=headers)
+            elif method == "PUT":
+                response = requests.put(url, json=data, headers=headers)
+            elif method == "DELETE":
+                response = requests.delete(url, json=data, headers=headers)
             else:
+                logger.error(f"Método HTTP no soportado: {method}")
+                return {"error": f"Método HTTP no soportado: {method}"}
+            
+            # Verificar si la respuesta es exitosa
+            if response.status_code == 200:
                 try:
-                    error_data = response.json()
-                    error_msg = error_data.get('message', 'Error desconocido')
-                except:
-                    error_msg = f"Error {response.status_code}"
-                
-                logger.error(f"Error en petición API: {error_msg}")
-                return {"success": False, "message": error_msg, "status_code": response.status_code}
-                
+                    return response.json()
+                except ValueError:
+                    logger.error("La respuesta no es un JSON válido")
+                    return {"error": "La respuesta no es un JSON válido", "text": response.text}
+            elif response.status_code == 401:
+                logger.error("Token de autenticación inválido o expirado")
+                # Limpiar el token para forzar un nuevo login
+                self.token = None
+                self._save_token()
+                return {"error": "Token de autenticación inválido o expirado"}
+            else:
+                logger.error(f"Error en la solicitud: {response.status_code} - {response.text}")
+                return {"error": f"Error en la solicitud: {response.status_code}", "text": response.text}
         except Exception as e:
             logger.error(f"Error en petición API: {str(e)}")
-            return {"success": False, "message": f"Error de conexión: {str(e)}"}
+            return {"error": str(e)}
 
 # Crear una instancia global del servicio de autenticación
 auth_service = AuthService()

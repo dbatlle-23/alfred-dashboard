@@ -18,7 +18,7 @@ from utils.error_handlers import handle_exceptions, try_operation
 from utils.auth import auth_service, protect_callbacks
 
 # Importar componentes
-from components.sidebar import create_sidebar
+from components.sidebar import create_sidebar, register_callbacks as register_sidebar_callbacks
 from components.navbar import create_navbar
 
 # Inicializar componentes UI
@@ -68,6 +68,8 @@ app.layout = html.Div([
     html.Div(id="global-error-container"),
     # Contenedor para estado de autenticación (usado por el sistema de auth)
     html.Div(id="global-auth-status", style={"display": "none"}),
+    # Store global para la selección de cliente/proyecto
+    dcc.Store(id="global-client-selection", data={"client_id": "all", "project_id": "all"}),
     # Contenedor para el contenido de la página
     html.Div(id="page-content")
 ])
@@ -90,10 +92,26 @@ except Exception as e:
 from layouts.login import register_callbacks as register_login_callbacks
 from components.navbar import register_callbacks as register_navbar_callbacks
 
+# Registrar callbacks de las vistas principales
+from layouts.metrics import register_callbacks as register_metrics_callbacks
+from layouts.lock import register_callbacks as register_lock_callbacks
+from layouts.spaces import register_callbacks as register_spaces_callbacks
+from layouts.api_test import register_callbacks as register_api_test_callbacks
+
 try:
     logger.info("Registrando callbacks de autenticación")
     register_login_callbacks(app)
     register_navbar_callbacks(app)
+    # Registrar callbacks del sidebar
+    register_sidebar_callbacks(app)
+    
+    # Registrar callbacks de las vistas principales
+    logger.info("Registrando callbacks de las vistas principales")
+    register_metrics_callbacks(app)
+    register_lock_callbacks(app)
+    register_spaces_callbacks(app)
+    register_api_test_callbacks(app)
+    
     # Proteger callbacks
     protect_callbacks(app)
 except Exception as e:
@@ -116,6 +134,7 @@ def display_page(pathname):
     from layouts.metrics import layout as metrics_layout
     from layouts.lock import layout as lock_layout
     from layouts.spaces import layout as spaces_layout
+    from layouts.api_test import layout as api_test_layout
     
     logger.info(f"Navegando a la ruta: {pathname}")
     
@@ -132,47 +151,54 @@ def display_page(pathname):
             html.Div("Redirigiendo a la página de login...")
         ])
     
-    # Si está autenticado, mostrar la página correspondiente
-    # Crear el layout principal con navbar y sidebar
-    main_layout = html.Div([
-        # Navbar
-        create_navbar(),
+    try:
+        logger.info("Creando layout principal")
         
-        # Contenido principal con sidebar
-        dbc.Container([
-            dbc.Row([
-                # Sidebar
-                dbc.Col(create_sidebar(), width=2, className="sidebar-container"),
-                # Contenido de la página
-                dbc.Col(
-                    html.Div(id="main-content"),
-                    width=10, 
-                    className="content-container"
-                ),
-            ])
-        ], fluid=True)
-    ])
-    
-    # Determinar qué contenido mostrar en main-content
-    if pathname == "/database-explorer":
-        content = db_explorer_layout
-    elif pathname == "/db-config":
-        content = db_config_layout
-    elif pathname == "/ui-demo":
-        content = ui_demo_layout
-    elif pathname == "/metrics":
-        content = metrics_layout
-    elif pathname == "/lock":
-        content = lock_layout
-    elif pathname == "/spaces":
-        content = spaces_layout
-    else:
-        content = home_layout
-    
-    # Actualizar el contenido principal
-    main_layout.children[1].children[0].children[1].children = content
-    
-    return main_layout
+        # Determinar qué contenido mostrar
+        logger.info(f"Determinando contenido para la ruta: {pathname}")
+        if pathname == "/database-explorer":
+            content = db_explorer_layout
+        elif pathname == "/db-config":
+            content = db_config_layout
+        elif pathname == "/ui-demo":
+            content = ui_demo_layout
+        elif pathname == "/metrics":
+            content = metrics_layout
+        elif pathname == "/lock":
+            content = lock_layout
+        elif pathname == "/spaces":
+            content = spaces_layout
+        elif pathname == "/api-test":
+            logger.info("Cargando layout de API test")
+            content = api_test_layout
+        else:
+            content = home_layout
+        
+        # Crear el layout principal con navbar y sidebar
+        main_layout = html.Div([
+            # Navbar
+            create_navbar(),
+            
+            # Contenido principal con sidebar
+            dbc.Container([
+                dbc.Row([
+                    # Sidebar
+                    dbc.Col(create_sidebar(), width=2, className="sidebar-container"),
+                    # Contenido de la página
+                    dbc.Col(
+                        content,  # Colocar el contenido directamente aquí
+                        width=10, 
+                        className="content-container"
+                    ),
+                ])
+            ], fluid=True)
+        ])
+        
+        return main_layout
+    except Exception as e:
+        logger.error(f"Error en display_page: {str(e)}")
+        logger.exception("Detalles del error:")
+        return html.Div(f"Ha ocurrido un error al cargar la página: {str(e)}", className="alert alert-danger")
 
 # Ejecutar la aplicación
 if __name__ == "__main__":

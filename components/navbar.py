@@ -1,6 +1,7 @@
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 from utils.auth import auth_service
+from components.client_selector import create_client_selector
 
 def create_navbar():
     """
@@ -44,6 +45,9 @@ def create_navbar():
         align_end=True,
     )
     
+    # Crear el selector de cliente/proyecto
+    client_selector = create_client_selector()
+    
     # Crear la barra de navegación
     navbar = dbc.Navbar(
         dbc.Container(
@@ -61,6 +65,9 @@ def create_navbar():
                     href="/",
                     style={"textDecoration": "none"},
                 ),
+                
+                # Selector de cliente/proyecto (nuevo)
+                client_selector,
                 
                 # Elementos a la derecha
                 dbc.NavbarToggler(id="navbar-toggler"),
@@ -98,6 +105,10 @@ def register_callbacks(app):
     """
     from dash.dependencies import Input, Output, State
     import dash
+    
+    # Importar y registrar callbacks del selector de cliente/proyecto
+    from components.client_selector import register_callbacks as register_client_selector_callbacks
+    register_client_selector_callbacks(app)
     
     # Callback para manejar el logout
     @app.callback(

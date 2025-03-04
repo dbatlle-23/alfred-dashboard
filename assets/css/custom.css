@@ -1,0 +1,178 @@
+/* Estilos personalizados para la aplicación */
+
+/* Estilos para el selector de cliente/proyecto */
+.client-selector .Select-control {
+    background-color: #343a40;
+    border-color: #495057;
+    color: white;
+}
+
+.client-selector .Select-value-label {
+    color: white !important;
+}
+
+.client-selector .Select-menu-outer {
+    background-color: #343a40;
+    border-color: #495057;
+}
+
+.client-selector .Select-option {
+    background-color: #343a40;
+    color: white;
+}
+
+.client-selector .Select-option.is-focused {
+    background-color: #495057;
+}
+
+.client-selector .Select-arrow {
+    border-color: white transparent transparent;
+}
+
+/* Estilos para el breadcrumb de selección */
+#selection-breadcrumb {
+    font-size: 0.9rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Estilos para los indicadores de filtro */
+.filter-indicator {
+    margin-bottom: 1rem;
+    padding: 0.5rem 1rem;
+    border-radius: 0.25rem;
+}
+
+/* Mejoras para la barra de navegación */
+.navbar {
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+/* Mejoras para el sidebar */
+.sidebar {
+    height: calc(100vh - 72px);
+    overflow-y: auto;
+    padding: 1.5rem;
+    background-color: #f8f9fa;
+    border-right: 1px solid #e9ecef;
+}
+
+/* Estilos para las tarjetas */
+.card {
+    border: none;
+    border-radius: 0.5rem;
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    margin-bottom: 1.5rem;
+}
+
+.card-header {
+    background-color: rgba(0, 0, 0, 0.03);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.125);
+    padding: 0.75rem 1.25rem;
+}
+
+/* Estilos para las tablas */
+.table {
+    margin-bottom: 0;
+}
+
+.table th {
+    border-top: none;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.8rem;
+    color: #6c757d;
+}
+
+/* Estilos para los botones */
+.btn-group-sm > .btn, .btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    border-radius: 0.2rem;
+}
+
+/* Estilos para los badges */
+.badge {
+    padding: 0.35em 0.65em;
+    font-size: 0.75em;
+    font-weight: 600;
+    border-radius: 0.25rem;
+}
+
+/* Estilos para los gráficos */
+.dash-graph {
+    border-radius: 0.25rem;
+    overflow: hidden;
+}
+
+/* Estilos para los dropdowns en el sidebar */
+.sidebar .Select-control {
+    border-radius: 0.25rem;
+    border: 1px solid #ced4da;
+}
+
+.sidebar .Select-menu-outer {
+    border-radius: 0 0 0.25rem 0.25rem;
+    border: 1px solid #ced4da;
+    border-top: none;
+}
+
+/* Estilos para los sliders */
+.rc-slider-track {
+    background-color: #007bff;
+}
+
+.rc-slider-handle {
+    border-color: #007bff;
+}
+
+.rc-slider-handle:hover {
+    border-color: #0056b3;
+}
+
+.rc-slider-handle:active {
+    border-color: #0056b3;
+    box-shadow: 0 0 0 5px rgba(0, 123, 255, 0.2);
+}
+
+/* Estilos para los inputs */
+.form-control:focus {
+    border-color: #80bdff;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+/* Estilos para los alerts */
+.alert {
+    border: none;
+    border-radius: 0.25rem;
+}
+
+/* Estilos para el contenedor principal */
+.content-container {
+    padding: 1.5rem;
+}
+
+/* Estilos para dispositivos móviles */
+@media (max-width: 768px) {
+    .sidebar-container {
+        display: none;
+    }
+    
+    .content-container {
+        width: 100%;
+        max-width: 100%;
+        flex: 0 0 100%;
+    }
+    
+    .client-selector {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .client-selector .form-group {
+        margin-bottom: 0.5rem;
+        width: 100%;
+    }
+} 
