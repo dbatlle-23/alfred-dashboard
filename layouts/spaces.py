@@ -7,6 +7,9 @@ import pandas as pd
 from datetime import datetime
 from utils.logging import get_logger
 import math
+import numpy as np
+from utils.pdf_export import generate_spaces_report_pdf
+import base64
 
 # Configurar logger
 logger = get_logger(__name__)
@@ -24,6 +27,8 @@ layout = html.Div([
             # Componentes ocultos para paginación
             dcc.Store(id="page-number", data=1),
             dcc.Store(id="rows-per-page", data=10),
+            dcc.Store(id="weekly-occupation-data", data={}),  # Store para datos de ocupación semanal
+            dcc.Store(id="spaces-reservations-data", data={}),  # Nuevo Store para datos de espacios por reservas
             
             # Tarjetas de resumen
             dbc.Row([
@@ -64,57 +69,57 @@ layout = html.Div([
             # Sección de filtros
             html.Div([
                 html.H5("Filtros y Búsqueda", className="mb-3"),
-                dbc.Row([
-                    dbc.Col([
-                        html.Label("Tipo de Espacio"),
+                            dbc.Row([
+                                dbc.Col([
+                                    html.Label("Tipo de Espacio"),
                         dbc.Select(
-                            id="space-type-filter",
-                            options=[
-                                {"label": "Todos", "value": "all"},
-                                {"label": "Sala de Reuniones", "value": "reunion"},
+                                        id="space-type-filter",
+                                        options=[
+                                            {"label": "Todos", "value": "all"},
+                                            {"label": "Sala de Reuniones", "value": "reunion"},
                                 {"label": "Oficina", "value": "oficina"},
-                                {"label": "Espacio Común", "value": "comun"},
-                                {"label": "Almacén", "value": "almacen"}
-                            ],
+                                            {"label": "Espacio Común", "value": "comun"},
+                                            {"label": "Almacén", "value": "almacen"}
+                                        ],
                             value="all"
-                        )
-                    ], md=4),
-                    dbc.Col([
+                                    )
+                                ], md=4),
+                                dbc.Col([
                         html.Label("Estado de Reserva"),
                         dbc.Select(
-                            id="space-status-filter",
-                            options=[
-                                {"label": "Todos", "value": "all"},
-                                {"label": "Disponible", "value": "disponible"},
-                                {"label": "Ocupado", "value": "ocupado"},
-                                {"label": "Reservado", "value": "reservado"},
+                                        id="space-status-filter",
+                                        options=[
+                                            {"label": "Todos", "value": "all"},
+                                            {"label": "Disponible", "value": "disponible"},
+                                            {"label": "Ocupado", "value": "ocupado"},
+                                            {"label": "Reservado", "value": "reservado"},
                                 {"label": "Cancelado", "value": "cancelado"}
-                            ],
+                                        ],
                             value="all"
-                        )
-                    ], md=4),
-                    dbc.Col([
-                        html.Label("Capacidad Mínima"),
-                        dcc.Slider(
-                            id="space-capacity-filter",
-                            min=0,
-                            max=20,
-                            step=1,
-                            value=0,
+                                    )
+                                ], md=4),
+                                dbc.Col([
+                                    html.Label("Capacidad Mínima"),
+                                    dcc.Slider(
+                                        id="space-capacity-filter",
+                                        min=0,
+                                        max=20,
+                                        step=1,
+                                        value=0,
                             marks={i: str(i) for i in range(0, 21, 5)}
-                        )
+                                    )
                     ], md=4)
                 ], className="mb-3"),
-                dbc.Row([
-                    dbc.Col([
-                        html.Label("Búsqueda"),
-                        dbc.InputGroup([
-                            dbc.Input(id="space-search", placeholder="Buscar por nombre o ID..."),
-                            dbc.Button([html.I(className="fas fa-search")], color="primary")
+                            dbc.Row([
+                                dbc.Col([
+                                    html.Label("Búsqueda"),
+                                    dbc.InputGroup([
+                                        dbc.Input(id="space-search", placeholder="Buscar por nombre o ID..."),
+                                        dbc.Button([html.I(className="fas fa-search")], color="primary")
                         ])
-                    ], md=8),
-                    dbc.Col([
-                        html.Label("Acciones"),
+                                ], md=8),
+                                dbc.Col([
+                                    html.Label("Acciones"),
                         html.Div([
                             dbc.Button([html.I(className="fas fa-filter me-1"), "Aplicar Filtros"], id="apply-space-filters", color="primary", className="me-2"),
                             dbc.Button([html.I(className="fas fa-redo me-1"), "Reiniciar"], id="reset-space-filters", color="secondary", className="me-2"),
@@ -124,10 +129,108 @@ layout = html.Div([
                 ], className="mb-4")
             ], className="p-3 bg-light rounded mb-4"),
             
-            # Sección de espacios
+            # Sección de análisis avanzado
             html.Div([
+            dbc.Row([
+                dbc.Col([
+                        html.H5("Análisis Avanzado de Reservas", className="mb-3"),
+                        html.P("Visualización de patrones de reserva y ocupación", className="text-muted mb-4")
+                    ], md=8),
+                    dbc.Col([
+                        dbc.Row([
+                            dbc.Col([
+                                html.Label("Período de Análisis"),
+                                dcc.Dropdown(
+                                    id="analysis-period",
+                                    options=[
+                                        {"label": "Última semana", "value": "last_week"},
+                                        {"label": "Último mes", "value": "last_month"},
+                                        {"label": "Último trimestre", "value": "last_quarter"},
+                                        {"label": "Último año", "value": "last_year"},
+                                        {"label": "Este año hasta hoy", "value": "this_year"},
+                                        {"label": "Todo", "value": "all_time"}
+                                    ],
+                                    value="last_month",
+                                    clearable=False
+                                )
+                            ], width=6),
+                            dbc.Col([
+                                html.Button(
+                                    [html.I(className="fas fa-file-pdf mr-2"), "Exportar a PDF"],
+                                    id="export-spaces-pdf",
+                                    className="btn btn-primary mt-4"
+                                ),
+                                dcc.Download(id="download-spaces-pdf"),
+                                html.Div(id="pdf-export-error", className="text-danger mt-2")
+                            ], className="d-flex justify-content-end", width=6)
+                        ])
+                    ], md=4)
+                ]),
                 dbc.Row([
                     dbc.Col([
+                        dbc.Card([
+                            dbc.CardHeader("Resumen Estadístico"),
+                        dbc.CardBody([
+                                dbc.Row([
+                                    dbc.Col([
+                                        html.Div([
+                                            html.H4(id="avg-weekly-bookings", className="text-primary mb-0"),
+                                            html.P("Reservas semanales (promedio)", className="text-muted small")
+                                        ], className="text-center mb-3")
+                                    ], md=3),
+                                    dbc.Col([
+                                        html.Div([
+                                            html.H4(id="max-day-occupation", className="text-warning mb-0"),
+                                            html.P("Día con mayor ocupación", className="text-muted small")
+                                        ], className="text-center mb-3")
+                                    ], md=3),
+                                    dbc.Col([
+                                        html.Div([
+                                            html.H4(id="total-bookings-period", className="text-success mb-0"),
+                                            html.P("Total de reservas en el período", className="text-muted small")
+                                        ], className="text-center mb-3")
+                                    ], md=3),
+                                    dbc.Col([
+                                        html.Div([
+                                            html.H4(id="avg-occupation-rate", className="text-info mb-0"),
+                                            html.P("Tasa de ocupación media", className="text-muted small")
+                                        ], className="text-center mb-3")
+                                    ], md=3)
+                                ])
+                            ])
+                        ], className="mb-4")
+                    ], md=12)
+                ]),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                            dbc.CardHeader("Reservas por Semana"),
+                        dbc.CardBody([
+                                dcc.Graph(id="weekly-bookings-chart", className="dash-graph")
+                            ])
+                        ])
+                    ], md=6),
+                dbc.Col([
+                    dbc.Card([
+                            dbc.CardHeader("Ocupación Media por Día"),
+                        dbc.CardBody([
+                                dcc.Graph(id="daily-occupation-chart", className="dash-graph")
+                            ])
+                        ])
+                    ], md=6)
+                ])
+            ], className="mb-4"),
+            
+            # Nueva sección para la tabla de ocupación semanal por día
+            html.Div(id="weekly-occupation-table-container", className="mt-4"),
+            
+            # Nueva sección para la tabla de espacios por reservas
+            html.Div(id="spaces-reservations-table-container", className="mt-4"),
+            
+            # Sección de espacios
+            html.Div([
+            dbc.Row([
+                dbc.Col([
                         html.H5("Reservas de Espacios", className="d-inline-block me-2"),
                         dbc.Badge(id="spaces-count", color="primary", className="me-1")
                     ], width="auto"),
@@ -137,7 +240,7 @@ layout = html.Div([
                 ], className="mb-3"),
                 html.Div(id="spaces-table-container"),
                 html.Div(id="pagination-container", className="mt-3")
-            ], className="mb-4"),
+                ], className="mb-4"),
             
             # Sección de gráficos
             html.Div([
@@ -312,7 +415,7 @@ def register_callbacks(app):
     # Callback para actualizar la tabla de espacios
     @app.callback(
         [
-            Output("spaces-table-container", "children"),
+        Output("spaces-table-container", "children"),
             Output("pagination-container", "children")
         ],
         [
@@ -838,7 +941,7 @@ def register_callbacks(app):
         prevent_initial_call=True
     )
     def reset_filters(n_clicks):
-        return "all", "all", 0, ""
+        return "all", "all", 0, "" 
     
     @app.callback(
         Output("spaces-count", "children"),
@@ -925,8 +1028,783 @@ def register_callbacks(app):
             Output("rows-per-page", "data", allow_duplicate=True)
         ],
         [Input("spaces-filter-indicator", "children")],
-        prevent_initial_call=False
+        prevent_initial_call='initial_duplicate'
     )
     def initialize_pagination(filter_indicator):
         # Este callback se ejecuta al cargar la página y establece los valores iniciales
-        return 1, 10 
+        return 1, 10
+    
+    # Callback para generar los gráficos de análisis avanzado
+    @app.callback(
+        [
+            Output("weekly-bookings-chart", "figure"), 
+            Output("daily-occupation-chart", "figure"),
+            Output("avg-weekly-bookings", "children"),
+            Output("max-day-occupation", "children"),
+            Output("total-bookings-period", "children"),
+            Output("avg-occupation-rate", "children"),
+            Output("weekly-occupation-data", "data"),
+            Output("spaces-reservations-data", "data")
+        ],
+        [Input("selected-client-store", "data"), Input("analysis-period", "value")],
+        prevent_initial_call=True
+    )
+    def update_advanced_analytics(selection_data, period):
+        # Usar también logging estándar para verificar
+        import logging
+        std_logger = logging.getLogger("layouts.spaces")
+        std_logger.info(f"Iniciando update_advanced_analytics con period={period}")
+        std_logger.info(f"Datos de selección recibidos: {selection_data}")
+        
+        # Valores por defecto para las estadísticas
+        avg_weekly = "0"
+        max_day = "N/A"
+        total_bookings = "0"
+        avg_occupation = "0%"
+        weekly_occupation_data = {}  # Diccionario para almacenar los datos de ocupación semanal
+        spaces_reservations_data = {}  # Nuevo diccionario para almacenar los datos de espacios por reservas
+        
+        # Inicializar figuras vacías
+        weekly_fig = {
+            "data": [],
+            "layout": {
+                "title": "Reservas por Semana",
+                "xaxis": {"title": "Semana del Año"},
+                "yaxis": {"title": "Número de Reservas"},
+                "showlegend": True,
+                "legend": {"orientation": "h", "y": -0.2},
+                "margin": {"l": 40, "r": 10, "t": 60, "b": 140},
+                "height": 400
+            }
+        }
+        
+        daily_fig = {
+            "data": [],
+            "layout": {
+                "title": "Ocupación Media por Día",
+                "xaxis": {"title": "Porcentaje de Ocupación"},
+                "yaxis": {"title": "Día de la Semana"},
+                "showlegend": False,
+                "margin": {"l": 120, "r": 10, "t": 60, "b": 40},
+                "height": 400
+            }
+        }
+        
+        try:
+            # Obtener datos de la tabla common_areas_booking_report
+            client_id = selection_data.get("client_id", "all")
+            community_uuid = selection_data.get("project_id", "all")
+            
+            logger.info(f"Obteniendo datos para client_id={client_id}, community_uuid={community_uuid}")
+            df = get_common_areas_bookings(client_id=client_id, community_uuid=community_uuid)
+            
+            # Verificar si hay datos
+            if df is None:
+                logger.warning("No se encontraron datos de reservas para el análisis avanzado (df es None)")
+                return weekly_fig, daily_fig, avg_weekly, max_day, total_bookings, avg_occupation, weekly_occupation_data, spaces_reservations_data
+            elif df.empty:
+                logger.warning("No se encontraron datos de reservas para el análisis avanzado (df está vacío)")
+                return weekly_fig, daily_fig, avg_weekly, max_day, total_bookings, avg_occupation, weekly_occupation_data, spaces_reservations_data
+            else:
+                logger.info(f"Datos obtenidos correctamente. Número de filas: {len(df)}")
+                logger.info(f"Columnas disponibles: {df.columns.tolist()}")
+                logger.info(f"Primeras 5 filas: {df.head(5).to_dict('records')}")
+            
+            # Convertir la columna de fecha a datetime
+            try:
+                logger.info(f"Convirtiendo columna start_time a datetime")
+                logger.info(f"Tipo de datos de start_time antes de la conversión: {df['start_time'].dtype}")
+                logger.info(f"Muestra de valores start_time antes de la conversión: {df['start_time'].head(3).tolist()}")
+                
+                df['start_time'] = pd.to_datetime(df['start_time'])
+                
+                logger.info(f"Columna start_time convertida a datetime. Tipo: {df['start_time'].dtype}")
+                logger.info(f"Muestra de valores start_time después de la conversión: {df['start_time'].head(3).tolist()}")
+            except KeyError as ke:
+                logger.error(f"Error: La columna 'start_time' no existe en el DataFrame. Columnas disponibles: {df.columns.tolist()}")
+                return weekly_fig, daily_fig, avg_weekly, max_day, total_bookings, avg_occupation, weekly_occupation_data, spaces_reservations_data
+            except Exception as e:
+                logger.error(f"Error al convertir start_time a datetime: {str(e)}")
+                return weekly_fig, daily_fig, avg_weekly, max_day, total_bookings, avg_occupation, weekly_occupation_data, spaces_reservations_data
+            
+            # Filtrar por período seleccionado
+            current_date = pd.Timestamp.now()
+            logger.info(f"Filtrando datos por período: {period}")
+            logger.info(f"Fecha actual para filtrado: {current_date}")
+            
+            if period == "last_week":
+                start_date = current_date - pd.Timedelta(days=7)
+                df_filtered = df[(df['start_time'] >= start_date) & (df['start_time'] <= current_date)]
+                period_label = "última semana"
+            elif period == "last_month":
+                start_date = current_date - pd.Timedelta(days=30)
+                df_filtered = df[(df['start_time'] >= start_date) & (df['start_time'] <= current_date)]
+                period_label = "último mes"
+            elif period == "last_quarter":
+                start_date = current_date - pd.Timedelta(days=90)
+                df_filtered = df[(df['start_time'] >= start_date) & (df['start_time'] <= current_date)]
+                period_label = "último trimestre"
+            elif period == "last_year":
+                start_date = current_date - pd.Timedelta(days=365)
+                df_filtered = df[(df['start_time'] >= start_date) & (df['start_time'] <= current_date)]
+                period_label = "último año"
+            elif period == "this_year":
+                start_date = pd.Timestamp(current_date.year, 1, 1)
+                df_filtered = df[(df['start_time'] >= start_date) & (df['start_time'] <= current_date)]
+                period_label = "este año hasta hoy"
+            else:  # all_time
+                # Para "all_time" también limitamos hasta la fecha actual
+                df_filtered = df[df['start_time'] <= current_date]
+                period_label = "todo el período"
+                logger.info("Usando todos los datos disponibles hasta hoy (sin filtro de fecha de inicio)")
+            
+            if period != "all_time":
+                logger.info(f"Filtrando datos desde {start_date} hasta {current_date}")
+                logger.info(f"Rango de fechas en los datos: {df['start_time'].min()} a {df['start_time'].max()}")
+            
+            logger.info(f"Datos filtrados por período: {period}. Registros antes: {len(df)}, después: {len(df_filtered)}")
+            
+            # Verificar si hay datos después del filtrado
+            if df_filtered.empty:
+                logger.warning(f"No hay datos disponibles para el período seleccionado: {period}")
+                return weekly_fig, daily_fig, avg_weekly, max_day, total_bookings, avg_occupation, weekly_occupation_data, spaces_reservations_data
+            
+            # Calcular total de reservas en el período
+            total_bookings_value = len(df_filtered)
+            total_bookings = f"{total_bookings_value:,}".replace(",", ".")
+            logger.info(f"Total de reservas en el período: {total_bookings_value}")
+            
+            # Calcular reservas por semana
+            try:
+                logger.info("Calculando reservas por semana...")
+                df_filtered['week'] = df_filtered['start_time'].dt.isocalendar().week
+                df_filtered['year'] = df_filtered['start_time'].dt.isocalendar().year
+                
+                # Agrupar por semana y contar reservas
+                weekly_counts = df_filtered.groupby(['year', 'week']).size().reset_index(name='count')
+                weekly_counts['week_label'] = weekly_counts.apply(lambda x: f"{x['year']}-W{x['week']:02d}", axis=1)
+                
+                # Ordenar por año y semana
+                weekly_counts = weekly_counts.sort_values(['year', 'week'])
+                
+                # Obtener la semana actual para asegurar que no se muestren semanas futuras
+                current_week = current_date.isocalendar()[1]
+                current_year = current_date.isocalendar()[0]
+                
+                # Filtrar para mostrar solo hasta la semana actual
+                weekly_counts = weekly_counts[
+                    ((weekly_counts['year'] < current_year)) | 
+                    ((weekly_counts['year'] == current_year) & (weekly_counts['week'] <= current_week))
+                ]
+                
+                logger.info(f"Reservas por semana calculadas. Número de semanas: {len(weekly_counts)}")
+                logger.info(f"Datos de reservas por semana: {weekly_counts.to_dict('records')}")
+                logger.info(f"Semana actual: {current_year}-W{current_week:02d}")
+                
+                # Calcular promedio semanal de reservas
+                if len(weekly_counts) > 0:
+                    avg_weekly_value = weekly_counts['count'].mean()
+                    avg_weekly = f"{avg_weekly_value:.1f}".replace(".", ",")
+                    logger.info(f"Promedio semanal de reservas: {avg_weekly_value}")
+            except Exception as e:
+                logger.error(f"Error al calcular reservas por semana: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+            
+            # Crear gráfico de barras para reservas semanales
+            try:
+                logger.info("Creando gráfico de reservas semanales...")
+                weekly_fig["data"] = [{
+                    "type": "bar",
+                    "x": weekly_counts['week_label'].tolist(),
+                    "y": weekly_counts['count'].tolist(),
+                    "marker": {"color": "#4e73df"}
+                }]
+                logger.info("Gráfico de reservas semanales creado correctamente")
+            except Exception as e:
+                logger.error(f"Error al crear gráfico de reservas semanales: {str(e)}")
+            
+            # Calcular ocupación por día de la semana
+            try:
+                logger.info("Calculando ocupación por día de la semana...")
+                
+                # Extraer el día de la semana de la fecha de inicio de la reserva
+                df_filtered['day_of_week'] = df_filtered['start_time'].dt.day_name()
+                logger.info(f"Valores únicos de day_of_week: {df_filtered['day_of_week'].unique().tolist()}")
+                
+                # Mapear nombres de días en inglés a español si es necesario
+                day_map = {
+                    'Monday': 'Lunes',
+                    'Tuesday': 'Martes',
+                    'Wednesday': 'Miércoles',
+                    'Thursday': 'Jueves',
+                    'Friday': 'Viernes',
+                    'Saturday': 'Sábado',
+                    'Sunday': 'Domingo'
+                }
+                
+                # Verificar si los días están en inglés y convertir si es necesario
+                if 'Monday' in df_filtered['day_of_week'].values:
+                    logger.info("Convirtiendo nombres de días de inglés a español")
+                    df_filtered['day_of_week'] = df_filtered['day_of_week'].map(day_map)
+                    logger.info(f"Valores únicos de day_of_week después de la conversión: {df_filtered['day_of_week'].unique().tolist()}")
+                
+                # Orden correcto de los días de la semana
+                day_order = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
+                
+                # Obtener el número total de espacios únicos disponibles
+                unique_areas = get_unique_common_areas(client_id, community_uuid)
+                total_spaces = len(unique_areas) if unique_areas is not None else 0
+                logger.info(f"Total de espacios únicos disponibles: {total_spaces}")
+                
+                if total_spaces > 0:
+                    # Para cada día de la semana, calcular cuántos espacios únicos están ocupados
+                    daily_occupation = []
+                    
+                    for day in day_order:
+                        # Filtrar reservas para este día de la semana
+                        day_bookings = df_filtered[df_filtered['day_of_week'] == day]
+                        
+                        # Contar espacios únicos ocupados en este día
+                        occupied_spaces = day_bookings['common_area_id'].nunique() if not day_bookings.empty else 0
+                        
+                        # Calcular porcentaje de ocupación
+                        occupation_percentage = round((occupied_spaces / total_spaces) * 100, 1)
+                        
+                        daily_occupation.append({
+                            'day_of_week': day,
+                            'occupied_spaces': occupied_spaces,
+                            'percentage': occupation_percentage,
+                            'count': len(day_bookings)  # Mantener el conteo de reservas para compatibilidad
+                        })
+                    
+                    # Crear DataFrame con los resultados
+                    daily_counts = pd.DataFrame(daily_occupation)
+                    logger.info(f"Ocupación por día calculada (nueva metodología): {daily_counts.to_dict('records')}")
+                else:
+                    # Si no hay espacios, crear un DataFrame vacío con las columnas necesarias
+                    daily_counts = pd.DataFrame({
+                        'day_of_week': day_order,
+                        'occupied_spaces': 0,
+                        'percentage': 0,
+                        'count': 0
+                    })
+                
+                # Ordenar por día de la semana
+                daily_counts['day_order'] = daily_counts['day_of_week'].map({day: i for i, day in enumerate(day_order)})
+                daily_counts = daily_counts.sort_values('day_order')
+                
+                logger.info(f"Ocupación por día calculada (con todos los días): {daily_counts.to_dict('records')}")
+                
+                # Encontrar el día con mayor ocupación
+                if not daily_counts.empty:
+                    max_day_row = daily_counts.loc[daily_counts['percentage'].idxmax()]
+                    max_day = max_day_row['day_of_week']
+                    logger.info(f"Día con mayor ocupación: {max_day} con {max_day_row['percentage']}% de ocupación")
+                    
+                    # Calcular tasa de ocupación promedio
+                    avg_occupation_value = daily_counts['percentage'].mean()
+                    avg_occupation = f"{avg_occupation_value:.1f}%".replace(".", ",")
+                    logger.info(f"Tasa de ocupación promedio: {avg_occupation_value}%")
+                
+                # NUEVA SECCIÓN: Calcular ocupación por semana y día
+                try:
+                    logger.info("Calculando tabla de ocupación por semana y día...")
+                    
+                    # Añadir columnas de semana y día
+                    df_filtered['week'] = df_filtered['start_time'].dt.isocalendar().week
+                    df_filtered['year'] = df_filtered['start_time'].dt.isocalendar().year
+                    df_filtered['week_label'] = df_filtered.apply(lambda x: f"{x['year']}-W{x['week']:02d}", axis=1)
+                    
+                    # Crear un DataFrame con todas las combinaciones de semanas y días
+                    weeks = sorted(df_filtered['week_label'].unique())
+                    
+                    # Filtrar para mostrar solo hasta la semana actual
+                    current_week = f"{current_date.isocalendar()[0]}-W{current_date.isocalendar()[1]:02d}"
+                    weeks = [week for week in weeks if week <= current_week]
+                    
+                    # Si hay espacios disponibles, calcular la ocupación por semana y día
+                    if total_spaces > 0 and weeks:
+                        # Crear todas las combinaciones de semanas y días
+                        all_combinations = []
+                        for week in weeks:
+                            for day in day_order:
+                                all_combinations.append({'week_label': week, 'day_of_week': day})
+                        
+                        all_combinations_df = pd.DataFrame(all_combinations)
+                        
+                        # Para cada combinación de semana y día, calcular la ocupación
+                        weekly_daily_occupation = []
+                        
+                        for week in weeks:
+                            week_data = df_filtered[df_filtered['week_label'] == week]
+                            
+                            for day in day_order:
+                                # Filtrar reservas para este día de la semana en esta semana
+                                day_bookings = week_data[week_data['day_of_week'] == day]
+                                
+                                # Contar espacios únicos ocupados en este día de esta semana
+                                occupied_spaces = day_bookings['common_area_id'].nunique() if not day_bookings.empty else 0
+                                
+                                # Calcular porcentaje de ocupación
+                                occupation_percentage = round((occupied_spaces / total_spaces) * 100, 1)
+                                
+                                weekly_daily_occupation.append({
+                                    'week_label': week,
+                                    'day_of_week': day,
+                                    'occupied_spaces': occupied_spaces,
+                                    'percentage': occupation_percentage,
+                                    'count': len(day_bookings),
+                                    'total': total_spaces
+                                })
+                        
+                        # Crear DataFrame con los resultados
+                        complete_weekly_daily = pd.DataFrame(weekly_daily_occupation)
+                        
+                        # Ordenar por semana y día
+                        complete_weekly_daily['day_order'] = complete_weekly_daily['day_of_week'].map(
+                            {day: i for i, day in enumerate(day_order)}
+                        )
+                        complete_weekly_daily = complete_weekly_daily.sort_values(['week_label', 'day_order'])
+                        
+                        # Crear un diccionario pivotado para la tabla
+                        pivot_data = {}
+                        
+                        # Crear una entrada para cada semana
+                        for week in weeks:
+                            week_data = complete_weekly_daily[complete_weekly_daily['week_label'] == week]
+                            pivot_data[week] = {
+                                day: round(float(row['percentage']), 1) 
+                                for day, row in zip(
+                                    week_data['day_of_week'], 
+                                    week_data.to_dict('records')
+                                )
+                            }
+                        
+                        # Guardar los datos para la tabla
+                        weekly_occupation_data = {
+                            'weeks': weeks,
+                            'days': day_order,
+                            'data': pivot_data
+                        }
+                        
+                        logger.info(f"Tabla de ocupación por semana y día calculada con {len(weeks)} semanas")
+                    else:
+                        # Si no hay espacios o semanas, crear un diccionario vacío
+                        weekly_occupation_data = {'weeks': [], 'days': day_order, 'data': {}}
+                        logger.info("No hay espacios disponibles o semanas para calcular la ocupación semanal")
+                    
+                except Exception as e:
+                    logger.error(f"Error al calcular tabla de ocupación por semana y día: {str(e)}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    weekly_occupation_data = {'weeks': [], 'days': day_order, 'data': {}}
+                
+            except Exception as e:
+                logger.error(f"Error al calcular ocupación por día: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+            
+            # Crear gráfico de barras horizontales para ocupación diaria
+            try:
+                logger.info("Creando gráfico de ocupación diaria...")
+                daily_fig["data"] = [{
+                    "type": "bar",
+                    "y": daily_counts['day_of_week'].tolist(),
+                    "x": daily_counts['percentage'].tolist(),
+                    "orientation": 'h',
+                    "marker": {"color": "#1cc88a"},
+                    "text": [f"{p}% ({o} de {total_spaces} espacios)" for p, o in zip(daily_counts['percentage'], daily_counts['occupied_spaces'])],
+                    "textposition": "auto",
+                    "hoverinfo": "text"
+                }]
+                
+                # Actualizar el layout para mostrar que es ocupación de espacios
+                daily_fig["layout"]["title"] = "Ocupación de Espacios por Día"
+                daily_fig["layout"]["xaxis"]["title"] = "Porcentaje de Espacios Ocupados"
+                
+                logger.info("Gráfico de ocupación diaria creado correctamente")
+            except Exception as e:
+                logger.error(f"Error al crear gráfico de ocupación diaria: {str(e)}")
+            
+            logger.info(f"Análisis avanzado completado con éxito. Período: {period_label}, Total reservas: {total_bookings_value}")
+            
+            # NUEVA SECCIÓN: Calcular reservas por espacio y día de la semana
+            try:
+                logger.info("Calculando tabla de reservas por espacio y día de la semana...")
+                
+                # Verificar si tenemos la columna common_area_name
+                if 'common_area_name' not in df_filtered.columns or 'common_area_id' not in df_filtered.columns:
+                    logger.error(f"Columnas necesarias no encontradas. Columnas disponibles: {df_filtered.columns.tolist()}")
+                    spaces_reservations_data = {'spaces': [], 'days': day_order, 'data': {}}
+                else:
+                    # Agrupar por espacio y contar reservas totales
+                    space_counts = df_filtered.groupby(['common_area_id', 'common_area_name']).size().reset_index(name='total_reservations')
+                    
+                    # Ordenar por número de reservas (descendente)
+                    space_counts = space_counts.sort_values('total_reservations', ascending=False)
+                    
+                    # Obtener lista de espacios ordenados
+                    spaces = space_counts[['common_area_id', 'common_area_name', 'total_reservations']].to_dict('records')
+                    
+                    # Calcular reservas por espacio y día de la semana
+                    space_day_data = {}
+                    
+                    for space in spaces:
+                        space_id = space['common_area_id']
+                        space_name = space['common_area_name']
+                        
+                        # Filtrar reservas para este espacio
+                        space_bookings = df_filtered[df_filtered['common_area_id'] == space_id]
+                        
+                        # Inicializar conteo por día
+                        day_counts = {day: 0 for day in day_order}
+                        
+                        # Contar reservas por día para este espacio
+                        if not space_bookings.empty:
+                            day_distribution = space_bookings.groupby('day_of_week').size().to_dict()
+                            
+                            # Actualizar conteos
+                            for day, count in day_distribution.items():
+                                if day in day_counts:
+                                    day_counts[day] = count
+                        
+                        # Guardar datos para este espacio
+                        space_day_data[space_id] = {
+                            'name': space_name,
+                            'total': space['total_reservations'],
+                            'days': day_counts
+                        }
+                    
+                    # Guardar los datos para la tabla
+                    spaces_reservations_data = {
+                        'spaces': spaces,
+                        'days': day_order,
+                        'data': space_day_data
+                    }
+                    
+                    logger.info(f"Tabla de reservas por espacio calculada con {len(spaces)} espacios")
+            except Exception as e:
+                logger.error(f"Error al calcular tabla de reservas por espacio: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+                spaces_reservations_data = {'spaces': [], 'days': day_order, 'data': {}}
+        
+        except Exception as e:
+            logger.error(f"Error general en update_advanced_analytics: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+        
+        return weekly_fig, daily_fig, avg_weekly, max_day, total_bookings, avg_occupation, weekly_occupation_data, spaces_reservations_data 
+
+    # Callback para exportar el análisis a PDF
+    @app.callback(
+        [
+            Output("download-spaces-pdf", "data"),
+            Output("pdf-export-error", "children")
+        ],
+        [Input("export-spaces-pdf", "n_clicks")],
+        [
+            State("selected-client-store", "data"),
+            State("analysis-period", "value"),
+            State("weekly-bookings-chart", "figure"),
+            State("daily-occupation-chart", "figure"),
+            State("avg-weekly-bookings", "children"),
+            State("max-day-occupation", "children"),
+            State("total-bookings-period", "children"),
+            State("avg-occupation-rate", "children"),
+            State("weekly-occupation-data", "data"),
+            State("spaces-reservations-data", "data")
+        ],
+        prevent_initial_call=True
+    )
+    def export_spaces_to_pdf(n_clicks, client_data, period, weekly_fig, daily_fig, avg_weekly, max_day, total_bookings, avg_occupation, weekly_occupation_data, spaces_reservations_data):
+        """
+        Exporta el análisis de espacios a un archivo PDF.
+        """
+        if n_clicks is None:
+            return dash.no_update, dash.no_update
+        
+        try:
+            # Logging para depuración
+            logger.info(f"Exportando a PDF con período: {period}")
+            logger.info(f"Tipo de weekly_fig: {type(weekly_fig)}")
+            logger.info(f"Tipo de daily_fig: {type(daily_fig)}")
+            
+            if isinstance(weekly_fig, dict):
+                logger.info(f"weekly_fig es un diccionario con claves: {list(weekly_fig.keys())}")
+            if isinstance(daily_fig, dict):
+                logger.info(f"daily_fig es un diccionario con claves: {list(daily_fig.keys())}")
+            
+            # Obtener información del cliente
+            client_id = client_data.get("client_id", "all")
+            project_id = client_data.get("project_id", "all")
+            
+            # Obtener el nombre real del cliente a partir del ID
+            client_name = "Todos los clientes"
+            community_name = "Todas las comunidades"
+            
+            if client_id != "all":
+                try:
+                    from utils.api import get_clientes
+                    clientes = get_clientes()
+                    logger.info(f"Clientes obtenidos: {len(clientes) if isinstance(clientes, list) else 'No es una lista'}")
+                    client_match = next((c for c in clientes if str(c.get("id", "")) == str(client_id)), None)
+                    if client_match:
+                        logger.info(f"Cliente encontrado: {client_match}")
+                        # Intentar obtener el nombre con diferentes claves posibles
+                        for key in ['nombre', 'name', 'client_name', 'nombre_cliente', 'client']:
+                            if key in client_match and client_match[key]:
+                                client_name = client_match[key]
+                                logger.info(f"Nombre del cliente obtenido con clave '{key}': {client_name}")
+                                break
+                    else:
+                        logger.warning(f"No se encontró cliente con ID: {client_id}")
+                except Exception as e:
+                    logger.error(f"Error al obtener el nombre del cliente: {str(e)}")
+            
+            if project_id != "all":
+                try:
+                    from utils.api import get_projects
+                    projects = get_projects(client_id)
+                    logger.info(f"Proyectos obtenidos: {len(projects) if isinstance(projects, list) else 'No es una lista'}")
+                    project_match = next((p for p in projects if str(p.get("id", "")) == str(project_id)), None)
+                    if project_match:
+                        logger.info(f"Proyecto encontrado: {project_match}")
+                        # Intentar obtener el nombre con diferentes claves posibles
+                        for key in ['nombre', 'name', 'project_name', 'nombre_proyecto', 'project']:
+                            if key in project_match and project_match[key]:
+                                community_name = project_match[key]
+                                logger.info(f"Nombre de la comunidad obtenido con clave '{key}': {community_name}")
+                                break
+                    else:
+                        logger.warning(f"No se encontró proyecto con ID: {project_id}")
+                except Exception as e:
+                    logger.error(f"Error al obtener el nombre de la comunidad: {str(e)}")
+            
+            logger.info(f"Nombre final del cliente: {client_name}")
+            logger.info(f"Nombre final de la comunidad: {community_name}")
+            
+            # Mapear el valor del período a una etiqueta legible
+            period_labels = {
+                "last_week": "Última semana",
+                "last_month": "Último mes",
+                "last_quarter": "Último trimestre",
+                "last_year": "Último año",
+                "this_year": "Este año hasta hoy",
+                "all_time": "Todo el período"
+            }
+            period_label = period_labels.get(period, "Período seleccionado")
+            
+            # Generar el PDF
+            pdf_content = generate_spaces_report_pdf(
+                client_name=client_name,
+                community_name=community_name,
+                period_label=period_label,
+                weekly_bookings_fig=weekly_fig,
+                daily_occupation_fig=daily_fig,
+                avg_weekly_bookings=avg_weekly,
+                max_day_occupation=max_day,
+                total_bookings_period=total_bookings,
+                avg_occupation_rate=avg_occupation,
+                weekly_occupation_data=weekly_occupation_data,
+                spaces_reservations_data=spaces_reservations_data
+            )
+            
+            if pdf_content:
+                logger.info("PDF generado correctamente")
+                # Convertir el contenido del PDF (bytes) a base64 para que sea JSON serializable
+                encoded_content = base64.b64encode(pdf_content).decode('utf-8')
+                
+                return {
+                    'content': encoded_content,
+                    'filename': f"alfred_spaces_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                    'type': 'application/pdf',
+                    'base64': True
+                }, ""
+            else:
+                logger.error("Error: PDF content is None")
+                return dash.no_update, html.Div("Error al generar el PDF. Por favor, inténtelo de nuevo.", className="alert alert-danger")
+        
+        except Exception as e:
+            logger.error(f"Error al exportar a PDF: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return dash.no_update, html.Div(f"Error al generar el PDF: {str(e)}", className="alert alert-danger")
+
+    # Callback para generar la tabla de ocupación semanal por día
+    @app.callback(
+        Output("weekly-occupation-table-container", "children"),
+        [Input("weekly-occupation-data", "data")],
+        prevent_initial_call=True
+    )
+    def update_weekly_occupation_table(weekly_occupation_data):
+        """
+        Genera una tabla HTML con los datos de ocupación semanal por día.
+        """
+        if not weekly_occupation_data or not weekly_occupation_data.get('weeks') or not weekly_occupation_data.get('days'):
+            return html.Div()
+        
+        # Obtener datos
+        weeks = weekly_occupation_data.get('weeks', [])
+        days = weekly_occupation_data.get('days', [])
+        data = weekly_occupation_data.get('data', {})
+        
+        if not weeks:
+            return html.Div()
+        
+        # Crear la tabla
+        table_header = [
+            html.Thead(html.Tr(
+                [html.Th("Semana", className="text-center")] + 
+                [html.Th(day, className="text-center") for day in days]
+            ), className="table-primary")
+        ]
+        
+        table_rows = []
+        for week in weeks:
+            week_values = data.get(week, {})
+            row_cells = [html.Td(week, className="fw-bold")]
+            
+            for day in days:
+                value = week_values.get(day, 0)
+                # Formatear el valor como porcentaje
+                formatted_value = f"{value:.1f}%".replace(".", ",")
+                
+                # Aplicar clases de color según el valor
+                cell_class = ""
+                if value > 75:
+                    cell_class = "bg-danger text-white"
+                elif value > 50:
+                    cell_class = "bg-warning"
+                elif value > 25:
+                    cell_class = "bg-info text-white"
+                elif value > 0:
+                    cell_class = "bg-success text-white"
+                
+                row_cells.append(html.Td(formatted_value, className=f"text-center {cell_class}"))
+            
+            table_rows.append(html.Tr(row_cells))
+        
+        table_body = [html.Tbody(table_rows)]
+        
+        # Crear el contenedor de la tabla con título y descripción
+        return html.Div([
+            dbc.Card([
+                dbc.CardHeader("Ocupación Semanal por Día (%)"),
+                dbc.CardBody([
+                    html.P(
+                        "Esta tabla muestra el porcentaje de ocupación para cada día de la semana, desglosado por semanas. "
+                        "Los valores representan el porcentaje de reservas realizadas en cada día respecto al total de reservas "
+                        "de la semana correspondiente.",
+                        className="text-muted mb-3"
+                    ),
+                    dbc.Table(
+                        table_header + table_body,
+                        bordered=True,
+                        hover=True,
+                        responsive=True,
+                        striped=True,
+                        className="mb-2"
+                    ),
+                    html.Small(
+                        "Nota: Los colores indican el nivel de ocupación: >75% (rojo), >50% (amarillo), >25% (azul), >0% (verde).",
+                        className="text-muted"
+                    )
+                ])
+            ])
+        ]) 
+
+    # Nuevo callback para generar la tabla de espacios por reservas
+    @app.callback(
+        Output("spaces-reservations-table-container", "children"),
+        [Input("spaces-reservations-data", "data")],
+        prevent_initial_call=True
+    )
+    def update_spaces_reservations_table(spaces_reservations_data):
+        """
+        Genera una tabla HTML que muestra los espacios ordenados por número de reservas,
+        con columnas para el total y el desglose por día de la semana.
+        """
+        logger.info("Generando tabla de espacios por reservas...")
+        
+        # Verificar si hay datos
+        if not spaces_reservations_data or 'spaces' not in spaces_reservations_data or not spaces_reservations_data['spaces']:
+            return html.Div("No hay datos disponibles para generar la tabla de espacios por reservas.", className="alert alert-info")
+        
+        # Obtener datos
+        spaces = spaces_reservations_data.get('spaces', [])
+        days = spaces_reservations_data.get('days', [])
+        data = spaces_reservations_data.get('data', {})
+        
+        if not spaces or not days or not data:
+            return html.Div("Datos insuficientes para generar la tabla de espacios por reservas.", className="alert alert-info")
+        
+        # Crear encabezado de la tabla
+        header_row = [html.Th("Espacio"), html.Th("Total")]
+        for day in days:
+            header_row.append(html.Th(day))
+        
+        # Crear filas de datos
+        table_rows = []
+        for space in spaces:
+            space_id = space['common_area_id']
+            space_data = data.get(space_id, {})
+            
+            if not space_data:
+                continue
+                
+            # Crear fila para este espacio
+            row_cells = [
+                html.Td(space_data.get('name', 'Desconocido')),
+                html.Td(space_data.get('total', 0), className="text-center font-weight-bold")
+            ]
+            
+            # Añadir celdas para cada día
+            day_counts = space_data.get('days', {})
+            for day in days:
+                count = day_counts.get(day, 0)
+                
+                # Aplicar clases según el valor
+                cell_class = "text-center "
+                if count > 10:
+                    cell_class += "table-danger"
+                elif count > 5:
+                    cell_class += "table-warning"
+                elif count > 0:
+                    cell_class += "table-info"
+                
+                row_cells.append(html.Td(count, className=cell_class))
+            
+            # Añadir fila a la tabla
+            table_rows.append(html.Tr(row_cells))
+        
+        # Construir la tabla completa
+        table = dbc.Table(
+            [html.Thead(html.Tr(header_row)), html.Tbody(table_rows)],
+            bordered=True,
+            hover=True,
+            responsive=True,
+            striped=True,
+            className="mt-3"
+        )
+        
+        # Crear tarjeta con la tabla
+        card = dbc.Card([
+            dbc.CardHeader([
+                html.H5("Espacios por Número de Reservas", className="mb-0")
+            ]),
+            dbc.CardBody([
+                html.P("Esta tabla muestra los espacios ordenados por el número total de reservas, con el desglose por día de la semana.", className="card-text"),
+                table,
+                html.Small([
+                    html.I(className="fas fa-info-circle me-1"),
+                    "Los colores indican el nivel de uso: ",
+                    html.Span("Alto (>10)", className="badge bg-danger me-1"),
+                    html.Span("Medio (>5)", className="badge bg-warning me-1"),
+                    html.Span("Bajo (>0)", className="badge bg-info me-1")
+                ], className="text-muted mt-2 d-block")
+            ])
+        ])
+        
+        return card

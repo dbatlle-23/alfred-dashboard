@@ -171,6 +171,20 @@ def execute_query(query, params=None):
         
         # Ejecutar la consulta
         if params:
+            # Asegurarse de que params sea una tupla
+            if not isinstance(params, tuple):
+                # Si es un diccionario, convertir a una lista de valores
+                if isinstance(params, dict):
+                    # Reemplazar parámetros con nombre por posicionales en la consulta
+                    for key in params:
+                        query = query.replace(f":{key}", "%s")
+                    # Convertir diccionario a lista de valores
+                    params = tuple(params.values())
+                else:
+                    # Si es otro tipo, intentar convertir a tupla
+                    params = tuple(params) if hasattr(params, '__iter__') and not isinstance(params, str) else (params,)
+            
+            # Ejecutar con parámetros posicionales
             df = pd.read_sql_query(query, engine, params=params)
         else:
             df = pd.read_sql_query(query, engine)
@@ -300,6 +314,8 @@ def get_common_areas_bookings(client_id=None, community_uuid=None):
         DataFrame: Resultados de la consulta o None si hay un error
     """
     try:
+        logger.info(f"Obteniendo datos de common_areas_booking_report con client_id={client_id}, community_uuid={community_uuid}")
+        
         # Construir la consulta base
         query = "SELECT * FROM common_areas_booking_report"
         
@@ -310,26 +326,35 @@ def get_common_areas_bookings(client_id=None, community_uuid=None):
         if client_id and client_id != "all":
             conditions.append("client_id = %s")
             params.append(client_id)
+            logger.info(f"Añadiendo filtro por client_id: {client_id}")
             
         if community_uuid and community_uuid != "all":
             conditions.append("community_uuid = %s")
             params.append(community_uuid)
+            logger.info(f"Añadiendo filtro por community_uuid: {community_uuid}")
             
         # Añadir condiciones a la consulta
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
         
+        logger.info(f"Consulta SQL: {query}")
+        logger.info(f"Parámetros: {params}")
+        
         # Obtener la conexión
         engine = get_db_connection()
         if engine is None:
+            logger.error("No se pudo obtener la conexión a la base de datos")
             return None
             
         # Ejecutar la consulta con los parámetros
         if params:
+            logger.info("Ejecutando consulta con parámetros")
             df = pd.read_sql_query(query, engine, params=tuple(params))
         else:
+            logger.info("Ejecutando consulta sin parámetros")
             df = pd.read_sql_query(query, engine)
         
+        logger.info(f"Consulta ejecutada correctamente. Filas obtenidas: {len(df) if df is not None else 0}")
         return df
     except Exception as e:
         logger.error(f"Error obteniendo datos de common_areas_booking_report: {str(e)}")

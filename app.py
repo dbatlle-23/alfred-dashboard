@@ -109,7 +109,10 @@ try:
     logger.info("Registrando callbacks de las vistas principales")
     register_metrics_callbacks(app)
     register_lock_callbacks(app)
+    
+    # Registrar callbacks para spaces
     register_spaces_callbacks(app)
+    
     register_api_test_callbacks(app)
     
     # Proteger callbacks
