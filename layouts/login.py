@@ -10,56 +10,62 @@ layout = html.Div([
         dbc.Row([
             dbc.Col([
                 html.Div([
-                    html.Img(src="/assets/img/logo.svg", className="login-logo mb-4"),
-                    html.H2("Iniciar Sesión", className="text-center mb-4"),
+                    # Sección superior con fondo azul para el logo
+                    html.Div([
+                        html.Img(src="/assets/img/AlfredSmart White.png", className="login-logo", 
+                                style={"width": "auto", "max-height": "60px", "margin-top": "10px", "margin-bottom": "10px"})
+                    ], className="text-center py-4 logo-header"),
                     
-                    # Alerta para mensajes de error o éxito
-                    html.Div(id="login-alert"),
-                    
-                    # Formulario de login
-                    dbc.Form([
-                        html.Div([
-                            dbc.Label("Email", html_for="login-email"),
-                            dbc.Input(
-                                type="email",
-                                id="login-email",
-                                placeholder="Ingrese su email",
-                                className="mb-3"
+                    # Contenido del formulario
+                    html.Div([
+                        # Alerta para mensajes de error o éxito
+                        html.Div(id="login-alert", className="mt-2"),
+                        
+                        # Formulario de login
+                        dbc.Form([
+                            html.Div([
+                                dbc.Label("Email", html_for="login-email"),
+                                dbc.Input(
+                                    type="email",
+                                    id="login-email",
+                                    placeholder="Ingrese su email",
+                                    className="mb-3"
+                                ),
+                            ], className="mb-3"),
+                            
+                            html.Div([
+                                dbc.Label("Contraseña", html_for="login-password"),
+                                dbc.Input(
+                                    type="password",
+                                    id="login-password",
+                                    placeholder="Ingrese su contraseña",
+                                    className="mb-3"
+                                ),
+                            ], className="mb-4"),
+                            
+                            dbc.Button(
+                                "Iniciar Sesión",
+                                id="login-button",
+                                color="primary",
+                                className="w-100 mb-3"
                             ),
-                        ], className="mb-3"),
+                            
+                            # Spinner para indicar carga
+                            dbc.Spinner(html.Div(id="login-loading"), color="#003D59", type="grow", size="sm"),
+                            
+                            # Store para almacenar el estado del login
+                            dcc.Store(id="login-state"),
+                        ]),
                         
-                        html.Div([
-                            dbc.Label("Contraseña", html_for="login-password"),
-                            dbc.Input(
-                                type="password",
-                                id="login-password",
-                                placeholder="Ingrese su contraseña",
-                                className="mb-3"
-                            ),
-                        ], className="mb-4"),
+                        html.Hr(className="my-4"),
                         
-                        dbc.Button(
-                            "Iniciar Sesión",
-                            id="login-button",
-                            color="primary",
-                            className="w-100 mb-3"
-                        ),
-                        
-                        # Spinner para indicar carga
-                        dbc.Spinner(html.Div(id="login-loading"), color="primary", type="grow", size="sm"),
-                        
-                        # Store para almacenar el estado del login
-                        dcc.Store(id="login-state"),
-                    ]),
+                        html.P([
+                            "¿Problemas para iniciar sesión? ",
+                            html.A("Contacte a soporte", href="mailto:soporte@alfredsmartdata.com")
+                        ], className="text-center text-muted small")
+                    ], className="p-4")
                     
-                    html.Hr(className="my-4"),
-                    
-                    html.P([
-                        "¿Problemas para iniciar sesión? ",
-                        html.A("Contacte a soporte", href="mailto:soporte@alfredsmartdata.com")
-                    ], className="text-center text-muted small")
-                    
-                ], className="login-form p-4 border rounded shadow-sm bg-white")
+                ], className="login-form border rounded shadow-sm bg-white overflow-hidden")
             ], width={"size": 6, "offset": 3}, lg={"size": 4, "offset": 4}, md={"size": 6, "offset": 3}, sm={"size": 10, "offset": 1})
         ], className="vh-100 d-flex align-items-center")
     ], fluid=True)

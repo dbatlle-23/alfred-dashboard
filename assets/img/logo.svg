@@ -1,11 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="200" height="60" viewBox="0 0 200 60">
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="80" viewBox="0 0 300 80">
   <style>
-    .logo-text { font-family: Arial, sans-serif; font-weight: bold; }
-    .primary { fill: #0d6efd; }
-    .secondary { fill: #6c757d; }
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700&display=swap');
+    .logo-text { 
+      font-family: 'Montserrat', sans-serif; 
+      font-weight: 600;
+      letter-spacing: -0.5px;
+    }
+    .logo-text-bold { 
+      font-family: 'Montserrat', sans-serif; 
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+    .alfred-color { fill: #003D59; }
   </style>
-  <g transform="translate(10, 40)">
-    <text class="logo-text primary" font-size="30">Alfred</text>
-    <text class="logo-text secondary" x="95" font-size="30">Dashboard</text>
+  <g transform="translate(10, 45)">
+    <text class="logo-text alfred-color" font-size="42">alfred</text>
+    <text class="logo-text-bold alfred-color" x="130" font-size="42">smart</text>
   </g>
 </svg> 

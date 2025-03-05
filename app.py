@@ -48,7 +48,8 @@ app = dash.Dash(
     external_stylesheets=[dbc.themes.BOOTSTRAP, 'https://use.fontawesome.com/releases/v5.15.4/css/all.css'],
     suppress_callback_exceptions=True,
     meta_tags=[
-        {"name": "viewport", "content": "width=device-width, initial-scale=1"}
+        {"name": "viewport", "content": "width=device-width, initial-scale=1"},
+        {"name": "favicon", "content": "/assets/favicon.png"}
     ]
 )
 
