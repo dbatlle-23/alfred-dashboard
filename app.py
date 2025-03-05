@@ -69,6 +69,8 @@ app.layout = html.Div([
     html.Div(id="global-error-container"),
     # Contenedor para estado de autenticación (usado por el sistema de auth)
     html.Div(id="global-auth-status", style={"display": "none"}),
+    # Store para el token JWT (almacenado en sessionStorage del navegador)
+    dcc.Store(id="jwt-token-store", storage_type="session", data={}),
     # Store global para la selección de cliente/proyecto
     dcc.Store(id="global-client-selection", data={"client_id": "all", "project_id": "all"}),
     # Contenedor para el contenido de la página
@@ -125,10 +127,11 @@ except Exception as e:
 # Callback para cambiar el contenido de la página
 @app.callback(
     dash.dependencies.Output("page-content", "children"),
-    [dash.dependencies.Input("url", "pathname")]
+    [dash.dependencies.Input("url", "pathname")],
+    [dash.dependencies.State("jwt-token-store", "data")]
 )
 @handle_exceptions(default_return=html.Div("Ha ocurrido un error al cargar la página", className="alert alert-danger"))
-def display_page(pathname):
+def display_page(pathname, token_data):
     # Importar layouts aquí para evitar importaciones circulares
     from layouts.home import layout as home_layout
     from layouts.db_config import layout as db_config_layout
@@ -146,12 +149,15 @@ def display_page(pathname):
     if pathname == "/login":
         return login_layout
     
+    # Obtener el token JWT del store
+    token = token_data.get('token') if token_data else None
+    
     # Verificar autenticación para todas las demás rutas
-    if not auth_service.is_authenticated():
+    if not token or not auth_service.is_authenticated(token):
         logger.info("Usuario no autenticado, redirigiendo a login")
         # Usar dcc.Location para forzar la redirección a /login
         return html.Div([
-            dcc.Location(id="redirect-to-login", pathname="/login", refresh=True),
+            dcc.Location(id="redirect-to-login", pathname="/login"),
             html.Div("Redirigiendo a la página de login...")
         ])
     

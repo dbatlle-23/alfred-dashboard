@@ -1,6 +1,88 @@
 # Alfred Dashboard
 
-Dashboard para explorar y gestionar la base de datos de Alfred.
+Dashboard para visualización y análisis de datos de Alfred Smart.
+
+## Autenticación con JWT
+
+El dashboard implementa un sistema de autenticación basado en tokens JWT (JSON Web Tokens) para gestionar las sesiones de usuario de forma segura y aislada. Cada navegador o pestaña mantiene su propia sesión independiente.
+
+### Características principales
+
+- **Tokens JWT**: Cada sesión genera un token JWT único que se almacena en el navegador.
+- **Almacenamiento por sesión**: Los tokens se guardan en `dcc.Store(storage_type="session")`, lo que garantiza que cada pestaña tenga su propia sesión.
+- **Logout independiente**: Al cerrar sesión en una pestaña, solo se elimina el token de esa pestaña, sin afectar a otras sesiones activas.
+- **Verificación de tokens**: En cada solicitud se verifica la validez del token JWT.
+- **Seguridad mejorada**: Los tokens tienen tiempo de expiración y se validan en cada operación.
+
+### Flujo de autenticación
+
+1. **Login**: El usuario ingresa sus credenciales, que se envían al backend.
+2. **Generación de token**: El servidor valida las credenciales y genera un token JWT.
+3. **Almacenamiento**: El token se guarda en `dcc.Store` con `storage_type="session"`.
+4. **Verificación**: En cada cambio de página o solicitud a la API, se verifica la validez del token.
+5. **Logout**: Al cerrar sesión, se elimina el token de la pestaña actual sin afectar otras sesiones.
+
+### Mensajes de log durante la inicialización
+
+Durante la inicialización de la aplicación o cuando se carga una nueva pestaña, es normal ver mensajes en los logs como:
+
+```
+No se proporcionó token JWT para obtener clientes
+No se proporcionó token JWT para obtener proyectos
+```
+
+Estos mensajes son informativos y no indican un error. Ocurren porque:
+
+1. Los componentes (como el selector de clientes) intentan cargar datos al inicializarse
+2. En ese momento, el usuario aún no ha iniciado sesión, por lo que no hay token JWT disponible
+3. La aplicación maneja correctamente esta situación mostrando opciones por defecto
+4. Una vez que el usuario inicia sesión, los componentes se actualizan con datos reales
+
+Este comportamiento es parte del diseño normal de la aplicación y no requiere ninguna acción correctiva.
+
+### Implementación técnica
+
+- `utils/auth.py`: Servicio de autenticación que maneja la generación y verificación de tokens JWT.
+- `app.py`: Configuración principal de la aplicación con el store para el token JWT.
+- `layouts/login.py`: Manejo del proceso de login y almacenamiento del token.
+- `components/navbar.py`: Implementación del logout que solo afecta a la pestaña actual.
+
+## Instalación
+
+Para instalar las dependencias necesarias:
+
+```bash
+pip install -r requirements.txt
+```
+
+## Ejecución
+
+Para ejecutar la aplicación:
+
+```bash
+python app.py
+```
+
+Por defecto, la aplicación se ejecutará en `http://0.0.0.0:8050`.
+
+## Configuración
+
+La aplicación puede configurarse mediante variables de entorno:
+
+- `HOST`: Host en el que se ejecutará la aplicación (por defecto: `0.0.0.0`)
+- `PORT`: Puerto en el que se ejecutará la aplicación (por defecto: `8050`)
+- `DASH_DEBUG`: Modo debug (`true` o `false`, por defecto: `false`)
+- `JWT_SECRET_KEY`: Clave secreta para firmar los tokens JWT (por defecto: `alfred-dashboard-secret-key`)
+
+## Estructura del proyecto
+
+- `app.py`: Punto de entrada principal de la aplicación
+- `assets/`: Archivos estáticos (CSS, imágenes, etc.)
+- `components/`: Componentes reutilizables de la interfaz
+- `layouts/`: Layouts para las diferentes páginas
+- `utils/`: Utilidades y servicios
+- `config/`: Archivos de configuración
+- `logs/`: Logs de la aplicación
 
 ## Características
 

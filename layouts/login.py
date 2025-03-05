@@ -2,6 +2,9 @@ from dash import html, dcc, Input, Output, State, callback_context
 import dash_bootstrap_components as dbc
 import dash
 from utils.auth import auth_service
+from utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 # Layout para la página de login
 layout = html.Div([
@@ -78,6 +81,7 @@ def register_callbacks(app):
             Output("login-alert", "children"),
             Output("login-loading", "children"),
             Output("login-state", "data"),
+            Output("jwt-token-store", "data", allow_duplicate=True),
             Output("login-url", "pathname")
         ],
         [Input("login-button", "n_clicks")],
@@ -89,7 +93,7 @@ def register_callbacks(app):
     )
     def handle_login(n_clicks, email, password):
         if not n_clicks:
-            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
         
         # Validar campos
         if not email or not password:
@@ -97,32 +101,43 @@ def register_callbacks(app):
                 "Por favor, complete todos los campos",
                 color="danger",
                 dismissable=True
-            ), "", {"authenticated": False}, dash.no_update
+            ), "", {"authenticated": False}, dash.no_update, dash.no_update
         
-        # Intentar login
-        result = auth_service.login(email, password)
-        
-        if result["success"]:
-            # Login exitoso - Forzar recarga completa para asegurar redirección
-            from dash import dcc
-            import time
+        try:
+            # Intentar login
+            result = auth_service.login(email, password)
             
-            # Mostrar mensaje de éxito
-            alert = dbc.Alert(
-                "Login exitoso. Redirigiendo...",
-                color="success",
-                dismissable=False
-            )
-            
-            # Pequeña pausa para mostrar el mensaje
-            time.sleep(0.5)
-            
-            # Redireccionar a la página principal
-            return alert, "", {"authenticated": True, "timestamp": time.time()}, "/"
-        else:
-            # Login fallido
+            if result["success"]:
+                # Login exitoso - Forzar recarga completa para asegurar redirección
+                from dash import dcc
+                import time
+                
+                # Mostrar mensaje de éxito
+                alert = dbc.Alert(
+                    "Login exitoso. Redirigiendo...",
+                    color="success",
+                    dismissable=False
+                )
+                
+                # Pequeña pausa para mostrar el mensaje
+                time.sleep(0.5)
+                
+                # Guardar el token JWT en el store
+                token_data = {"token": result["token"]}
+                
+                # Redireccionar a la página principal
+                return alert, "", {"authenticated": True, "timestamp": time.time()}, token_data, "/"
+            else:
+                # Login fallido
+                return dbc.Alert(
+                    result["message"],
+                    color="danger",
+                    dismissable=True
+                ), "", {"authenticated": False}, dash.no_update, dash.no_update
+        except Exception as e:
+            logger.error(f"Error en el proceso de login: {str(e)}")
             return dbc.Alert(
-                result["message"],
+                f"Error en el proceso de login: {str(e)}",
                 color="danger",
                 dismissable=True
-            ), "", {"authenticated": False}, dash.no_update 
+            ), "", {"authenticated": False}, dash.no_update, dash.no_update 

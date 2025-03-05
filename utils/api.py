@@ -10,6 +10,25 @@ BASE_URL = "https://services.alfredsmartdata.com"
 CLIENTS_ENDPOINT = f"{BASE_URL}/clients"
 PROJECTS_ENDPOINT = f"{BASE_URL}/projects"
 
+# Función para obtener los headers de autenticación
+def get_auth_headers(jwt_token=None):
+    """
+    Obtiene los headers de autenticación para las llamadas a la API
+    
+    Args:
+        jwt_token: Token JWT (opcional)
+        
+    Returns:
+        dict: Headers de autenticación
+    """
+    if jwt_token:
+        # Usar el token JWT proporcionado
+        return auth_service.get_auth_headers_from_token(jwt_token)
+    else:
+        # Si no hay token JWT, devolver headers vacíos
+        logger.warning("No se proporcionó token JWT para obtener headers de autenticación")
+        return {}
+
 def extract_list_from_response(data, fallback_func, item_type="items", client_id=None):
     """
     Extrae una lista de elementos de una respuesta de API que puede tener diferentes estructuras
@@ -23,292 +42,127 @@ def extract_list_from_response(data, fallback_func, item_type="items", client_id
     Returns:
         list: Lista de elementos extraída o datos de fallback
     """
-    # Registrar la estructura de los datos para depuración
+    # Registrar la estructura de los datos recibida para depuración
     logger.debug(f"Estructura de datos recibida para {item_type}: {type(data)}")
     
-    # Caso especial para la estructura de respuesta del ejemplo proporcionado
-    if isinstance(data, dict) and "data" in data and isinstance(data["data"], list):
-        logger.debug(f"Encontrada estructura de respuesta estándar con campo 'data' que contiene {len(data['data'])} elementos")
-        items_list = data["data"]
+    # Caso especial para clientes - verificar si hay una estructura específica para clientes
+    if item_type == "clients" and isinstance(data, dict):
+        # Verificar si hay una estructura específica para clientes en la API de Alfred
+        if "clients" in data and isinstance(data["clients"], list):
+            logger.debug(f"Encontrada lista de clientes en la clave 'clients' con {len(data['clients'])} elementos")
+            return data["clients"]
+        elif "data" in data and isinstance(data["data"], list):
+            logger.debug(f"Encontrada lista de clientes en la clave 'data' con {len(data['data'])} elementos")
+            return data["data"]
+        elif "results" in data and isinstance(data["results"], list):
+            logger.debug(f"Encontrada lista de clientes en la clave 'results' con {len(data['results'])} elementos")
+            return data["results"]
         
-        # Si hay client_id y estamos buscando proyectos, filtrar los elementos
-        if client_id and client_id != "all" and item_type == "projects":
-            filtered_items = []
-            for project in items_list:
-                if not isinstance(project, dict):
-                    continue
-                
-                # Buscar el client_id en diferentes campos posibles, priorizando 'client'
-                project_client_id = None
-                client_id_field = None
-                # Primero buscar en 'client' que es el campo que sabemos que funciona
-                if 'client' in project:
-                    project_client_id = project['client']
-                    client_id_field = 'client'
-                else:
-                    # Si no está en 'client', buscar en otros campos posibles
-                    for key in ['client_id', 'clientId', 'id_cliente', 'cliente_id', 'cliente', 'clienteId', 'idCliente']:
-                        if key in project:
-                            project_client_id = project[key]
-                            client_id_field = key
-                            break
-                
-                if project_client_id is not None:
-                    logger.debug(f"Proyecto con client_id '{project_client_id}' (campo: {client_id_field}) vs buscado '{client_id}'")
-                    if str(project_client_id) == str(client_id):
-                        logger.debug(f"¡COINCIDENCIA! Proyecto encontrado para client_id {client_id}")
-                        filtered_items.append(project)
-            
-            logger.debug(f"Filtrado por client_id {client_id}: {len(filtered_items)} elementos")
-            return filtered_items
-        
-        return items_list
+        # Verificar si hay una estructura anidada común en APIs
+        if "data" in data and isinstance(data["data"], dict) and "clients" in data["data"] and isinstance(data["data"]["clients"], list):
+            logger.debug(f"Encontrada lista de clientes en data.clients con {len(data['data']['clients'])} elementos")
+            return data["data"]["clients"]
     
-    # Continuar con el resto de la lógica existente
-    if isinstance(data, dict):
-        logger.debug(f"Claves en el diccionario: {data.keys()}")
-        # Registrar valores de algunas claves comunes si existen
-        for key in ['data', item_type, 'results', 'items', 'clients', 'projects', 'response']:
-            if key in data:
-                value_type = type(data[key])
-                logger.debug(f"Tipo de valor para clave '{key}': {value_type}")
-                if isinstance(data[key], list):
-                    logger.debug(f"Longitud de la lista en clave '{key}': {len(data[key])}")
-                    if len(data[key]) > 0 and isinstance(data[key][0], dict):
-                        logger.debug(f"Claves del primer elemento en '{key}': {data[key][0].keys()}")
-    elif isinstance(data, list) and len(data) > 0:
-        logger.debug(f"Estructura del primer elemento: {type(data[0])}")
-        if isinstance(data[0], dict):
-            logger.debug(f"Claves del primer elemento: {data[0].keys()}")
-            # Si estamos buscando proyectos, verificar si tienen client_id
-            if item_type == "projects":
-                # Primero buscar 'client' que es el campo que sabemos que funciona
-                if 'client' in data[0]:
-                    logger.debug(f"Encontrado campo de client_id: 'client' con valor: {data[0]['client']}")
-                else:
-                    # Si no está en 'client', buscar en otros campos posibles
-                    for key in ['client_id', 'clientId', 'id_cliente', 'cliente_id', 'cliente', 'clienteId', 'idCliente']:
-                        if key in data[0]:
-                            logger.debug(f"Encontrado campo de client_id: '{key}' con valor: {data[0][key]}")
-    
-    # Caso especial para proyectos - verificar si hay una estructura específica
-    if item_type == "projects" and isinstance(data, dict):
-        # Verificar si hay una estructura específica para proyectos
-        if "projects" in data and isinstance(data["projects"], list):
-            projects_list = data["projects"]
-            logger.debug(f"Encontrada lista de proyectos directamente en la clave 'projects' con {len(projects_list)} elementos")
-            
-            # Si hay client_id, filtrar los elementos
-            if client_id and client_id != "all":
-                # Buscar el client_id en diferentes campos posibles
-                filtered_projects = []
-                for project in projects_list:
-                    # Buscar el client_id en diferentes campos posibles, priorizando 'client'
-                    project_client_id = None
-                    client_id_field = None
-                    # Primero buscar en 'client' que es el campo que sabemos que funciona
-                    if 'client' in project:
-                        project_client_id = project['client']
-                        client_id_field = 'client'
-                    else:
-                        # Si no está en 'client', buscar en otros campos posibles
-                        for key in ['client_id', 'clientId', 'id_cliente', 'cliente_id', 'cliente', 'clienteId', 'idCliente']:
-                            if key in project:
-                                project_client_id = project[key]
-                                client_id_field = key
-                                break
-                    
-                    if project_client_id is not None:
-                        logger.debug(f"Proyecto con client_id '{project_client_id}' (campo: {client_id_field}) vs buscado '{client_id}'")
-                        if str(project_client_id) == str(client_id):
-                            logger.debug(f"¡COINCIDENCIA! Proyecto encontrado para client_id {client_id}")
-                            filtered_projects.append(project)
-                
-                logger.debug(f"Filtrado por client_id {client_id}: {len(filtered_projects)} elementos")
-                return filtered_projects
-            
-            return projects_list
-        
-        # Verificar si hay una estructura específica para proyectos en otras claves comunes
-        for projects_key in ['data', 'results', 'items', 'response']:
-            if projects_key in data and isinstance(data[projects_key], list):
-                # Verificar si los elementos parecen ser proyectos (tienen campos típicos de proyectos)
-                if len(data[projects_key]) > 0 and isinstance(data[projects_key][0], dict):
-                    first_item = data[projects_key][0]
-                    # Verificar si tiene campos típicos de proyectos
-                    project_fields = ['nombre', 'name', 'project_name', 'id', 'project_id', 'projectId']
-                    if any(field in first_item for field in project_fields):
-                        logger.debug(f"Encontrada posible lista de proyectos en la clave '{projects_key}' con {len(data[projects_key])} elementos")
-                        
-                        # Si hay client_id, filtrar los elementos
-                        if client_id and client_id != "all":
-                            # Buscar el client_id en diferentes campos posibles
-                            filtered_projects = []
-                            for project in data[projects_key]:
-                                # Buscar el client_id en diferentes campos posibles, priorizando 'client'
-                                project_client_id = None
-                                client_id_field = None
-                                # Primero buscar en 'client' que es el campo que sabemos que funciona
-                                if 'client' in project:
-                                    project_client_id = project['client']
-                                    client_id_field = 'client'
-                                else:
-                                    # Si no está en 'client', buscar en otros campos posibles
-                                    for key in ['client_id', 'clientId', 'id_cliente', 'cliente_id', 'cliente', 'clienteId', 'idCliente']:
-                                        if key in project:
-                                            project_client_id = project[key]
-                                            client_id_field = key
-                                            break
-                                
-                                if project_client_id is not None:
-                                    logger.debug(f"Proyecto con client_id '{project_client_id}' (campo: {client_id_field}) vs buscado '{client_id}'")
-                                    if str(project_client_id) == str(client_id):
-                                        logger.debug(f"¡COINCIDENCIA! Proyecto encontrado para client_id {client_id}")
-                                        filtered_projects.append(project)
-                            
-                            logger.debug(f"Filtrado por client_id {client_id}: {len(filtered_projects)} elementos")
-                            return filtered_projects
-                        
-                        return data[projects_key]
-    
-    # Si ya es una lista, procesarla directamente
-    if isinstance(data, list):
-        logger.debug(f"Datos recibidos como lista con {len(data)} elementos")
-        # Si hay client_id, filtrar los elementos
-        if client_id and client_id != "all" and item_type == "projects":
-            # Buscar el client_id en diferentes campos posibles
-            filtered_data = []
-            for project in data:
-                if not isinstance(project, dict):
-                    continue
-                
-                # Buscar el client_id en diferentes campos posibles, priorizando 'client'
-                project_client_id = None
-                client_id_field = None
-                # Primero buscar en 'client' que es el campo que sabemos que funciona
-                if 'client' in project:
-                    project_client_id = project['client']
-                    client_id_field = 'client'
-                else:
-                    # Si no está en 'client', buscar en otros campos posibles
-                    for key in ['client_id', 'clientId', 'id_cliente', 'cliente_id', 'cliente', 'clienteId', 'idCliente']:
-                        if key in project:
-                            project_client_id = project[key]
-                            client_id_field = key
-                            break
-                
-                if project_client_id is not None:
-                    logger.debug(f"Proyecto con client_id '{project_client_id}' (campo: {client_id_field}) vs buscado '{client_id}'")
-                    if str(project_client_id) == str(client_id):
-                        logger.debug(f"¡COINCIDENCIA! Proyecto encontrado para client_id {client_id}")
-                        filtered_data.append(project)
-            
-            logger.debug(f"Filtrado por client_id {client_id}: {len(filtered_data)} elementos")
-            return filtered_data
-        return data
-    
-    # Si es un diccionario, intentar extraer la lista
-    elif isinstance(data, dict):
-        # Campos comunes donde podría estar la lista
-        possible_fields = ['data', item_type, 'results', 'items', 'clients', 'projects', 'response']
-        
-        # Buscar en cada campo posible
-        for field in possible_fields:
-            if field in data:
-                items_list = data.get(field)
-                logger.debug(f"Encontrado campo '{field}' en la respuesta")
-                
-                # Verificar que sea una lista
-                if isinstance(items_list, list):
-                    logger.debug(f"Campo '{field}' contiene una lista con {len(items_list)} elementos")
-                    
-                    # Si hay client_id, filtrar los elementos
-                    if client_id and client_id != "all" and item_type == "projects":
-                        # Buscar el client_id en diferentes campos posibles
-                        filtered_items = []
-                        for project in items_list:
-                            if not isinstance(project, dict):
-                                continue
-                            
-                            # Buscar el client_id en diferentes campos posibles, priorizando 'client'
-                            project_client_id = None
-                            client_id_field = None
-                            # Primero buscar en 'client' que es el campo que sabemos que funciona
-                            if 'client' in project:
-                                project_client_id = project['client']
-                                client_id_field = 'client'
-                            else:
-                                # Si no está en 'client', buscar en otros campos posibles
-                                for key in ['client_id', 'clientId', 'id_cliente', 'cliente_id', 'cliente', 'clienteId', 'idCliente']:
-                                    if key in project:
-                                        project_client_id = project[key]
-                                        client_id_field = key
-                                        break
-                            
-                            if project_client_id is not None:
-                                logger.debug(f"Proyecto con client_id '{project_client_id}' (campo: {client_id_field}) vs buscado '{client_id}'")
-                                if str(project_client_id) == str(client_id):
-                                    logger.debug(f"¡COINCIDENCIA! Proyecto encontrado para client_id {client_id}")
-                                    filtered_items.append(project)
-                        
-                        logger.debug(f"Filtrado por client_id {client_id}: {len(filtered_items)} elementos")
-                        return filtered_items
-                    return items_list
-                else:
-                    logger.debug(f"Campo '{field}' no es una lista, es {type(items_list)}")
-        
-        # Si no encontramos la lista en ningún campo conocido, buscar recursivamente en subniveles
-        for key, value in data.items():
-            if isinstance(value, dict):
-                logger.debug(f"Buscando recursivamente en subclave '{key}'")
-                # Llamada recursiva para buscar en el subnivel
-                subresult = extract_list_from_response(value, lambda: [], item_type, client_id)
-                if subresult and len(subresult) > 0:
-                    logger.debug(f"Encontrada lista en subclave '{key}' con {len(subresult)} elementos")
-                    return subresult
-        
-        # Si no encontramos la lista en ningún campo conocido
-        logger.error(f"No se pudo extraer la lista de {item_type} de la respuesta: {data}")
+    # Si hay un error en la respuesta, usar fallback
+    if isinstance(data, dict) and "error" in data:
+        logger.error(f"Error en la respuesta para {item_type}: {data.get('error')}")
         return fallback_func(client_id) if item_type == "projects" else fallback_func()
     
-    # Si no es ni lista ni diccionario
-    logger.error(f"La API devolvió un tipo no esperado: {type(data)}")
+    # Si la respuesta ya es una lista, usarla directamente
+    if isinstance(data, list):
+        logger.debug(f"La respuesta ya es una lista con {len(data)} elementos")
+        # Verificar si los elementos parecen ser del tipo correcto
+        if len(data) > 0 and isinstance(data[0], dict):
+            logger.debug(f"Primer elemento de la lista: {data[0]}")
+            return data
+    
+    # Si la respuesta es un diccionario, buscar la lista en diferentes claves
+    if isinstance(data, dict):
+        # Claves comunes donde podría estar la lista
+        possible_keys = ['data', item_type, 'results', 'items', 'clients', 'projects', 'response']
+        
+        # Primero buscar en las claves más probables
+        for key in possible_keys:
+            if key in data and isinstance(data[key], list):
+                logger.debug(f"Encontrada lista en la clave '{key}' con {len(data[key])} elementos")
+                if len(data[key]) > 0:
+                    logger.debug(f"Primer elemento de la lista: {data[key][0]}")
+                return data[key]
+        
+        # Si no encontramos la lista en las claves comunes, buscar en todas las claves
+        for key, value in data.items():
+            if isinstance(value, list):
+                logger.debug(f"Encontrada lista en la clave '{key}' con {len(value)} elementos")
+                if len(value) > 0:
+                    logger.debug(f"Primer elemento de la lista: {value[0]}")
+                return value
+            
+            # Si el valor es un diccionario, buscar recursivamente
+            if isinstance(value, dict):
+                logger.debug(f"Buscando recursivamente en la clave '{key}'")
+                result = extract_list_from_response(value, lambda: [], item_type, client_id)
+                if result and len(result) > 0:
+                    return result
+    
+    # Si no encontramos la lista, usar fallback
+    logger.warning(f"No se pudo encontrar una lista de {item_type} en la respuesta")
     return fallback_func(client_id) if item_type == "projects" else fallback_func()
 
-def get_clientes():
+def get_clientes(jwt_token=None):
     """
     Obtiene la lista de clientes desde la API
     
+    Args:
+        jwt_token: Token JWT para autenticación (opcional)
+        
     Returns:
         list: Lista de clientes con formato [{id, nombre, ...}]
     """
     try:
-        # Crear instancia del servicio de autenticación
-        auth_service = AuthService()
-        
         # Verificar autenticación
-        if not auth_service.is_authenticated():
-            logger.warning("No hay una sesión activa para obtener clientes")
+        if jwt_token:
+            # Usar el token JWT proporcionado
+            logger.debug(f"Verificando autenticación con token JWT: {jwt_token[:10]}...")
+            if not auth_service.is_authenticated(jwt_token):
+                logger.warning("Token JWT inválido para obtener clientes")
+                return get_clientes_fallback()
+                
+            # Endpoint para clientes (sin la URL base)
+            endpoint = "clients"
+            
+            logger.debug(f"Obteniendo clientes con endpoint: {endpoint}")
+            
+            # Hacer la solicitud a la API con el token JWT
+            logger.debug("Realizando solicitud a la API para obtener clientes")
+            response = auth_service.make_api_request(jwt_token, "GET", endpoint)
+            logger.debug(f"Respuesta recibida de la API: {type(response)}")
+            
+            # Registrar la respuesta completa para depuración
+            if isinstance(response, dict):
+                logger.debug(f"Claves en la respuesta: {list(response.keys())}")
+                # Imprimir los primeros 5 elementos si hay una lista en la respuesta
+                for key, value in response.items():
+                    if isinstance(value, list) and len(value) > 0:
+                        logger.debug(f"Lista encontrada en clave '{key}' con {len(value)} elementos")
+                        logger.debug(f"Primeros elementos: {value[:min(5, len(value))]}")
+            elif isinstance(response, list):
+                logger.debug(f"Respuesta es una lista con {len(response)} elementos")
+                if len(response) > 0:
+                    logger.debug(f"Primeros elementos: {response[:min(5, len(response))]}")
+        else:
+            # Si no hay token JWT, usar fallback directamente
+            logger.info("No se proporcionó token JWT para obtener clientes (comportamiento normal durante inicialización)")
             return get_clientes_fallback()
         
-        # Endpoint para clientes (sin la URL base)
-        endpoint = "clients"
-        
-        logger.debug(f"Obteniendo clientes con endpoint: {endpoint}")
-        
-        # Hacer la solicitud a la API
-        response = auth_service.make_api_request("GET", endpoint)
-        
         # Verificar si hay un error en la respuesta
-        if "error" in response:
+        if isinstance(response, dict) and "error" in response:
             logger.error(f"Error al obtener clientes: {response.get('error')}")
             return get_clientes_fallback()
         
-        # Registrar la respuesta para depuración
-        logger.debug(f"Respuesta de la API de clientes: {response}")
-        
         # Extraer la lista de clientes de la respuesta
-        return extract_list_from_response(response, get_clientes_fallback, "clients")
+        clientes = extract_list_from_response(response, get_clientes_fallback, "clients")
+        logger.debug(f"Clientes extraídos: {len(clientes) if isinstance(clientes, list) else 'no es lista'}")
+        return clientes
     except Exception as e:
         logger.error(f"Error al obtener clientes: {str(e)}")
         # En caso de excepción, devolver datos de ejemplo como fallback
@@ -321,43 +175,49 @@ def get_clientes_fallback():
     Returns:
         list: Lista de clientes de ejemplo
     """
+    logger.debug("Usando datos de fallback para clientes")
     return [
-        {"id": 1, "nombre": "Cliente A", "name": "Cliente A", "codigo": "CA", "client_id": 1},
-        {"id": 2, "nombre": "Cliente B", "name": "Cliente B", "codigo": "CB", "client_id": 2},
-        {"id": 3, "nombre": "Cliente C", "name": "Cliente C", "codigo": "CC", "client_id": 3},
-        {"id": 4, "nombre": "Cliente D", "name": "Cliente D", "codigo": "CD", "client_id": 4},
+        {"id": 1, "nombre": "Cliente A (FALLBACK - NO REAL)", "name": "Cliente A (FALLBACK - NO REAL)", "codigo": "CA", "client_id": 1},
+        {"id": 2, "nombre": "Cliente B (FALLBACK - NO REAL)", "name": "Cliente B (FALLBACK - NO REAL)", "codigo": "CB", "client_id": 2},
+        {"id": 3, "nombre": "Cliente C (FALLBACK - NO REAL)", "name": "Cliente C (FALLBACK - NO REAL)", "codigo": "CC", "client_id": 3},
+        {"id": 4, "nombre": "Cliente D (FALLBACK - NO REAL)", "name": "Cliente D (FALLBACK - NO REAL)", "codigo": "CD", "client_id": 4},
     ]
 
-def get_projects(client_id=None):
+def get_projects(client_id=None, jwt_token=None):
     """
     Obtiene la lista de proyectos desde la API
     
     Args:
         client_id: ID del cliente para filtrar los proyectos (opcional)
+        jwt_token: Token JWT para autenticación (opcional)
         
     Returns:
         list: Lista de proyectos
     """
     try:
-        auth_service = AuthService()
-        
         # Verificar autenticación
-        if not auth_service.is_authenticated():
-            logger.warning("No hay una sesión activa para obtener proyectos")
+        if jwt_token:
+            # Usar el token JWT proporcionado
+            if not auth_service.is_authenticated(jwt_token):
+                logger.warning("Token JWT inválido para obtener proyectos")
+                return get_projects_fallback(client_id)
+                
+            # Construir el endpoint (sin la URL base)
+            endpoint = "projects"
+            
+            # Añadir parámetros de consulta si se proporciona un client_id
+            params = {}
+            if client_id and client_id != "all":
+                # Usar el parámetro "client" como se especifica en la API
+                params["client"] = client_id
+                logger.debug(f"Obteniendo proyectos para el cliente: {client_id}")
+            
+            # Hacer la solicitud a la API con el token JWT
+            response = auth_service.make_api_request(jwt_token, "GET", endpoint, params=params)
+        else:
+            # Si no hay token JWT, usar fallback directamente
+            logger.info("No se proporcionó token JWT para obtener proyectos (comportamiento normal durante inicialización)")
             return get_projects_fallback(client_id)
-        
-        # Construir el endpoint (sin la URL base)
-        endpoint = "projects"
-        
-        # Añadir parámetros de consulta si se proporciona un client_id
-        params = {}
-        if client_id and client_id != "all":
-            # Usar el parámetro "client" como se especifica en la API
-            params["client"] = client_id
-            logger.debug(f"Obteniendo proyectos para el cliente: {client_id}")
-        
-        # Hacer la solicitud a la API
-        response = auth_service.make_api_request("GET", endpoint, params=params)
         
         # Verificar si hay un error en la respuesta
         if isinstance(response, dict) and "error" in response:
@@ -378,44 +238,15 @@ def get_projects(client_id=None):
             # Registrar información del primer proyecto para depuración
             if len(projects) > 0:
                 logger.debug(f"Primer proyecto: {json.dumps(projects[0], indent=2, default=str)}")
-                logger.debug(f"Claves del primer proyecto: {projects[0].keys()}")
-        elif isinstance(response, list):
-            # En caso de que la API devuelva directamente una lista
-            projects = response
-            logger.debug(f"La API devolvió directamente una lista con {len(projects)} proyectos")
-        else:
-            logger.warning(f"Formato de respuesta no reconocido: {type(response)}")
-            logger.debug(f"Contenido de la respuesta: {json.dumps(response, indent=2, default=str)}")
-            return get_projects_fallback(client_id)
         
         # Si no se encontraron proyectos, usar fallback
-        if not projects or len(projects) == 0:
-            logger.warning(f"No se encontraron proyectos para el cliente {client_id}")
+        if not projects:
+            logger.warning(f"No se encontraron proyectos para el cliente {client_id}, usando fallback")
             return get_projects_fallback(client_id)
-        
-        # Si se especificó un client_id, verificar que los proyectos correspondan a ese cliente
-        if client_id and client_id != "all":
-            filtered_projects = []
-            
-            for project in projects:
-                # Verificar si el proyecto tiene la estructura anidada de cliente como en el ejemplo
-                if "client" in project and isinstance(project["client"], dict) and "id" in project["client"]:
-                    project_client_id = project["client"]["id"]
-                    if str(project_client_id) == str(client_id):
-                        logger.debug(f"Proyecto encontrado para el cliente {client_id}: {project.get('name', 'Sin nombre')}")
-                        filtered_projects.append(project)
-            
-            # Si se encontraron proyectos filtrados, devolverlos
-            if filtered_projects:
-                logger.debug(f"Se encontraron {len(filtered_projects)} proyectos para el cliente {client_id}")
-                return filtered_projects
-            else:
-                logger.warning(f"No se encontraron proyectos para el cliente {client_id} después de filtrar")
-                return get_projects_fallback(client_id)
         
         return projects
     except Exception as e:
-        logger.error(f"Excepción al obtener proyectos: {str(e)}")
+        logger.error(f"Error al obtener proyectos: {str(e)}")
         return get_projects_fallback(client_id)
 
 def get_projects_fallback(client_id=None):

@@ -13,6 +13,7 @@ pillow==10.2.0
 kaleido==0.2.1
 pdfkit==1.0.0
 matplotlib==3.8.3
+pyjwt==2.8.0
 
 # Dependencias para desarrollo y pruebas
 pytest==8.0.2

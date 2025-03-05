@@ -7,144 +7,142 @@ logger = get_logger(__name__)
 
 def create_sidebar():
     """Crea el componente de sidebar"""
-    # Obtener la lista de clientes para el filtro
-    try:
-        clientes = get_clientes()
-        
-        # Verificar que clientes sea una lista
-        if not isinstance(clientes, list):
-            logger.error(f"get_clientes devolvió un tipo no esperado: {type(clientes)}")
-            clientes = get_clientes_fallback()
-        
-        # Crear opciones para el filtro de clientes
-        client_options = [{"label": "Ver todos", "value": "all"}]
-        
-        # Extender con los clientes de la API, manejando diferentes estructuras posibles
-        for cliente in clientes:
-            if not isinstance(cliente, dict):
-                logger.warning(f"Cliente no es un diccionario: {cliente}")
-                continue
-                
-            # Intentar obtener el nombre y el ID con diferentes claves posibles
-            nombre = None
-            id_cliente = None
-            
-            # Posibles claves para el nombre
-            for key in ['nombre', 'name', 'client_name', 'nombre_cliente', 'client']:
-                if key in cliente:
-                    nombre = cliente[key]
-                    break
-            
-            # Posibles claves para el ID
-            for key in ['id', 'client_id', 'id_cliente', 'clientId']:
-                if key in cliente:
-                    id_cliente = cliente[key]
-                    break
-            
-            # Si tenemos tanto nombre como ID, añadir a las opciones
-            if nombre and id_cliente is not None:
-                client_options.append({"label": nombre, "value": id_cliente})
-            else:
-                logger.warning(f"No se pudo extraer nombre o ID del cliente: {cliente}")
-    except Exception as e:
-        logger.error(f"Error al obtener clientes: {str(e)}")
-        # Usar opciones por defecto en caso de error
-        client_options = [
-            {"label": "Ver todos", "value": "all"},
-            {"label": "Cliente A", "value": 1},
-            {"label": "Cliente B", "value": 2}
-        ]
-    
-    return html.Div(
-        [
-            html.H2("Alfred Dashboard", className="display-6"),
+    # Crear el sidebar con opciones por defecto
+    sidebar = html.Div([
+        html.Div([
+            html.H5("Filtros", className="sidebar-title"),
             html.Hr(),
             
-            # Filtros de Cliente/Proyecto
+            # Filtro de cliente
             html.Div([
-                html.P("Filtros", className="lead mb-2"),
-                
-                # Filtro de Cliente
-                html.Label("Cliente:", className="mb-1"),
+                html.Label("Cliente:", className="filter-label"),
                 dcc.Dropdown(
                     id="sidebar-client-dropdown",
-                    options=client_options,
+                    options=[{"label": "Cargando...", "value": "all"}],
                     value="all",
                     clearable=False,
-                    className="mb-3"
-                ),
-                
-                # Filtro de Proyecto
-                html.Label("Proyecto:", className="mb-1"),
+                    className="sidebar-dropdown"
+                )
+            ], className="sidebar-filter"),
+            
+            # Filtro de proyecto
+            html.Div([
+                html.Label("Proyecto:", className="filter-label"),
                 dcc.Dropdown(
                     id="sidebar-project-dropdown",
-                    options=[{"label": "Ver todos", "value": "all"}],
+                    options=[{"label": "Cargando...", "value": "all"}],
                     value="all",
                     clearable=False,
-                    className="mb-3"
-                ),
-                
-                # Botón para aplicar filtros
+                    className="sidebar-dropdown"
+                )
+            ], className="sidebar-filter"),
+            
+            # Botón para aplicar filtros
+            html.Div([
                 dbc.Button(
-                    [html.I(className="fas fa-filter me-2"), "Aplicar Filtros"],
+                    "Aplicar Filtros",
                     id="apply-filters-button",
                     color="primary",
-                    className="w-100 mb-3"
-                ),
-            ], className="mb-4"),
+                    className="w-100 mt-3"
+                )
+            ]),
             
             html.Hr(),
             
-            # Sección Inicio
+            # Sección de Navegación
+            html.H5("Navegación", className="sidebar-title"),
             dbc.Nav(
                 [
-                    dbc.NavLink([html.I(className="fas fa-home me-2"), "Inicio"], href="/", active="exact"),
+                    dbc.NavLink(
+                        [html.I(className="fas fa-home me-2"), "Inicio"],
+                        href="/",
+                        active="exact",
+                        className="sidebar-link"
+                    ),
                 ],
                 vertical=True,
                 pills=True,
-                className="mb-3"
+                className="sidebar-nav mb-3"
             ),
             
-            # Sección Apps
-            html.P("Apps", className="lead mb-1"),
+            # Sección de Apps
+            html.H5("Apps", className="sidebar-title"),
             dbc.Nav(
                 [
-                    dbc.NavLink([html.I(className="fas fa-chart-line me-2"), "Metrics"], href="/metrics", active="exact"),
-                    dbc.NavLink([html.I(className="fas fa-lock me-2"), "Lock"], href="/lock", active="exact"),
-                    dbc.NavLink([html.I(className="fas fa-th-large me-2"), "Spaces"], href="/spaces", active="exact"),
+                    dbc.NavLink(
+                        [html.I(className="fas fa-building me-2"), "Spaces"],
+                        href="/spaces",
+                        active="exact",
+                        className="sidebar-link"
+                    ),
+                    dbc.NavLink(
+                        [html.I(className="fas fa-lock me-2"), "Lock"],
+                        href="/lock",
+                        active="exact",
+                        className="sidebar-link"
+                    ),
+                    dbc.NavLink(
+                        [html.I(className="fas fa-chart-bar me-2"), "Metrics"],
+                        href="/metrics",
+                        active="exact",
+                        className="sidebar-link"
+                    ),
                 ],
                 vertical=True,
                 pills=True,
-                className="mb-3"
+                className="sidebar-nav mb-3"
             ),
             
-            # Sección Configuración
-            html.P("Configuración", className="lead mb-1"),
+            # Sección de Configuración
+            html.H5("Configuración", className="sidebar-title"),
             dbc.Nav(
                 [
-                    dbc.NavLink([html.I(className="fas fa-cog me-2"), "Configuración DB"], href="/db-config", active="exact"),
-                    dbc.NavLink([html.I(className="fas fa-database me-2"), "Explorador BD"], href="/database-explorer", active="exact"),
-                    dbc.NavLink([html.I(className="fas fa-file-export me-2"), "Exportar Datos"], href="/data-export", active="exact"),
-                    dbc.NavLink([html.I(className="fas fa-plug me-2"), "Prueba de API"], href="/api-test", active="exact"),
+                    dbc.NavLink(
+                        [html.I(className="fas fa-database me-2"), "Explorador DB"],
+                        href="/db-explorer",
+                        active="exact",
+                        className="sidebar-link"
+                    ),
+                    dbc.NavLink(
+                        [html.I(className="fas fa-cog me-2"), "Configuración DB"],
+                        href="/db-config",
+                        active="exact",
+                        className="sidebar-link"
+                    ),
+                    dbc.NavLink(
+                        [html.I(className="fas fa-flask me-2"), "Test API"],
+                        href="/api-test",
+                        active="exact",
+                        className="sidebar-link"
+                    ),
                 ],
                 vertical=True,
                 pills=True,
-                className="mb-3"
+                className="sidebar-nav mb-3"
             ),
             
-            # Sección Desarrollo (opcional, puedes eliminarla si no la necesitas)
-            html.Hr(),
-            html.P("Desarrollo", className="lead mb-1"),
+            # Sección de Developer
+            html.H5("Developer", className="sidebar-title"),
             dbc.Nav(
                 [
-                    dbc.NavLink([html.I(className="fas fa-palette me-2"), "Componentes UI"], href="/ui-demo", active="exact"),
+                    dbc.NavLink(
+                        [html.I(className="fas fa-palette me-2"), "Demo UI"],
+                        href="/ui-demo",
+                        active="exact",
+                        className="sidebar-link"
+                    ),
                 ],
                 vertical=True,
                 pills=True,
+                className="sidebar-nav"
             ),
-        ],
-        className="sidebar",
-    )
+        ], className="sidebar-content"),
+        
+        # Store para la selección de cliente/proyecto
+        dcc.Store(id="selected-client-store", data={"client_id": "all", "project_id": "all"})
+    ], className="sidebar")
+    
+    return sidebar
 
 def register_callbacks(app):
     """
@@ -155,6 +153,71 @@ def register_callbacks(app):
     """
     from dash.dependencies import Input, Output, State
     import dash
+    
+    # Callback para cargar la lista de clientes en el sidebar
+    @app.callback(
+        Output("sidebar-client-dropdown", "options"),
+        [Input("jwt-token-store", "data")],
+        prevent_initial_call=False
+    )
+    def load_sidebar_clients(token_data):
+        try:
+            # Obtener el token JWT del store
+            token = token_data.get('token') if token_data else None
+            
+            # Si no hay token, mostrar opciones por defecto
+            if not token:
+                logger.info("No hay token JWT disponible para cargar clientes en sidebar (comportamiento normal durante inicialización)")
+                return [{"label": "Ver todos", "value": "all"}]
+            
+            # Log para depuración - verificar que tenemos un token
+            logger.debug(f"Token JWT disponible para cargar clientes en sidebar: {token[:10]}...")
+            
+            # Obtener la lista de clientes
+            logger.debug("Llamando a get_clientes con el token JWT desde sidebar")
+            clientes = get_clientes(jwt_token=token)
+            
+            # Log para depuración - verificar qué devolvió get_clientes
+            logger.debug(f"get_clientes devolvió para sidebar: {type(clientes)}, longitud: {len(clientes) if isinstance(clientes, list) else 'no es lista'}")
+            
+            # Verificar que clientes sea una lista
+            if not isinstance(clientes, list):
+                logger.error(f"get_clientes devolvió un tipo no esperado para sidebar: {type(clientes)}")
+                clientes = get_clientes_fallback()
+            
+            # Opciones para el dropdown de clientes
+            client_options = [{"label": "Ver todos", "value": "all"}]
+            
+            # Extender con los clientes de la API, manejando diferentes estructuras posibles
+            for cliente in clientes:
+                if not isinstance(cliente, dict):
+                    logger.warning(f"Cliente no es un diccionario (sidebar): {cliente}")
+                    continue
+                    
+                # Intentar obtener el nombre y el ID con diferentes claves posibles
+                nombre = None
+                id_cliente = None
+                
+                # Posibles claves para el nombre
+                for key in ['nombre', 'name', 'client_name', 'nombre_cliente', 'client']:
+                    if key in cliente:
+                        nombre = cliente[key]
+                        break
+                
+                # Posibles claves para el ID
+                for key in ['id', 'client_id', 'id_cliente', 'clientId']:
+                    if key in cliente:
+                        id_cliente = cliente[key]
+                        break
+                
+                # Si tenemos tanto nombre como ID, añadir a las opciones
+                if nombre and id_cliente is not None:
+                    client_options.append({"label": nombre, "value": str(id_cliente)})
+            
+            return client_options
+        except Exception as e:
+            logger.error(f"Error al cargar clientes en sidebar: {str(e)}")
+            return [{"label": "Error al cargar", "value": "all"}]
     
     # Callback para sincronizar los filtros del sidebar con los de la barra superior
     @app.callback(
@@ -170,19 +233,28 @@ def register_callbacks(app):
     # Callback para actualizar las opciones del dropdown de proyectos en el sidebar
     @app.callback(
         Output("sidebar-project-dropdown", "options"),
-        [Input("sidebar-client-dropdown", "value")],
+        [Input("sidebar-client-dropdown", "value"),
+         Input("jwt-token-store", "data")],
         prevent_initial_call=False
     )
-    def update_sidebar_project_options(client_id):
+    def update_sidebar_project_options(client_id, token_data):
         # Si se selecciona "Ver todos", mostrar solo la opción "Ver todos"
         if client_id == "all":
             return [{"label": "Ver todos", "value": "all"}]
         
         try:
+            # Obtener el token JWT del store
+            token = token_data.get('token') if token_data else None
+            
+            # Si no hay token, mostrar opciones por defecto
+            if not token:
+                logger.info("No hay token JWT disponible para cargar proyectos en sidebar (comportamiento normal durante inicialización)")
+                return [{"label": "Ver todos", "value": "all"}]
+                
             logger.debug(f"Actualizando opciones de proyectos en sidebar para cliente: {client_id}")
             
             # Obtener proyectos filtrados por cliente
-            projects = get_projects(client_id)
+            projects = get_projects(client_id=client_id, jwt_token=token)
             
             # Verificar que projects sea una lista
             if not isinstance(projects, list):

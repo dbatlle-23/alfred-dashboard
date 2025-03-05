@@ -9,6 +9,7 @@ from utils.auth import AuthService, API_BASE_URL
 import time
 from datetime import datetime
 import traceback
+import dash_table
 
 logger = get_logger(__name__)
 
@@ -150,179 +151,140 @@ def register_callbacks(app):
     # Callback para verificar el estado de la conexión
     @app.callback(
         Output("api-connection-status", "children"),
-        [Input("run-test-button", "n_clicks")],
+        [Input("run-test-button", "n_clicks"),
+         Input("jwt-token-store", "data")],
         prevent_initial_call=False
     )
-    def check_connection_status(n_clicks):
+    def check_connection_status(n_clicks, token_data):
         try:
-            auth_service = AuthService()
+            # Obtener el token JWT del store
+            token = token_data.get('token') if token_data else None
             
-            # Verificar si hay un token válido
-            if not auth_service.is_authenticated():
+            # Si no hay token, mostrar estado no autenticado
+            if not token:
                 return html.Div([
-                    html.P("No hay una sesión activa. Por favor, inicie sesión.", className="text-warning"),
-                    html.P("Estado: No autenticado", className="text-danger")
+                    html.I(className="fas fa-times-circle text-danger me-2"),
+                    "No autenticado"
                 ])
             
-            # Obtener información del token
-            token = auth_service.get_token()
-            token_info = auth_service.get_user_data()
+            # Verificar autenticación
+            if not auth_service.is_authenticated(token):
+                return html.Div([
+                    html.I(className="fas fa-times-circle text-danger me-2"),
+                    "No autenticado"
+                ])
             
-            # Mostrar información de la conexión
+            # Verificar conexión a la API
+            response = auth_service.make_api_request(token, "GET", "clients")
+            
+            if "error" in response:
+                return html.Div([
+                    html.I(className="fas fa-times-circle text-danger me-2"),
+                    f"Error de conexión: {response.get('error')}"
+                ])
+            
             return html.Div([
-                html.P("Conexión establecida correctamente.", className="text-success"),
-                html.P("Estado: Autenticado", className="text-success"),
-                html.P([
-                    html.Strong("Usuario: "), 
-                    html.Span(token_info.get("username", "Desconocido"))
-                ]),
-                html.P([
-                    html.Strong("Token: "), 
-                    html.Span(f"{token[:20]}..." if token and len(token) > 20 else token)
-                ]),
-                html.P([
-                    html.Strong("API Base URL: "), 
-                    html.Span(API_BASE_URL)
-                ])
+                html.I(className="fas fa-check-circle text-success me-2"),
+                "Conectado a la API"
             ])
         except Exception as e:
             logger.error(f"Error al verificar el estado de la conexión: {str(e)}")
             return html.Div([
-                html.P("Error al verificar el estado de la conexión.", className="text-danger"),
-                html.P(f"Error: {str(e)}", className="text-danger small")
+                html.I(className="fas fa-times-circle text-danger me-2"),
+                f"Error: {str(e)}"
             ])
     
     # Callback para probar específicamente el endpoint de proyectos
     @app.callback(
         Output("test-projects-results", "children"),
         [Input("test-projects-button", "n_clicks")],
+        [State("jwt-token-store", "data")],
         prevent_initial_call=True
     )
-    def test_projects_endpoint(n_clicks):
-        if n_clicks is None:
+    def test_projects_endpoint(n_clicks, token_data):
+        if not n_clicks:
             return no_update
         
         try:
-            auth_service = AuthService()
+            # Obtener el token JWT del store
+            token = token_data.get('token') if token_data else None
             
-            # Verificar autenticación
-            if not auth_service.is_authenticated():
+            # Si no hay token, mostrar mensaje de error
+            if not token:
                 return html.Div("No hay una sesión activa. Por favor, inicie sesión nuevamente.", className="alert alert-warning")
             
-            # Obtener el token actual
-            token = auth_service.get_token()
-            if not token:
-                return html.Div("No se pudo obtener el token de autenticación", className="alert alert-warning")
+            # Verificar autenticación
+            if not auth_service.is_authenticated(token):
+                return html.Div("No hay una sesión activa. Por favor, inicie sesión nuevamente.", className="alert alert-warning")
             
-            # Client ID problemático
-            client_id = "8f4e2492-68e0-4865-a11a-f7093c6019cb"
+            # Obtener proyectos
+            projects = get_projects(jwt_token=token)
             
-            # Construir la URL completa
-            url = f"{API_BASE_URL}/projects"
+            # Verificar que projects sea una lista
+            if not isinstance(projects, list):
+                return html.Div(f"Error: La respuesta no es una lista de proyectos. Tipo recibido: {type(projects)}", className="alert alert-danger")
             
-            # Configurar los headers con el token de autenticación
-            headers = {
-                'Authorization': f'Bearer {str(token)}',
-                'Content-Type': 'application/json'
-            }
+            # Crear tabla de resultados
+            if len(projects) == 0:
+                return html.Div("No se encontraron proyectos", className="alert alert-info")
             
-            # Probar diferentes variantes de parámetros
-            results = []
-            
-            # 1. Probar con client
-            params1 = {"client": client_id}
-            logger.debug(f"Prueba 1: GET {url} con parámetros: {params1}")
-            response1 = requests.get(url, headers=headers, params=params1)
-            results.append(html.Div([
-                html.H5("Prueba 1: Parámetro 'client'"),
-                html.P(f"URL: {url}?client={client_id}"),
-                html.P(f"Código de estado: {response1.status_code}"),
-                html.Pre(json.dumps(response1.json() if response1.status_code == 200 else response1.text, indent=2), 
-                         className="bg-light p-3 rounded")
-            ]))
-            
-            # 2. Probar con client_id
-            params2 = {"client_id": client_id}
-            logger.debug(f"Prueba 2: GET {url} con parámetros: {params2}")
-            response2 = requests.get(url, headers=headers, params=params2)
-            results.append(html.Div([
-                html.H5("Prueba 2: Parámetro 'client_id'"),
-                html.P(f"URL: {url}?client_id={client_id}"),
-                html.P(f"Código de estado: {response2.status_code}"),
-                html.Pre(json.dumps(response2.json() if response2.status_code == 200 else response2.text, indent=2), 
-                         className="bg-light p-3 rounded")
-            ]))
-            
-            # 3. Probar con clientId
-            params3 = {"clientId": client_id}
-            logger.debug(f"Prueba 3: GET {url} con parámetros: {params3}")
-            response3 = requests.get(url, headers=headers, params=params3)
-            results.append(html.Div([
-                html.H5("Prueba 3: Parámetro 'clientId'"),
-                html.P(f"URL: {url}?clientId={client_id}"),
-                html.P(f"Código de estado: {response3.status_code}"),
-                html.Pre(json.dumps(response3.json() if response3.status_code == 200 else response3.text, indent=2), 
-                         className="bg-light p-3 rounded")
-            ]))
-            
-            # 4. Probar sin parámetros (todos los proyectos)
-            logger.debug(f"Prueba 4: GET {url} sin parámetros")
-            response4 = requests.get(url, headers=headers)
-            
-            # Intentar extraer proyectos del cliente específico manualmente
-            matching_projects = []
-            if response4.status_code == 200:
-                try:
-                    all_projects = response4.json()
-                    
-                    # Buscar en diferentes estructuras posibles
-                    projects_list = None
-                    if isinstance(all_projects, list):
-                        projects_list = all_projects
-                    elif isinstance(all_projects, dict):
-                        if "data" in all_projects and isinstance(all_projects["data"], list):
-                            projects_list = all_projects["data"]
-                        elif "projects" in all_projects and isinstance(all_projects["projects"], list):
-                            projects_list = all_projects["projects"]
-                    
-                    if projects_list:
-                        for project in projects_list:
-                            if not isinstance(project, dict):
-                                continue
-                                
-                            # Buscar el client_id en diferentes campos posibles
-                            for key in ['client_id', 'clientId', 'id_cliente', 'cliente_id', 'client', 'cliente', 'clienteId', 'idCliente']:
-                                if key in project and str(project[key]) == str(client_id):
-                                    matching_projects.append(project)
-                                    break
-                except Exception as e:
-                    logger.error(f"Error al procesar proyectos: {str(e)}")
-            
-            results.append(html.Div([
-                html.H5("Prueba 4: Sin parámetros (todos los proyectos)"),
-                html.P(f"URL: {url}"),
-                html.P(f"Código de estado: {response4.status_code}"),
-                html.P(f"Proyectos encontrados para el cliente {client_id}: {len(matching_projects)}"),
-                html.Pre(json.dumps(matching_projects, indent=2) if matching_projects else "No se encontraron proyectos para este cliente", 
-                         className="bg-light p-3 rounded")
-            ]))
-            
-            return html.Div([
-                html.H4("Resultados de las pruebas del endpoint de proyectos"),
-                html.P(f"Client ID probado: {client_id}"),
-                html.Hr(),
-                html.Div(results)
-            ])
-            
+            # Crear encabezados de tabla basados en las claves del primer proyecto
+            if isinstance(projects[0], dict):
+                # Obtener todas las claves únicas de todos los proyectos
+                all_keys = set()
+                for project in projects:
+                    if isinstance(project, dict):
+                        all_keys.update(project.keys())
+                
+                # Filtrar y ordenar las claves para la tabla
+                important_keys = ['id', 'name', 'client', 'client_id', 'client_name']
+                headers = [key for key in important_keys if key in all_keys]
+                other_keys = sorted([key for key in all_keys if key not in important_keys])
+                headers.extend(other_keys)
+                
+                # Crear filas de la tabla
+                rows = []
+                for project in projects:
+                    if isinstance(project, dict):
+                        row = []
+                        for key in headers:
+                            value = project.get(key, "")
+                            # Formatear el valor para la tabla
+                            if isinstance(value, (dict, list)):
+                                value = json.dumps(value, ensure_ascii=False)
+                            elif value is None:
+                                value = ""
+                            row.append(value)
+                        rows.append(row)
+                
+                # Crear tabla
+                table = dash_table.DataTable(
+                    columns=[{"name": h, "id": h} for h in headers],
+                    data=[{h: row[i] for i, h in enumerate(headers)} for row in rows],
+                    style_table={'overflowX': 'auto'},
+                    style_cell={
+                        'textAlign': 'left',
+                        'minWidth': '100px', 'width': '100px', 'maxWidth': '300px',
+                        'overflow': 'hidden',
+                        'textOverflow': 'ellipsis',
+                    },
+                    style_header={
+                        'backgroundColor': 'rgb(230, 230, 230)',
+                        'fontWeight': 'bold'
+                    },
+                    page_size=10
+                )
+                
+                return html.Div([
+                    html.H5(f"Proyectos encontrados: {len(projects)}"),
+                    table
+                ])
+            else:
+                return html.Div(f"Error: El primer proyecto no es un diccionario. Tipo recibido: {type(projects[0])}", className="alert alert-danger")
+        
         except Exception as e:
             logger.error(f"Error al probar el endpoint de proyectos: {str(e)}")
-            error_details = html.Div([
-                html.H5("Error al ejecutar la prueba", className="text-danger"),
-                html.P(f"Mensaje de error: {str(e)}"),
-                html.P("Detalles del error:"),
-                html.Pre(traceback.format_exc(), className="bg-light p-3 rounded small")
-            ])
-            return error_details
+            return html.Div(f"Error al probar el endpoint de proyectos: {str(e)}", className="alert alert-danger")
     
     # Callback para ejecutar la prueba de API
     @app.callback(
@@ -333,50 +295,48 @@ def register_callbacks(app):
             State("method-select", "value"),
             State("custom-endpoint-input", "value"),
             State("params-input", "value"),
-            State("api-test-history", "children")
+            State("api-test-history", "children"),
+            State("jwt-token-store", "data")
         ],
         prevent_initial_call=True
     )
-    def run_api_test(n_clicks, endpoint, method, custom_endpoint, params_json, history):
-        """Ejecuta una prueba de API y muestra los resultados"""
-        if n_clicks is None:
+    def run_api_test(n_clicks, endpoint, method, custom_endpoint, params_json, history, token_data):
+        if not n_clicks:
             return no_update, no_update, no_update
         
         start_time = time.time()
         
-        # Determinar el endpoint a usar
-        if endpoint == "custom":
-            if not custom_endpoint:
-                return html.Div("Por favor, ingrese un endpoint personalizado", className="alert alert-warning"), "", no_update
-            final_endpoint = custom_endpoint
-        else:
-            final_endpoint = endpoint
-        
-        # Preparar los parámetros
-        params = None
-        if params_json:
-            try:
-                params = json.loads(params_json)
-                logger.debug(f"Parámetros para la prueba de API: {params}")
-            except json.JSONDecodeError as e:
-                return html.Div(f"Error en el formato JSON de los parámetros: {str(e)}", className="alert alert-danger"), "", no_update
-        
-        # Ejecutar la prueba
         try:
-            auth_service = AuthService()
+            # Determinar el endpoint final
+            if endpoint == "custom":
+                if not custom_endpoint:
+                    return html.Div("Por favor, ingrese un endpoint personalizado", className="alert alert-warning"), "", no_update
+                final_endpoint = custom_endpoint
+            else:
+                final_endpoint = endpoint
             
-            # Verificar autenticación
-            if not auth_service.is_authenticated():
+            # Procesar los parámetros JSON
+            params = {}
+            if params_json:
+                try:
+                    params = json.loads(params_json)
+                except json.JSONDecodeError:
+                    return html.Div("Error en el formato JSON de los parámetros", className="alert alert-danger"), "", no_update
+            
+            # Obtener el token JWT del store
+            token = token_data.get('token') if token_data else None
+            
+            # Si no hay token, mostrar mensaje de error
+            if not token:
                 return html.Div("No hay una sesión activa. Por favor, inicie sesión nuevamente.", className="alert alert-warning"), "", no_update
             
-            # Obtener el token actual
-            token = auth_service.get_token()
-            if not token:
-                return html.Div("No se pudo obtener el token de autenticación", className="alert alert-warning"), "", no_update
+            # Verificar autenticación
+            if not auth_service.is_authenticated(token):
+                return html.Div("No hay una sesión activa. Por favor, inicie sesión nuevamente.", className="alert alert-warning"), "", no_update
             
             # Hacer la solicitud a la API
             logger.debug(f"Ejecutando prueba de API: {method} {final_endpoint}")
-            response = auth_service.make_api_request(method, final_endpoint, data=params if method in ["POST", "PUT"] else None, params=params if method == "GET" else None)
+            response = auth_service.make_api_request(token, method, final_endpoint, data=params if method in ["POST", "PUT"] else None, params=params if method == "GET" else None)
             
             # Calcular el tiempo de respuesta
             elapsed_time = time.time() - start_time

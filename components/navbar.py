@@ -1,7 +1,10 @@
-from dash import html, dcc
+from dash import html, dcc, callback_context
 import dash_bootstrap_components as dbc
 from utils.auth import auth_service
 from components.client_selector import create_client_selector
+from utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 def create_navbar():
     """
@@ -10,10 +13,6 @@ def create_navbar():
     Returns:
         Un componente de barra de navegación de Dash Bootstrap
     """
-    # Obtener datos del usuario
-    user_data = auth_service.get_user_data()
-    user_type = user_data.get('user_type', 'Usuario')
-    
     # Botón de logout
     logout_button = dbc.Button(
         [html.I(className="fas fa-sign-out-alt me-2"), "Cerrar Sesión"],
@@ -29,7 +28,7 @@ def create_navbar():
         [
             dbc.DropdownMenuItem([
                 html.I(className="fas fa-user me-2"),
-                f"Tipo: {user_type}"
+                html.Span(id="user-type-display")
             ], header=True),
             dbc.DropdownMenuItem(divider=True),
             dbc.DropdownMenuItem("Perfil", href="#"),
@@ -110,21 +109,44 @@ def register_callbacks(app):
     from components.client_selector import register_callbacks as register_client_selector_callbacks
     register_client_selector_callbacks(app)
     
+    # Callback para actualizar la información del usuario en la barra de navegación
+    @app.callback(
+        Output("user-type-display", "children"),
+        [Input("jwt-token-store", "data")],
+        prevent_initial_call=False
+    )
+    def update_user_info(token_data):
+        if not token_data or 'token' not in token_data:
+            return "Tipo: Usuario"
+        
+        # Obtener datos del usuario desde el token JWT
+        try:
+            user_data = auth_service.get_user_data_from_token(token_data['token'])
+            user_type = user_data.get('user_type', 'Usuario')
+            
+            return f"Tipo: {user_type}"
+        except Exception as e:
+            logger.error(f"Error al obtener datos del usuario: {str(e)}")
+            return "Tipo: Usuario"
+    
     # Callback para manejar el logout
     @app.callback(
-        [Output("logout-state", "data"), Output("logout-url", "pathname")],
+        [Output("logout-state", "data"), 
+         Output("jwt-token-store", "data", allow_duplicate=True),
+         Output("logout-url", "pathname")],
         [Input("logout-button", "n_clicks")],
+        [State("jwt-token-store", "data")],
         prevent_initial_call=True
     )
-    def handle_logout(n_clicks):
+    def handle_logout(n_clicks, token_data):
         if not n_clicks:
-            return dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update
         
-        # Realizar logout
-        auth_service.logout()
+        # Limpiar el token JWT del store (solo en esta pestaña)
+        # No es necesario llamar a auth_service.logout() ya que no almacenamos el token en el servidor
         
         # Redireccionar a la página de login
-        return {"logged_out": True}, "/login"
+        return {"logged_out": True}, {}, "/login"
     
     # Callback para alternar el colapso de la barra de navegación en dispositivos móviles
     @app.callback(
