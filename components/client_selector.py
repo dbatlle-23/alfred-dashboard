@@ -2,6 +2,7 @@ from dash import html, dcc, callback_context
 import dash_bootstrap_components as dbc
 from utils.api import get_clientes, get_projects, get_clientes_fallback, get_projects_fallback
 from utils.logging import get_logger
+import os
 
 logger = get_logger(__name__)
 
@@ -179,15 +180,17 @@ def register_callbacks(app):
             logger.error(f"Error al cargar proyectos: {str(e)}")
             return [{"label": "Error al cargar", "value": "all"}]
     
-    # Callback para actualizar el store global cuando cambia la selección
+    # Callback para actualizar la selección global
     @app.callback(
-        Output("global-client-selection", "data"),
-        [Input("client-selector", "value"),
-         Input("project-selector", "value")],
-        prevent_initial_call=False
+        [Output("global-client-selection", "data", allow_duplicate=True),
+         Output("selected-client-store", "data", allow_duplicate=True)],
+        [Input("client-selector", "value"), Input("project-selector", "value")],
+        prevent_initial_call=True
     )
     def update_selection(client_id, project_id):
-        return {
-            "client_id": client_id,
-            "project_id": project_id
-        }
+        import os
+        selection = {"client_id": client_id, "project_id": project_id}
+        if os.environ.get('DASH_DEBUG') == 'true':
+            print(f"[DEBUG CLIENT SELECTOR] client_id: {client_id}, project_id: {project_id}")
+            print(f"[DEBUG CLIENT SELECTOR] Actualizando selección: {selection}")
+        return selection, selection

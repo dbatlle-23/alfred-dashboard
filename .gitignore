@@ -55,3 +55,8 @@ temp/
 
 # Archivos de Docker
 .docker/ 
+# Ignorar todos los archivos CSV
+*.csv
+
+# O ignorar solo los archivos en una carpeta específica
+data/analyzed_data/*.csv

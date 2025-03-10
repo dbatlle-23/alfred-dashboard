@@ -248,100 +248,201 @@ class AuthService:
     
     def make_api_request(self, token, method, endpoint, data=None, params=None):
         """
-        Realiza una solicitud a la API con autenticación
+        Realiza una solicitud a la API con autenticación JWT
         
         Args:
-            token: Token JWT
-            method: Método HTTP (GET, POST, PUT, DELETE)
+            token: Token JWT para autenticación
+            method: Método HTTP (GET, POST, etc.)
             endpoint: Endpoint de la API (sin la URL base)
-            data: Datos para enviar en el cuerpo de la solicitud (para POST/PUT)
-            params: Parámetros de consulta (para GET)
+            data: Datos para enviar en la solicitud (para POST, PUT, etc.)
+            params: Parámetros de consulta para la URL
             
         Returns:
             dict: Respuesta de la API en formato JSON
         """
         try:
-            # Verificar autenticación
-            logger.debug(f"Verificando autenticación para solicitud a {endpoint}")
-            if not self.is_authenticated(token):
-                logger.error("No hay una sesión activa para realizar la solicitud a la API")
-                return {"error": "No autenticado"}
+            # Verificar si estamos en modo debug
+            debug_mode = os.environ.get("DASH_DEBUG", "false").lower() == 'true'
+            
+            if debug_mode:
+                print("\n" + "="*80)
+                print(f"[DEBUG AUTH] INICIO make_api_request - Endpoint: {endpoint}, Método: {method}")
+            
+            # Verificar que el token sea válido
+            if not token:
+                if debug_mode:
+                    print("[DEBUG AUTH] make_api_request - No se proporcionó token JWT")
+                return {"error": "No se proporcionó token JWT"}
+            
+            # Construir la URL completa
+            base_url = os.environ.get("API_BASE_URL", "https://services.alfredsmartdata.com")
+            
+            # Eliminar barras iniciales y finales para evitar dobles barras
+            endpoint_clean = endpoint.strip('/')
+            
+            url = f"{base_url}/{endpoint_clean}"
+            if debug_mode:
+                print(f"[DEBUG AUTH] make_api_request - URL completa: {url}")
             
             # Obtener los headers de autenticación
             headers = self.get_auth_headers_from_token(token)
-            headers["Content-Type"] = "application/json"
+            if debug_mode:
+                print(f"[DEBUG AUTH] make_api_request - Headers: {headers}")
             
-            # Registrar los headers para depuración (ocultando parte del token)
-            auth_header = headers.get('Authorization', '')
-            if auth_header:
-                logger.debug(f"Headers de autenticación: Authorization: Bearer {auth_header.split(' ')[1][:10]}...")
+            # Mostrar los parámetros de la solicitud
+            if debug_mode:
+                if params:
+                    print(f"[DEBUG AUTH] make_api_request - Parámetros: {params}")
+                if data:
+                    print(f"[DEBUG AUTH] make_api_request - Datos: {data}")
+                
+                # Realizar la solicitud HTTP
+                print(f"[DEBUG AUTH] make_api_request - Realizando solicitud {method} a {url}")
+            
+            # Simular la respuesta para desarrollo/pruebas
+            if os.environ.get("ENVIRONMENT") == "development" or os.environ.get("MOCK_API") == "true":
+                if debug_mode:
+                    print("[DEBUG AUTH] make_api_request - Modo de desarrollo/pruebas, simulando respuesta")
+                
+                # Simular respuesta para diferentes endpoints
+                if endpoint == "clients":
+                    from utils.api import get_clientes_fallback
+                    response_data = {"data": get_clientes_fallback()}
+                elif endpoint == "projects":
+                    from utils.api import get_projects_fallback
+                    client_id = params.get("client") if params else None
+                    response_data = {"data": get_projects_fallback(client_id)}
+                elif endpoint == "assets":
+                    from utils.api import get_assets_fallback
+                    project_id = params.get("project_id") if params else None
+                    response_data = {"data": get_assets_fallback(project_id)}
+                else:
+                    response_data = {"data": [], "message": "Endpoint no implementado en modo simulación"}
+                
+                if debug_mode:
+                    print(f"[DEBUG AUTH] make_api_request - Respuesta simulada: {type(response_data)}")
+                    if isinstance(response_data, dict):
+                        print(f"[DEBUG AUTH] make_api_request - Claves en la respuesta: {list(response_data.keys())}")
+                        for key, value in response_data.items():
+                            if isinstance(value, list):
+                                print(f"[DEBUG AUTH] make_api_request - Lista en '{key}' con {len(value)} elementos")
+                    
+                    print(f"[DEBUG AUTH] FIN make_api_request (simulado)")
+                    print("="*80 + "\n")
+                
+                return response_data
+            
+            # Realizar la solicitud HTTP real
+            if method.upper() == "GET":
+                response = requests.get(url, headers=headers, params=params)
+            elif method.upper() == "POST":
+                response = requests.post(url, headers=headers, json=data, params=params)
+            elif method.upper() == "PUT":
+                response = requests.put(url, headers=headers, json=data, params=params)
+            elif method.upper() == "DELETE":
+                response = requests.delete(url, headers=headers, params=params)
             else:
-                logger.warning("No se encontró el header Authorization en los headers de autenticación")
-                logger.debug(f"Headers disponibles: {headers}")
-            
-            # Asegurarse de que el endpoint no comience con /
-            if endpoint.startswith("/"):
-                endpoint = endpoint[1:]
-            
-            # Construir la URL completa
-            from utils.api import BASE_URL
-            url = f"{BASE_URL}/{endpoint}"
-            
-            logger.debug(f"Realizando solicitud {method} a {url}")
-            if params:
-                logger.debug(f"Parámetros: {params}")
-            
-            # Realizar la solicitud según el método
-            method = method.upper()
-            if method == "GET":
-                logger.debug("Ejecutando solicitud GET")
-                response = requests.get(url, params=params, headers=headers)
-            elif method == "POST":
-                logger.debug("Ejecutando solicitud POST")
-                response = requests.post(url, json=data, headers=headers)
-            elif method == "PUT":
-                logger.debug("Ejecutando solicitud PUT")
-                response = requests.put(url, json=data, headers=headers)
-            elif method == "DELETE":
-                logger.debug("Ejecutando solicitud DELETE")
-                response = requests.delete(url, json=data, headers=headers)
-            else:
-                logger.error(f"Método HTTP no soportado: {method}")
-                return {"error": f"Método HTTP no soportado: {method}"}
+                if debug_mode:
+                    print(f"[DEBUG AUTH] make_api_request - Método no soportado: {method}")
+                return {"error": f"Método no soportado: {method}"}
             
             # Verificar si la respuesta es exitosa
-            logger.debug(f"Respuesta recibida con código: {response.status_code}")
-            
-            if response.status_code == 200:
+            if response.status_code >= 200 and response.status_code < 300:
+                if debug_mode:
+                    print(f"[DEBUG AUTH] make_api_request - Respuesta exitosa: {response.status_code}")
                 try:
-                    json_response = response.json()
-                    logger.debug(f"Respuesta JSON recibida con claves: {list(json_response.keys()) if isinstance(json_response, dict) else 'no es dict'}")
-                    
-                    # Registrar más detalles de la respuesta para depuración
-                    if isinstance(json_response, dict):
-                        for key, value in json_response.items():
-                            if isinstance(value, list) and len(value) > 0:
-                                logger.debug(f"Lista encontrada en clave '{key}' con {len(value)} elementos")
-                                if len(value) > 0 and isinstance(value[0], dict):
-                                    logger.debug(f"Primer elemento de la lista: {value[0]}")
-                    
-                    return json_response
+                    response_data = response.json()
+                    if debug_mode:
+                        print(f"[DEBUG AUTH] make_api_request - Respuesta JSON: {type(response_data)}")
+                        if isinstance(response_data, dict):
+                            print(f"[DEBUG AUTH] make_api_request - Claves en la respuesta: {list(response_data.keys())}")
+                            for key, value in response_data.items():
+                                if isinstance(value, list):
+                                    print(f"[DEBUG AUTH] make_api_request - Lista en '{key}' con {len(value)} elementos")
+                        print(f"[DEBUG AUTH] FIN make_api_request (exitoso)")
+                        print("="*80 + "\n")
+                    return response_data
                 except ValueError:
-                    logger.error("La respuesta no es un JSON válido")
-                    logger.debug(f"Texto de respuesta: {response.text[:100]}...")
-                    return {"error": "La respuesta no es un JSON válido", "text": response.text}
-            elif response.status_code == 401:
-                logger.error("Token de autenticación inválido o expirado")
-                logger.debug(f"Texto de respuesta: {response.text[:100]}...")
-                return {"error": "Token de autenticación inválido o expirado"}
+                    if debug_mode:
+                        print(f"[DEBUG AUTH] make_api_request - La respuesta no es JSON válido: {response.text[:100]}...")
+                        print(f"[DEBUG AUTH] FIN make_api_request (error de formato)")
+                        print("="*80 + "\n")
+                    return {"error": "La respuesta no es JSON válido", "text": response.text[:100]}
             else:
-                logger.error(f"Error en la solicitud: {response.status_code} - {response.text[:100]}...")
-                return {"error": f"Error en la solicitud: {response.status_code}", "text": response.text}
+                if debug_mode:
+                    print(f"[DEBUG AUTH] make_api_request - Error en la respuesta: {response.status_code}")
+                try:
+                    error_data = response.json()
+                    if debug_mode:
+                        print(f"[DEBUG AUTH] make_api_request - Datos de error: {error_data}")
+                        print(f"[DEBUG AUTH] FIN make_api_request (error de API)")
+                        print("="*80 + "\n")
+                    return {"error": f"Error {response.status_code}", "details": error_data}
+                except ValueError:
+                    if debug_mode:
+                        print(f"[DEBUG AUTH] make_api_request - Error sin formato JSON: {response.text[:100]}...")
+                        print(f"[DEBUG AUTH] FIN make_api_request (error sin formato)")
+                        print("="*80 + "\n")
+                    return {"error": f"Error {response.status_code}", "text": response.text[:100]}
         except Exception as e:
-            logger.error(f"Error en petición API: {str(e)}")
-            import traceback
-            logger.debug(f"Traceback: {traceback.format_exc()}")
-            return {"error": str(e)}
+            logger.error(f"Error en make_api_request: {str(e)}")
+            if os.environ.get("DASH_DEBUG", "false").lower() == 'true':
+                print(f"[ERROR AUTH] make_api_request: {str(e)}")
+                import traceback
+                print(traceback.format_exc())
+                print(f"[DEBUG AUTH] FIN make_api_request (excepción)")
+                print("="*80 + "\n")
+            return {"error": f"Excepción: {str(e)}"}
+    
+    def get_token(self):
+        """
+        Obtiene el token JWT actual desde el contexto de la aplicación
+        
+        Returns:
+            str: Token JWT o None si no hay token disponible
+        """
+        try:
+            # Intentar obtener el token del contexto de callback
+            from dash import callback_context
+            
+            # Verificar si estamos en un callback
+            if callback_context and hasattr(callback_context, 'triggered'):
+                # Buscar el token en los inputs o states del callback
+                if hasattr(callback_context, 'inputs') and callback_context.inputs:
+                    for key, value in callback_context.inputs.items():
+                        if 'jwt-token-store' in key:
+                            if isinstance(value, dict) and 'token' in value:
+                                logger.debug("Token JWT obtenido del input jwt-token-store")
+                                if os.environ.get("DASH_DEBUG", "false").lower() == 'true':
+                                    print(f"[DEBUG AUTH] Token obtenido de jwt-token-store en inputs")
+                                return value.get('token')
+                
+                # Si no está en inputs, buscar en states
+                if hasattr(callback_context, 'states') and callback_context.states:
+                    for key, value in callback_context.states.items():
+                        if 'jwt-token-store' in key:
+                            if isinstance(value, dict) and 'token' in value:
+                                logger.debug("Token JWT obtenido del state jwt-token-store")
+                                if os.environ.get("DASH_DEBUG", "false").lower() == 'true':
+                                    print(f"[DEBUG AUTH] Token obtenido de jwt-token-store en states")
+                                return value.get('token')
+                
+                # No mostrar advertencia, ya que es normal que no haya token en muchos callbacks
+                # Solo registrar en debug
+                if callback_context.triggered and os.environ.get("DASH_DEBUG", "false").lower() == 'true':
+                    logger.debug("No se pudo obtener el token JWT del contexto de callback")
+                    print(f"[DEBUG AUTH] No se pudo obtener token del contexto de callback")
+            
+            # Si no estamos en un callback o no se encontró el token, devolver None silenciosamente
+            return None
+        except Exception as e:
+            # Solo registrar en debug, no como error
+            logger.debug(f"Error al obtener el token JWT: {str(e)}")
+            if os.environ.get("DASH_DEBUG", "false").lower() == 'true':
+                print(f"[DEBUG AUTH ERROR] Error al obtener token: {str(e)}")
+                import traceback
+                logger.debug(f"Traceback: {traceback.format_exc()}")
+            return None
 
 # Crear una instancia global del servicio de autenticación
 auth_service = AuthService()

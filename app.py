@@ -5,11 +5,11 @@ import os
 import sys
 import traceback
 import argparse
+import logging
 
-# Configurar logging avanzado
-from utils.logging import configure_logging, get_logger
+# Configurar logging
+from utils.logging import configure_logging
 logger = configure_logging()
-logger = get_logger(__name__)
 
 # Importar manejadores de errores
 from utils.error_handlers import handle_exceptions, try_operation
@@ -209,6 +209,9 @@ def display_page(pathname, token_data):
         logger.error(f"Error en display_page: {str(e)}")
         logger.exception("Detalles del error:")
         return html.Div(f"Ha ocurrido un error al cargar la página: {str(e)}", className="alert alert-danger")
+
+# Crear carpetas necesarias
+os.makedirs("data/analyzed_data", exist_ok=True)
 
 # Ejecutar la aplicación
 if __name__ == "__main__":
