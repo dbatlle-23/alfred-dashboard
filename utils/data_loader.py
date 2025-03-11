@@ -820,7 +820,7 @@ def generate_monthly_readings_by_consumption_type(df: pd.DataFrame, consumption_
         
         table_df['Asset'] = [asset_names.get(asset_id, asset_id) for asset_id in assets]
         
-        # Para cada mes, encontrar la última lectura de cada asset
+        # Para cada mes, calcular el consumo como la diferencia entre la lectura final e inicial
         for month_start in months:
             # Calcular el final del mes
             if month_start.month == 12:
@@ -838,7 +838,7 @@ def generate_monthly_readings_by_consumption_type(df: pd.DataFrame, consumption_
             # Esto evita problemas de tipo de datos
             month_values = {}
             
-            # Para cada asset, encontrar la última lectura del mes
+            # Para cada asset, calcular el consumo del mes
             for asset_id in assets:
                 # Filtrar por asset y rango de fechas del mes
                 asset_month_data = tag_df[
@@ -847,13 +847,40 @@ def generate_monthly_readings_by_consumption_type(df: pd.DataFrame, consumption_
                     (tag_df['date'] <= month_end)
                 ]
                 
-                if not asset_month_data.empty:
-                    # Ordenar por fecha y tomar la última lectura
-                    last_reading = asset_month_data.sort_values('date').iloc[-1]
-                    # Almacenar el valor en el diccionario
-                    consumption_value = last_reading['consumption']
+                if not asset_month_data.empty and len(asset_month_data) >= 2:
+                    # Ordenar por fecha
+                    asset_month_data = asset_month_data.sort_values('date')
+                    
+                    # Obtener la primera y última lectura del mes
+                    first_reading = asset_month_data.iloc[0]['consumption']
+                    last_reading = asset_month_data.iloc[-1]['consumption']
+                    
+                    # Calcular el consumo como la diferencia entre la última y la primera lectura
+                    try:
+                        # Convertir a números si son strings
+                        if isinstance(first_reading, str):
+                            first_reading = float(first_reading)
+                        if isinstance(last_reading, str):
+                            last_reading = float(last_reading)
+                            
+                        # Calcular la diferencia
+                        consumption_value = last_reading - first_reading
+                        
+                        # Si el valor es negativo (posible error o reinicio del contador), usar el último valor
+                        if consumption_value < 0:
+                            debug_log(f"[WARNING] generate_monthly_readings_by_consumption_type - Consumo negativo para asset {asset_id}, mes {month_name}: {consumption_value}. Usando último valor: {last_reading}")
+                            consumption_value = last_reading
+                    except (ValueError, TypeError) as e:
+                        debug_log(f"[ERROR] generate_monthly_readings_by_consumption_type - Error al calcular consumo para asset {asset_id}, mes {month_name}: {str(e)}")
+                        consumption_value = np.nan
+                    
                     month_values[asset_id] = consumption_value
-                    debug_log(f"[DEBUG] generate_monthly_readings_by_consumption_type - Asset {asset_id}, Mes {month_name}, Valor: {consumption_value}")
+                    debug_log(f"[DEBUG] generate_monthly_readings_by_consumption_type - Asset {asset_id}, Mes {month_name}, Consumo calculado: {consumption_value}")
+                elif not asset_month_data.empty and len(asset_month_data) == 1:
+                    # Si solo hay una lectura en el mes, usar ese valor (no podemos calcular diferencia)
+                    consumption_value = asset_month_data.iloc[0]['consumption']
+                    month_values[asset_id] = consumption_value
+                    debug_log(f"[DEBUG] generate_monthly_readings_by_consumption_type - Asset {asset_id}, Mes {month_name}, Solo una lectura disponible: {consumption_value}")
                 else:
                     # Si no hay datos, almacenar NaN
                     month_values[asset_id] = np.nan

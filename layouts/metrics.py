@@ -11,6 +11,7 @@ from io import StringIO
 import json
 import plotly.express as px
 import calendar
+import plotly.graph_objects as go
 
 # Importar módulos de utilidades
 from utils.data_loader import (
@@ -1835,6 +1836,21 @@ def register_callbacks(app):
                 ),
                 # Store para datos de regeneración masiva
                 dcc.Store(id="bulk-regenerate-data"),
+                
+                # Modal de confirmación de regeneración
+                dbc.Modal(
+                    [
+                        dbc.ModalHeader(dbc.ModalTitle("Confirmar Regeneración"), close_button=True),
+                        dbc.ModalBody(id="confirmation-message"),
+                        dbc.ModalFooter([
+                            dbc.Button("Cancelar", id="cancel-confirmation", className="me-2"),
+                            dbc.Button("Proceder", id="proceed-regeneration", color="danger")
+                        ]),
+                    ],
+                    id="confirm-regeneration-modal",
+                    size="md",
+                    is_open=False,
+                ),
             ])
         
         except Exception as e:
@@ -2025,7 +2041,7 @@ def register_callbacks(app):
             consumption_type: Tipo de consumo
             
         Returns:
-            Componente de gráfico o mensaje de advertencia
+            Objeto Figure de Plotly o None si hay un error
         """
         try:
             # Filtrar por asset_id y consumption_type
@@ -2044,7 +2060,22 @@ def register_callbacks(app):
             ]
             
             if filtered_df.empty:
-                return html.Div("No hay datos disponibles para generar el gráfico.", className="alert alert-warning")
+                # Devolver una figura vacía con un mensaje
+                fig = go.Figure()
+                fig.add_annotation(
+                    text="No hay datos disponibles para generar el gráfico",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5, showarrow=False,
+                    font=dict(size=14)
+                )
+                fig.update_layout(
+                    title=f"Consumo diario - {asset_id} - {month}/{year} - {consumption_type}",
+                    xaxis_title="Fecha",
+                    yaxis_title="Consumo",
+                    plot_bgcolor='white',
+                    height=400
+                )
+                return fig
             
             # Ordenar por fecha
             filtered_df = filtered_df.sort_values('date')
@@ -2068,11 +2099,153 @@ def register_callbacks(app):
                 height=400
             )
             
-            return dcc.Graph(figure=fig)
+            # Devolver solo la figura, no el componente dcc.Graph
+            return fig
         
         except Exception as e:
             debug_log(f"[ERROR] Error al generar gráfico de consumo diario: {str(e)}")
-            return html.Div(f"Error al generar el gráfico: {str(e)}", className="alert alert-danger")
+            # Devolver una figura vacía con un mensaje de error
+            fig = go.Figure()
+            fig.add_annotation(
+                text=f"Error al generar el gráfico: {str(e)}",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False,
+                font=dict(size=14, color="red")
+            )
+            fig.update_layout(
+                title=f"Error - Consumo diario - {asset_id} - {month}/{year} - {consumption_type}",
+                xaxis_title="Fecha",
+                yaxis_title="Consumo",
+                plot_bgcolor='white',
+                height=400
+            )
+            return fig
+
+    # Función para generar un gráfico de consumo histórico completo para un asset
+    def generate_complete_consumption_chart(df, asset_id, consumption_type):
+        """
+        Genera un gráfico de consumo histórico completo para un asset.
+        
+        Args:
+            df: DataFrame con los datos
+            asset_id: ID del asset
+            consumption_type: Tipo de consumo
+            
+        Returns:
+            Objeto Figure de Plotly
+        """
+        try:
+            # Filtrar por asset_id y consumption_type
+            filtered_df = df[
+                (df['asset_id'] == asset_id) & 
+                (df['consumption_type'] == consumption_type)
+            ].copy()
+            
+            # Asegurarse de que la fecha esté en formato datetime
+            filtered_df['date'] = pd.to_datetime(filtered_df['date'])
+            
+            if filtered_df.empty:
+                # Devolver una figura vacía con un mensaje
+                fig = go.Figure()
+                fig.add_annotation(
+                    text="No hay datos disponibles para generar el gráfico",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5, showarrow=False,
+                    font=dict(size=14)
+                )
+                fig.update_layout(
+                    title=f"Consumo histórico completo - {asset_id} - {consumption_type}",
+                    xaxis_title="Fecha",
+                    yaxis_title="Consumo",
+                    plot_bgcolor='white',
+                    height=400
+                )
+                return fig
+            
+            # Ordenar por fecha
+            filtered_df = filtered_df.sort_values('date')
+            
+            # Agrupar por mes para tener una vista más clara
+            monthly_df = filtered_df.copy()
+            monthly_df['month_year'] = monthly_df['date'].dt.strftime('%Y-%m')
+            monthly_sum = monthly_df.groupby('month_year')['consumption'].sum().reset_index()
+            monthly_sum['date'] = pd.to_datetime(monthly_sum['month_year'] + '-01')
+            monthly_sum = monthly_sum.sort_values('date')
+            
+            # Crear el gráfico con dos trazas: datos diarios y resumen mensual
+            fig = go.Figure()
+            
+            # Traza de datos diarios (puntos más pequeños)
+            fig.add_trace(go.Scatter(
+                x=filtered_df['date'],
+                y=filtered_df['consumption'],
+                mode='markers',
+                name='Datos diarios',
+                marker=dict(size=4, color='rgba(0, 123, 255, 0.5)'),
+                hovertemplate='%{x|%Y-%m-%d}<br>Consumo: %{y:.2f}<extra></extra>'
+            ))
+            
+            # Traza de resumen mensual (línea)
+            fig.add_trace(go.Scatter(
+                x=monthly_sum['date'],
+                y=monthly_sum['consumption'],
+                mode='lines+markers',
+                name='Consumo mensual',
+                line=dict(width=2, color='rgb(255, 99, 71)'),
+                marker=dict(size=8, color='rgb(255, 99, 71)'),
+                hovertemplate='%{x|%Y-%m}<br>Consumo mensual: %{y:.2f}<extra></extra>'
+            ))
+            
+            # Personalizar el diseño
+            fig.update_layout(
+                title=f"Consumo histórico completo - {consumption_type}",
+                xaxis_title="Fecha",
+                yaxis_title="Consumo",
+                plot_bgcolor='white',
+                hovermode='closest',
+                height=500,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                )
+            )
+            
+            # Añadir rangeslider para poder navegar por los datos
+            fig.update_xaxes(
+                rangeslider_visible=True,
+                rangeselector=dict(
+                    buttons=list([
+                        dict(count=1, label="1m", step="month", stepmode="backward"),
+                        dict(count=6, label="6m", step="month", stepmode="backward"),
+                        dict(count=1, label="1y", step="year", stepmode="backward"),
+                        dict(step="all")
+                    ])
+                )
+            )
+            
+            return fig
+        
+        except Exception as e:
+            debug_log(f"[ERROR] Error al generar gráfico de consumo histórico completo: {str(e)}")
+            # Devolver una figura vacía con un mensaje de error
+            fig = go.Figure()
+            fig.add_annotation(
+                text=f"Error al generar el gráfico: {str(e)}",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False,
+                font=dict(size=14, color="red")
+            )
+            fig.update_layout(
+                title=f"Error - Consumo histórico completo - {asset_id} - {consumption_type}",
+                xaxis_title="Fecha",
+                yaxis_title="Consumo",
+                plot_bgcolor='white',
+                height=400
+            )
+            return fig
 
     # Función para generar estadísticas de consumo para un asset y mes específico
     def generate_consumption_stats(df, asset_id, month, year, consumption_type):
@@ -2256,384 +2429,395 @@ def register_callbacks(app):
     def show_consumption_detail_modal(active_cell, close_detail_clicks, close_update_clicks, cancel_clicks, confirm_clicks, 
                                      derived_virtual_data, derived_virtual_indices, page_current, page_size, full_table_data, stored_data, 
                                      detail_is_open, update_is_open, project_id, consumption_tags, token_data):
-        debug_log("=== INICIO DEL CALLBACK show_consumption_detail_modal ===")
-        debug_log(f"active_cell: {active_cell}")
-        debug_log(f"page_current: {page_current}")
-        debug_log(f"page_size: {page_size}")
-        debug_log(f"derived_virtual_data length: {len(derived_virtual_data) if derived_virtual_data else 0}")
-        debug_log(f"derived_virtual_indices length: {len(derived_virtual_indices) if derived_virtual_indices else 0}")
-        debug_log(f"full_table_data length: {len(full_table_data) if full_table_data else 0}")
-        
+        # Identificar el contexto de la llamada
         ctx = dash.callback_context
-        
         if not ctx.triggered:
-            debug_log("No hay trigger, retornando valores por defecto")
             return False, None, "", False, None, None, False, None, None
         
-        trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
-        
-        # Log para depuración
+        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
         debug_log(f"[DEBUG] Trigger: {trigger_id}")
-        debug_log(f"[DEBUG] Página actual: {page_current}, Tamaño de página: {page_size}")
         
-        # Si se hizo clic en el botón de cerrar detalles
+        # Si se hace clic en cerrar, cerrar el modal correspondiente
         if trigger_id == "close-consumption-detail-modal":
-            debug_log("Cerrando modal de detalles")
-            return False, None, "", update_is_open, None, None, False, None, None
-            
-        # Si se hizo clic en el botón de cerrar actualización
-        if trigger_id == "close-update-asset-readings-modal":
-            debug_log("Cerrando modal de actualización")
+            return False, None, "", update_is_open, dash.no_update, dash.no_update, False, None, None
+        elif trigger_id == "close-update-asset-readings-modal":
             return detail_is_open, dash.no_update, dash.no_update, False, None, None, False, None, None
+        elif trigger_id in ["cancel-regenerate-readings", "confirm-regenerate-readings"]:
+            return detail_is_open, dash.no_update, dash.no_update, update_is_open, dash.no_update, dash.no_update, False, None, None
         
-        # Si no hay celda activa o no hay datos, no hacer nada
+        # Si no hay celda activa o datos virtuales, no hacer nada
         if not active_cell or not derived_virtual_data:
-            debug_log(f"[DEBUG] No hay celda activa o datos: active_cell={active_cell}, derived_virtual_data_length={len(derived_virtual_data) if derived_virtual_data else 0}")
-            return detail_is_open, None, "", update_is_open, None, None, False, None, None
+            return False, None, "", False, None, None, False, None, None
         
-        try:
-            # Importar json al principio de la función
-            import json
+        # Obtener información sobre la paginación
+        page_current = page_current or 0
+        page_size = page_size or 15
+        debug_log(f"[DEBUG] Página actual: {page_current}, Tamaño de página: {page_size}")
             
             # Obtener los datos de la celda seleccionada
-            row = active_cell["row"]
-            col = active_cell["column"]
-            col_id = active_cell["column_id"]
-            
-            # Log para depuración
-            debug_log(f"[DEBUG] Celda seleccionada: row={row}, col={col}, col_id={col_id}")
-            
-            # Calcular el índice real basado en la página actual y el tamaño de página
-            # Si page_current es None, asumimos que estamos en la primera página (0)
-            current_page = 0 if page_current is None else page_current
-            # Si page_size es None, usamos un valor predeterminado (15 es el valor que se usa en la tabla)
-            items_per_page = 15 if page_size is None else page_size
-            
-            # Calcular el índice absoluto (considerando todas las páginas)
-            absolute_row_index = (current_page * items_per_page) + row
-            
-            debug_log(f"[DEBUG] Índice de fila calculado: página {current_page} * {items_per_page} + {row} = {absolute_row_index}")
-            
-            # Verificar si tenemos índices virtuales disponibles
-            if derived_virtual_indices and len(derived_virtual_indices) > row:
-                # Si tenemos índices virtuales, los usamos para obtener el índice real
-                virtual_index = derived_virtual_indices[row]
-                debug_log(f"[DEBUG] Índice virtual para la fila {row}: {virtual_index}")
-            
-            # Si se hizo clic en la columna Asset ID, no mostrar detalles
-            if col_id == "Asset ID":
-                debug_log("Se hizo clic en la columna Asset ID, no mostrando detalles")
-                return detail_is_open, None, "", update_is_open, None, None, False, None, None
+        row_idx = active_cell['row']
+        col_id = active_cell['column_id']
+        debug_log(f"[DEBUG] Celda seleccionada: row={row_idx}, col={active_cell['column']}, col_id={col_id}")
+        
+        # Calcular el índice real en los datos virtuales
+        # El índice row_idx es relativo a la página actual, necesitamos convertirlo al índice en los datos virtuales
+        # Si derived_virtual_indices está disponible, usarlo para obtener el índice real
+        if derived_virtual_indices and row_idx < len(derived_virtual_indices):
+            virtual_row_idx = row_idx  # El índice ya es relativo a los datos virtuales filtrados
+            debug_log(f"[DEBUG] Índice virtual para la fila {row_idx}: {virtual_row_idx}")
+        else:
+            virtual_row_idx = row_idx
+            debug_log(f"[DEBUG] Usando índice directo: {virtual_row_idx}")
+        
+        # Verificar que el índice está dentro del rango
+        if virtual_row_idx >= len(derived_virtual_data):
+            debug_log(f"[ERROR] Índice fuera de rango: {virtual_row_idx} >= {len(derived_virtual_data)}")
+            return False, None, "", False, None, None, False, None, None
             
             # Obtener los datos de la fila seleccionada
-            # Usamos derived_virtual_data que contiene los datos de la página actual
-            if row >= len(derived_virtual_data):
-                debug_log(f"[ERROR] Índice de fila {row} fuera de rango para derived_virtual_data con longitud {len(derived_virtual_data)}")
-                return detail_is_open, None, "", update_is_open, None, None, False, None, None
-            
-            # Obtener datos de la fila usando el índice absoluto calculado
-            if full_table_data and len(full_table_data) > absolute_row_index:
-                row_data = full_table_data[absolute_row_index]
-                debug_log(f"[DEBUG] Usando datos de la fila con índice absoluto {absolute_row_index}")
+        row_data = derived_virtual_data[virtual_row_idx]
+        debug_log(f"[DEBUG] Usando datos de la fila con índice virtual {virtual_row_idx}")
+        debug_log(f"[DEBUG] Datos de la fila seleccionada: {row_data}")
+        
+        # Extraer el row_id para identificar la fila
+        row_id = row_data.get('row_id', '')
+        debug_log(f"[DEBUG] Row ID: {row_id}")
+        
+        # Extraer información básica del row_id o de los datos de la fila
+        try:
+            # Intentar extraer información del row_id primero
+            if row_id and '_' in row_id:
+                parts = row_id.split('_')
+                if len(parts) >= 3:
+                    asset_id = parts[0]
+                    consumption_type = parts[1]
+                    month_year = parts[2]
+                else:
+                    # Si no hay suficientes partes, intentar extraer de los datos de la fila
+                    asset_id = row_data.get('Asset ID') or row_data.get('asset_id')
+                    consumption_type = row_data.get('Tipo de Consumo') or row_data.get('consumption_type')
+                    month_year = row_data.get('Mes') or row_data.get('month_year')
             else:
-                row_data = derived_virtual_data[row]
-                debug_log(f"[DEBUG] Usando datos de la fila con índice relativo {row}")
+                # Si no hay row_id válido, extraer de los datos de la fila
+                asset_id = row_data.get('Asset ID') or row_data.get('asset_id')
+                consumption_type = row_data.get('Tipo de Consumo') or row_data.get('consumption_type')
+                month_year = row_data.get('Mes') or row_data.get('month_year')
             
-            # Log para depuración
-            debug_log(f"[DEBUG] Datos de la fila seleccionada: {row_data}")
-            debug_log(f"[DEBUG] Row ID: {row_data.get('row_id', 'No disponible')}")
+            debug_log(f"[DEBUG] Datos básicos obtenidos de la fila: asset_id={asset_id}, consumption_type={consumption_type}, month_year={month_year}")
             
-            # IMPORTANTE: Siempre usar los datos del enlace en lugar de confiar en los datos de la fila
-            # Esto es necesario porque los índices virtuales no funcionan correctamente con la paginación
-            if col_id == "Acción":
-                cell_value = row_data["Acción"]
-                debug_log(f"[DEBUG] Valor de la celda Acción: {cell_value}")
-                
-                # Extraer el tipo de acción y los parámetros del enlace
-                if "regenerate_" in cell_value:
-                    # Formato: [Regenerar](regenerate_asset_id_consumption_type_month_year)
-                    debug_log(f"[DEBUG] Acción Regenerar detectada")
-                    
-                    # Extraer los parámetros del enlace
-                    link_parts = cell_value.split("regenerate_")[1].split(")")[0].split("_")
-                    if len(link_parts) >= 3:
-                        # Reconstruir asset_id, consumption_type y month_year
-                        asset_id = link_parts[0]
-                        consumption_type = link_parts[1]
-                        month_year = "_".join(link_parts[2:])
-                        
-                        debug_log(f"[DEBUG] Parámetros extraídos del enlace: asset_id={asset_id}, consumption_type={consumption_type}, month_year={month_year}")
-                        
-                        # Preparar datos para regenerar lecturas del asset específico
-                        # Extraer el tag correspondiente al tipo de consumo
-                        tag = None
-                        for tag_value, consumption_name in TAGS_TO_CONSUMPTION_TYPE.items():
-                            if consumption_name == consumption_type:
-                                tag = tag_value
-                                break
-                        
-                        if not tag and consumption_tags:
-                            # Si no se encontró el tag, usar el primero de los seleccionados
-                            tag = consumption_tags[0]
-                        
-                        # Crear contenido del modal de regeneración
-                        regenerate_content = html.Div([
-                            html.P([
-                                "¿Desea regenerar las lecturas para el asset ",
-                                html.Strong(asset_id),
-                                " con tipo de consumo ",
-                                html.Strong(consumption_type),
-                                "?"
-                            ]),
-                            html.P("Esta acción consultará la API para obtener nuevos datos y reemplazará el archivo de lecturas existente."),
-                            html.Div(id="regenerate-readings-status", className="mt-3")
-                        ])
-                        
-                        # Guardar datos necesarios para la regeneración
-                        regenerate_data = {
-                            "asset_id": asset_id,
-                            "consumption_type": consumption_type,
-                            "tag": tag,
-                            "project_id": project_id,
-                            "token": token_data,
-                            "month_year": month_year
-                        }
-                        
-                        # Log para depuración
-                        debug_log(f"[DEBUG] Datos para regeneración: {regenerate_data}")
-                        debug_log("=== FIN DEL CALLBACK show_consumption_detail_modal (Regenerar) ===")
-                        
-                        # Mostrar el modal de regeneración
-                        return False, None, "", False, None, None, True, regenerate_content, json.dumps(regenerate_data)
-                
-                elif "update_" in cell_value:
-                    # Formato: [Actualizar](update_asset_id_consumption_type_month_year)
-                    debug_log(f"[DEBUG] Acción Actualizar detectada")
-                    
-                    # Extraer los parámetros del enlace
-                    link_parts = cell_value.split("update_")[1].split(")")[0].split("_")
-                    if len(link_parts) >= 3:
-                        # Reconstruir asset_id, consumption_type y month_year
-                        asset_id = link_parts[0]
-                        consumption_type = link_parts[1]
-                        month_year = "_".join(link_parts[2:])
-                        
-                        debug_log(f"[DEBUG] Parámetros extraídos del enlace: asset_id={asset_id}, consumption_type={consumption_type}, month_year={month_year}")
-                        
-                        # Preparar datos para actualizar lecturas del asset específico
-                        # Extraer el tag correspondiente al tipo de consumo
-                        tag = None
-                        for tag_value, consumption_name in TAGS_TO_CONSUMPTION_TYPE.items():
-                            if consumption_name == consumption_type:
-                                tag = tag_value
-                                break
-                        
-                        if not tag and consumption_tags:
-                            # Si no se encontró el tag, usar el primero de los seleccionados
-                            tag = consumption_tags[0]
-                        
-                        # Crear contenido del modal de actualización
-                        update_content = html.Div([
-                            html.P([
-                                "¿Desea actualizar las lecturas para el asset ",
-                                html.Strong(asset_id),
-                                " con tipo de consumo ",
-                                html.Strong(consumption_type),
-                                "?"
-                            ]),
-                            html.P("Esta acción consultará la API para obtener nuevos datos y actualizará el archivo de lecturas."),
-                            html.Div(id="update-asset-readings-status", className="mt-3")
-                        ])
-                        
-                        # Guardar datos necesarios para la actualización
-                        update_data = {
-                            "asset_id": asset_id,
-                            "consumption_type": consumption_type,
-                            "tag": tag,
-                            "project_id": project_id,
-                            "token": token_data
-                        }
-                        
-                        debug_log("=== FIN DEL CALLBACK show_consumption_detail_modal (Actualizar) ===")
-                        return False, None, "", True, update_content, json.dumps(update_data), False, None, None
-                
-                elif "details_" in cell_value:
-                    # Formato: [Ver detalles](details_asset_id_consumption_type_month_year)
-                    debug_log(f"[DEBUG] Acción Ver detalles detectada")
-                    
-                    # Extraer los parámetros del enlace
-                    link_parts = cell_value.split("details_")[1].split(")")[0].split("_")
-                    if len(link_parts) >= 3:
-                        # Reconstruir asset_id, consumption_type y month_year
-                        asset_id = link_parts[0]
-                        consumption_type = link_parts[1]
-                        month_year = "_".join(link_parts[2:])
-                        
-                        debug_log(f"[DEBUG] Parámetros extraídos del enlace: asset_id={asset_id}, consumption_type={consumption_type}, month_year={month_year}")
-                    else:
-                        # Si no se reconoce la acción, no hacer nada
-                            debug_log(f"[DEBUG] Acción no reconocida: {cell_value}")
-                            debug_log("=== FIN DEL CALLBACK show_consumption_detail_modal (Acción no reconocida) ===")
-                            return detail_is_open, None, "", update_is_open, None, None, False, None, None
+            # Verificar que tenemos todos los datos necesarios
+            if not asset_id or not consumption_type or not month_year:
+                debug_log(f"[ERROR] Faltan datos necesarios: asset_id={asset_id}, consumption_type={consumption_type}, month_year={month_year}")
+                return False, None, "", False, None, None, False, None, None
             
-# Obtener datos básicos de la fila si no se han obtenido de los enlaces
-            if "asset_id" not in locals() or "consumption_type" not in locals() or "month_year" not in locals():
-                asset_id = row_data["Asset ID"]
-                consumption_type = row_data["Tipo de Consumo"]
-                month_year = row_data["Mes"]
-                debug_log(f"[DEBUG] Datos básicos obtenidos de la fila: asset_id={asset_id}, consumption_type={consumption_type}, month_year={month_year}")
+            # Extraer año y mes del formato month_year (YYYY-MM)
+            if '-' in month_year:
+                year, month = month_year.split('-')
             else:
-                debug_log(f"[DEBUG] Usando datos básicos obtenidos de los enlaces: asset_id={asset_id}, consumption_type={consumption_type}, month_year={month_year}")
+                # Si el formato es diferente, intentar extraer de otra manera
+                # Por ejemplo, si es MM/YYYY o MM_YYYY
+                if '/' in month_year:
+                    month, year = month_year.split('/')
+                elif '_' in month_year:
+                    month, year = month_year.split('_')
+                else:
+                    # Si no se puede determinar, usar valores por defecto
+                    year = '2023'
+                    month = '01'
             
-            # Extraer el mes y el año
-            year, month = month_year.split("-")
-            
-            # Cargar los datos originales
-            try:
-                original_data = json.loads(stored_data)
-                original_df_json = original_data["original_df"]
+            # Verificar si se hizo clic en un enlace de acción
+            if col_id == 'Acción' and 'regenerate' in active_cell.get('value', ''):
+                # Preparar datos para regeneración
+                regenerate_data = {
+                    "asset_id": asset_id,
+                    "consumption_type": consumption_type,
+                    "project_id": project_id,
+                    "token": token_data,
+                    "month_year": month_year
+                }
                 
-                # Convertir los datos JSON a DataFrame
+                # Crear el cuerpo del modal de regeneración
+                regenerate_modal_body = html.Div([
+                    html.P(f"¿Está seguro que desea regenerar las lecturas para el siguiente consumo?"),
+                    html.Ul([
+                        html.Li(f"Asset: {asset_id}"),
+                        html.Li(f"Tipo de consumo: {consumption_type}"),
+                        html.Li(f"Período: {month_year}")
+                    ]),
+                    html.P("Esta acción puede tardar varios segundos en completarse."),
+                    html.Div(id="regenerate-readings-status")
+                ])
+                
+                return False, None, "", False, None, None, True, regenerate_modal_body, json.dumps(regenerate_data)
+            
+            elif col_id == 'Acción' and 'update' in active_cell.get('value', ''):
+                # Preparar datos para actualización
+                update_data = {
+                    "asset_id": asset_id,
+                    "consumption_type": consumption_type,
+                    "year": year,
+                    "month": month,
+                    "project_id": project_id,
+                    "token": token_data
+                }
+                
+                # Crear el cuerpo del modal de actualización
+                update_modal_body = html.Div([
+                    html.P(f"¿Está seguro que desea actualizar las lecturas para el siguiente consumo?"),
+                    html.Ul([
+                        html.Li(f"Asset: {asset_id}"),
+                        html.Li(f"Tipo de consumo: {consumption_type}"),
+                        html.Li(f"Año: {year}"),
+                        html.Li(f"Mes: {month}")
+                    ]),
+                    html.P("Esta acción puede tardar varios segundos en completarse."),
+                    html.Div(id="update-asset-readings-status")
+                ])
+                
+                return False, None, "", True, update_modal_body, json.dumps(update_data), False, None, None
+            
+            else:
+                # Mostrar detalles del consumo
+                # Cargar los datos almacenados
+                if not stored_data:
+                    return False, None, "", False, None, None, False, None, None
+                
                 try:
-                    # Intentar el formato estándar primero
-                    df = pd.read_json(StringIO(original_df_json), orient='split')
+                    # Usar StringIO para evitar la advertencia de deprecación
+                    from io import StringIO
+                    import json
+                    
+                    debug_log(f"[DEBUG] Tipo de stored_data: {type(stored_data)}")
+                    
+                    # Crear un DataFrame vacío por defecto
+                    df = None
+                    
+                    # Si stored_data es un diccionario
+                    if isinstance(stored_data, dict):
+                        debug_log(f"[DEBUG] stored_data es un diccionario con claves: {list(stored_data.keys())}")
+                        
+                        # Si tiene la clave 'original_df'
+                        if 'original_df' in stored_data:
+                            debug_log(f"[DEBUG] Procesando clave 'original_df'")
+                            original_df = stored_data['original_df']
+                            
+                            # Si original_df es un string, intentar parsearlo como JSON
+                            if isinstance(original_df, str):
+                                try:
+                                    # Convertir a DataFrame usando StringIO
+                                    df = pd.read_json(StringIO(original_df), orient='split')
+                                except Exception as e:
+                                    debug_log(f"[ERROR] Error al parsear original_df como JSON: {str(e)}")
+                                    # Intentar parsear como diccionario
+                                    try:
+                                        original_dict = json.loads(original_df)
+                                        if 'data' in original_dict and 'columns' in original_dict:
+                                            df = pd.DataFrame(original_dict['data'], columns=original_dict['columns'])
+                                    except Exception as e2:
+                                        debug_log(f"[ERROR] Error al parsear original_df como diccionario: {str(e2)}")
+                            # Si original_df es un diccionario
+                            elif isinstance(original_df, dict):
+                                if 'data' in original_df and 'columns' in original_df:
+                                    df = pd.DataFrame(original_df['data'], columns=original_df['columns'])
+                        
+                        # Si tiene las claves 'data' y 'columns'
+                        elif 'data' in stored_data and 'columns' in stored_data:
+                            debug_log(f"[DEBUG] Procesando claves 'data' y 'columns'")
+                            df = pd.DataFrame(stored_data['data'], columns=stored_data['columns'])
+                    
+                    # Si stored_data es un string
+                    elif isinstance(stored_data, str):
+                        debug_log(f"[DEBUG] stored_data es un string")
+                        
+                        try:
+                            # Intentar parsear como JSON primero
+                            parsed_data = json.loads(stored_data)
+                            debug_log(f"[DEBUG] JSON parseado correctamente. Claves: {list(parsed_data.keys()) if isinstance(parsed_data, dict) else 'No es un diccionario'}")
+                            
+                            # Si tiene la clave 'original_df'
+                            if isinstance(parsed_data, dict) and 'original_df' in parsed_data:
+                                debug_log(f"[DEBUG] Procesando clave 'original_df' del JSON parseado")
+                                original_df = parsed_data['original_df']
+                                
+                                # Si original_df es un string
+                                if isinstance(original_df, str):
+                                    try:
+                                        df = pd.read_json(StringIO(original_df), orient='split')
+                                    except Exception as e:
+                                        debug_log(f"[ERROR] Error al parsear original_df como JSON: {str(e)}")
+                                        # Intentar parsear como diccionario
+                                        try:
+                                            original_dict = json.loads(original_df)
+                                            if 'data' in original_dict and 'columns' in original_dict:
+                                                df = pd.DataFrame(original_dict['data'], columns=original_dict['columns'])
+                                        except Exception as e2:
+                                            debug_log(f"[ERROR] Error al parsear original_df como diccionario: {str(e2)}")
+                                # Si original_df es un diccionario
+                                elif isinstance(original_df, dict):
+                                    if 'data' in original_df and 'columns' in original_df:
+                                        df = pd.DataFrame(original_df['data'], columns=original_df['columns'])
+                            
+                            # Si tiene las claves 'data' y 'columns'
+                            elif isinstance(parsed_data, dict) and 'data' in parsed_data and 'columns' in parsed_data:
+                                debug_log(f"[DEBUG] Procesando claves 'data' y 'columns' del JSON parseado")
+                                df = pd.DataFrame(parsed_data['data'], columns=parsed_data['columns'])
+                            
+                            # Si no tiene ninguna de las claves esperadas
+                            else:
+                                debug_log(f"[DEBUG] El JSON parseado no tiene las claves esperadas, intentando leer directamente")
+                                df = pd.read_json(StringIO(stored_data), orient='split')
+                        
+                        except Exception as e:
+                            debug_log(f"[ERROR] Error al parsear stored_data como JSON: {str(e)}")
+                            # Intentar leer directamente como JSON con orient='split'
+                            try:
+                                df = pd.read_json(StringIO(stored_data), orient='split')
+                            except Exception as e2:
+                                debug_log(f"[ERROR] Error al leer stored_data como JSON con orient='split': {str(e2)}")
+                    
+                    # Si df sigue siendo None, intentar una última opción
+                    if df is None:
+                        debug_log(f"[DEBUG] Intentando convertir stored_data directamente a DataFrame")
+                        df = pd.DataFrame(stored_data)
+                    
+                    debug_log(f"[DEBUG] DataFrame cargado con éxito: {len(df)} filas")
+                    
+                    # Filtrar el DataFrame para el asset y tipo de consumo seleccionados
+                    filtered_df = df[(df['asset_id'] == asset_id) & (df['consumption_type'] == consumption_type)]
+                    debug_log(f"[DEBUG] DataFrame filtrado: {len(filtered_df)} filas para asset_id={asset_id}, consumption_type={consumption_type}")
+                    
+                    if filtered_df.empty:
+                        debug_log(f"[WARNING] No se encontraron datos para asset_id={asset_id}, consumption_type={consumption_type}")
+                        return False, None, "", False, None, None, False, None, None
+                
                 except Exception as e:
-                    # Si falla, intentar con el formato alternativo
-                    try:
-                        data_dict = json.loads(original_df_json)
-                        df = pd.DataFrame(data_dict['data'], columns=data_dict['columns'])
-                    except Exception as e2:
-                        debug_log(f"[ERROR] Error al convertir JSON a DataFrame en modal: {str(e)} / {str(e2)}")
-                        debug_log("=== FIN DEL CALLBACK show_consumption_detail_modal (Error JSON) ===")
-                        return True, html.Div(f"Error al procesar los datos: {str(e2)}", className="alert alert-danger"), "Error", False, None, None, False, None, None
+                    debug_log(f"[ERROR] Error al cargar los datos almacenados: {str(e)}")
+                    import traceback
+                    debug_log(traceback.format_exc())
+                    return False, None, "", False, None, None, False, None, None
                 
-                # Asegurarse de que la fecha esté en formato datetime
-                df['date'] = pd.to_datetime(df['date'])
-            except Exception as e:
-                debug_log(f"[ERROR] Error al cargar datos originales en modal: {str(e)}")
-                debug_log("=== FIN DEL CALLBACK show_consumption_detail_modal (Error datos) ===")
-                return True, html.Div(f"Error al cargar datos: {str(e)}", className="alert alert-danger"), "Error", False, None, None, False, None, None
-            
-            # Crear el título del modal
-            modal_title = f"Detalles de consumo - {asset_id} - {month}/{year} - {consumption_type}"
-            
-            # Generar el contenido del modal
-            modal_content = []
-            
-            # Si el consumo es "Error", mostrar un mensaje especial
-            if row_data["Consumo"] == "Error":
-                debug_log(f"[DEBUG] Consumo con error para asset_id={asset_id}")
-                modal_content.append(
-                    html.Div(
-                        "No hay datos disponibles para este período o se produjo un error al obtener los datos.",
-                        className="alert alert-warning mb-3"
-                    )
-                )
+                # Crear el título del modal
+                modal_title = f"Detalles de consumo - {consumption_type} - {month_year}"
                 
-                # Añadir información de diagnóstico
-                modal_content.append(
-                    html.Div([
-                        html.H5("Información de diagnóstico"),
-                        html.P([
-                            html.Strong("Asset ID: "), asset_id
-                        ]),
-                        html.P([
-                            html.Strong("Tipo de consumo: "), consumption_type
-                        ]),
-                        html.P([
-                            html.Strong("Período: "), f"{month}/{year}"
-                        ]),
-                        html.P([
-                            html.Strong("Estado: "), "Error - No hay datos disponibles"
-                        ]),
-                        html.Hr(),
-                        html.H5("Opciones de diagnóstico"),
-                        html.Div([
-                            dbc.Button(
-                                "Ver datos fuente", 
-                                id="view-source-data-btn", 
-                                color="primary", 
-                                className="me-2"
-                            ),
-                            dbc.Button(
-                                "Verificar conexión con sensor", 
-                                id="check-sensor-btn", 
-                                color="info", 
-                                className="me-2"
-                            ),
-                            dbc.Button(
-                                "Ver logs de error", 
-                                id="view-error-logs-btn", 
-                                color="warning",
-                                className="me-2"
-                            ),
-                            dbc.Button(
-                                "Obtener lecturas en tiempo real", 
-                                id="get-realtime-readings-btn", 
-                                color="success",
-                                className="me-2"
-                            ),
-                            dbc.Button(
-                                "Actualizar lecturas", 
-                                id="update-readings-from-detail-btn", 
-                                color="danger", 
-                                className="me-2"
-                            )
-                        ], className="mb-3"),
-                        html.Div(id="error-diagnosis-results"),
-                        dcc.Store(id="error-diagnosis-data", data=json.dumps({
+                # Crear el cuerpo del modal con los detalles del consumo
+                modal_body = html.Div([
+                    # Almacenar datos para diagnóstico
+                    dcc.Store(id="error-diagnosis-data", data=json.dumps({
                                 "asset_id": asset_id,
                                 "consumption_type": consumption_type,
                                 "year": year,
-                            "month": month,
-                            "project_id": project_id
-                        }))
-                    ])
-                )
-                
-                debug_log("=== FIN DEL CALLBACK show_consumption_detail_modal (Error) ===")
-                return True, modal_content, modal_title, False, None, None, False, None, None
-            
-            # Filtrar el DataFrame para el asset y tipo de consumo seleccionados
-            filtered_df = df[(df['asset_id'] == asset_id) & (df['consumption_type'] == consumption_type)]
-            
-            # Log para depuración
-            debug_log(f"[DEBUG] DataFrame filtrado: {len(filtered_df)} filas para asset_id={asset_id}, consumption_type={consumption_type}")
-            
-            # Generar gráfico de consumo diario
-            daily_chart = generate_daily_consumption_chart(filtered_df, asset_id, month, year, consumption_type)
-            
-            # Generar estadísticas de consumo
-            stats_content = generate_consumption_stats(filtered_df, asset_id, month, year, consumption_type)
-            
-            # Generar tabla de lecturas diarias
-            daily_readings_table = generate_daily_readings_table(filtered_df, asset_id, month, year, consumption_type)
-            
-            # Añadir todos los elementos al contenido del modal
-            modal_content.extend([
-                html.Div([
-                    html.H5("Consumo diario"),
-                    daily_chart
-                ], className="mb-4"),
-                html.Div([
-                    html.H5("Estadísticas"),
-                    stats_content
-                ], className="mb-4"),
-                html.Div([
-                    html.H5("Lecturas diarias"),
-                    daily_readings_table
+                                "month": month
+                    })),
+                    
+                    # Almacenar datos completos para uso en callbacks
+                    dcc.Store(id="complete-consumption-data", data=filtered_df.to_json(date_format='iso', orient='split')),
+                    
+                    # Información general
+                    html.Div([
+                        html.H5("Información general", className="card-title"),
+                        html.P([
+                            html.Strong("Asset ID: "), asset_id, html.Br(),
+                            html.Strong("Tipo de consumo: "), consumption_type, html.Br(),
+                            html.Strong("Período seleccionado: "), f"{month}/{year}", html.Br(),
+                            html.Strong("Total de registros: "), f"{len(filtered_df)}", html.Br(),
+                            html.Strong("Rango de fechas: "), 
+                            f"{filtered_df['date'].min().strftime('%Y-%m-%d') if not filtered_df.empty else 'N/A'} a {filtered_df['date'].max().strftime('%Y-%m-%d') if not filtered_df.empty else 'N/A'}"
+                        ])
+                    ], className="card mb-4 p-3"),
+                    
+                    # Selector de período
+                    html.Div([
+                        html.H5("Seleccionar período", className="card-title"),
+                        html.Div([
+                            html.Div([
+                                html.Label("Año:", className="form-label me-2"),
+                                dcc.Dropdown(
+                                    id="year-selector",
+                                    options=[
+                                        {"label": str(y), "value": str(y)} 
+                                        for y in sorted(filtered_df['date'].dt.year.unique()) if not pd.isna(y)
+                                    ] if not filtered_df.empty else [{"label": year, "value": year}],
+                                    value=year,
+                                    clearable=False,
+                                    className="form-select",
+                                    style={"width": "150px", "display": "inline-block"}
+                                )
+                            ], className="me-4", style={"display": "inline-block"}),
+                            
+                            html.Div([
+                                html.Label("Mes:", className="form-label me-2"),
+                                dcc.Dropdown(
+                                    id="month-selector",
+                                    options=[
+                                        {"label": calendar.month_name[int(m)], "value": str(m)} 
+                                        for m in range(1, 13)
+                                    ],
+                                    value=month,
+                                    clearable=False,
+                                    className="form-select",
+                                    style={"width": "200px", "display": "inline-block"}
+                                )
+                            ], style={"display": "inline-block"})
+                        ], className="d-flex align-items-center")
+                    ], className="card mb-4 p-3"),
+                    
+                    # Gráfico de consumo completo
+                    html.Div([
+                        html.H5("Consumo histórico completo", className="card-title"),
+                        dcc.Graph(
+                            id="complete-consumption-chart",
+                            figure=generate_complete_consumption_chart(filtered_df, asset_id, consumption_type)
+                        )
+                    ], className="card mb-4"),
+                    
+                    # Gráfico de consumo del mes seleccionado
+                    html.Div([
+                        html.H5(f"Consumo diario - ", id="daily-consumption-title"),
+                        dcc.Graph(
+                            id="daily-consumption-chart", 
+                            figure=generate_daily_consumption_chart(filtered_df, asset_id, month, year, consumption_type)
+                        )
+                    ], className="card mb-4"),
+                    
+                    # Estadísticas de consumo
+                    html.Div([
+                        html.H5("Estadísticas", className="card-title"),
+                        html.Div(id="consumption-stats-container", children=
+                            generate_consumption_stats(filtered_df, asset_id, month, year, consumption_type)
+                        )
+                    ], className="card mb-4"),
+                    
+                    # Tabla de lecturas diarias
+                    html.Div([
+                        html.H5("Lecturas diarias", className="card-title"),
+                        html.Div(id="daily-readings-table-container", children=
+                            generate_daily_readings_table(filtered_df, asset_id, month, year, consumption_type)
+                        )
+                    ], className="card mb-4"),
+                    
+                    # Herramientas de diagnóstico
+                    html.Div([
+                        html.H5("Diagnóstico de errores", className="card-title"),
+                        html.Div([
+                            html.Button("Ver datos fuente", id="view-source-data-btn", className="btn btn-outline-primary me-2"),
+                            html.Button("Verificar conexión con sensor", id="check-sensor-btn", className="btn btn-outline-primary me-2"),
+                            html.Button("Ver logs de error", id="view-error-logs-btn", className="btn btn-outline-primary me-2"),
+                            html.Button("Obtener lecturas en tiempo real", id="get-realtime-readings-btn", className="btn btn-outline-primary me-2"),
+                            html.Button("Actualizar lecturas", id="update-readings-from-detail-btn", className="btn btn-outline-primary")
+                        ], className="mb-3"),
+                        html.Div(id="error-diagnosis-results")
+                    ], className="card")
                 ])
-            ])
-            
-            debug_log("=== FIN DEL CALLBACK show_consumption_detail_modal (Ver detalles) ===")
-            return True, modal_content, modal_title, False, None, None, False, None, None
+                
+                return True, modal_body, modal_title, False, None, None, False, None, None
         
         except Exception as e:
-            debug_log(f"[ERROR] Error en callback show_consumption_detail_modal: {str(e)}")
             import traceback
+            debug_log(f"[ERROR] Error al procesar la celda seleccionada: {str(e)}")
             debug_log(traceback.format_exc())
-            debug_log("=== FIN DEL CALLBACK show_consumption_detail_modal (Exception) ===")
-            return True, html.Div(f"Error: {str(e)}", className="alert alert-danger"), "Error", False, None, None, False, None, None
+            return False, None, "", False, None, None, False, None, None
+        
+        debug_log("=== FIN DEL CALLBACK show_consumption_detail_modal ===")
     
     # Callback para cerrar el modal
     @app.callback(
@@ -3797,10 +3981,69 @@ def register_callbacks(app):
         prevent_initial_call=True
     )
     def handle_regenerate_readings_click(active_cell, cancel_clicks, confirm_clicks, table_data, is_open, project_id, token_data):
-        # Este callback ya no se utiliza, pero se mantiene para evitar errores
+        # Identificar el contexto de la llamada
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            return dash.no_update, dash.no_update, dash.no_update
+        
+        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+        
+        # Si se hace clic en cancelar o confirmar, cerrar el modal
+        if trigger_id in ["cancel-regenerate-readings", "confirm-regenerate-readings"]:
+            return False, dash.no_update, dash.no_update
+        
+        # Si no hay celda activa o datos de tabla, no hacer nada
+        if not active_cell or not table_data:
+            return dash.no_update, dash.no_update, dash.no_update
+        
+        # Obtener los datos de la celda seleccionada
+        row_idx = active_cell['row']
+        if row_idx >= len(table_data):
+            return dash.no_update, dash.no_update, dash.no_update
+        
+            row_data = table_data[row_idx]
+        
+        # Extraer información necesaria
+        try:
+            asset_id = row_data.get('asset_id')
+            consumption_type = row_data.get('consumption_type')
+            month_year = row_data.get('month_year')
+            
+            # Verificar que todos los datos necesarios estén presentes
+            if not asset_id or not consumption_type or not month_year:
+                debug_log(f"[ERROR] Faltan datos necesarios para la regeneración: asset_id={asset_id}, consumption_type={consumption_type}, month_year={month_year}")
+                return dash.no_update, dash.no_update, dash.no_update
+            
+            debug_log(f"[DEBUG] Parámetros extraídos del enlace: asset_id={asset_id}, consumption_type={consumption_type}, month_year={month_year}")
+            
+            # Preparar los datos para la regeneración
+            regenerate_data = {
+                "asset_id": asset_id,
+                "consumption_type": consumption_type,
+                "project_id": project_id,
+                "token": token_data,
+                "month_year": month_year
+            }
+            
+            # Crear el cuerpo del modal
+            modal_body = html.Div([
+                html.P(f"¿Está seguro que desea regenerar las lecturas para el siguiente consumo?"),
+                html.Ul([
+                    html.Li(f"Asset: {asset_id}"),
+                    html.Li(f"Tipo de consumo: {consumption_type}"),
+                    html.Li(f"Período: {month_year}")
+                ]),
+                html.P("Esta acción puede tardar varios segundos en completarse."),
+                html.Div(id="regenerate-readings-status")
+            ])
+            
+            # Abrir el modal y devolver los datos
+            return True, modal_body, json.dumps(regenerate_data)
+            
+        except Exception as e:
+            debug_log(f"[ERROR] Error al preparar datos para regeneración: {str(e)}")
         return dash.no_update, dash.no_update, dash.no_update
     
-    # Callback para regenerar las lecturas cuando se confirma
     @app.callback(
         [Output("regenerate-readings-status", "children"),
          Output("metrics-data-store", "data", allow_duplicate=True)],
@@ -3810,118 +4053,74 @@ def register_callbacks(app):
         prevent_initial_call=True
     )
     def regenerate_readings(n_clicks, regenerate_data_json, current_data):
-        if not n_clicks or not regenerate_data_json:
-            return None, dash.no_update
+        """
+        Regenera las lecturas para un asset y tipo de consumo específicos.
+        """
+        if not n_clicks:
+            return dash.no_update, dash.no_update
         
+        if not regenerate_data_json:
+            return html.Div("No hay datos para regenerar", className="alert alert-warning"), dash.no_update
+            
         try:
-            # Importar json al principio de la función
-            import json
-            import time
+            # Importar las funciones necesarias
+            from utils.regeneration import regenerate_readings as regenerate_readings_func
             
             # Cargar los datos de regeneración
             regenerate_data = json.loads(regenerate_data_json)
+            
+            # Extraer los datos necesarios
             asset_id = regenerate_data.get("asset_id")
-            tag = regenerate_data.get("tag")
+            consumption_type = regenerate_data.get("consumption_type")
             project_id = regenerate_data.get("project_id")
             token_data = regenerate_data.get("token")
+            month_year = regenerate_data.get("month_year")
             
-            if not asset_id or not tag or not project_id:
-                return html.Div("Error: Faltan datos necesarios para la regeneración.", className="alert alert-danger"), dash.no_update
+            # Verificar que todos los datos necesarios estén presentes
+            if not asset_id or not consumption_type or not project_id:
+                error_msg = "Faltan datos necesarios para la regeneración"
+                debug_log(f"[ERROR] {error_msg}: asset_id={asset_id}, consumption_type={consumption_type}, project_id={project_id}")
+                return html.Div(error_msg, className="alert alert-danger"), current_data
             
-            # Obtener el token JWT si está disponible
-            token = None
-            if token_data and "token" in token_data:
-                token = token_data["token"]
+            debug_log(f"[INFO] Regenerando lecturas para asset_id={asset_id}, consumption_type={consumption_type}, month_year={month_year}")
             
-            # Asegurar que existe la carpeta del proyecto
-            from utils.api import ensure_project_folder_exists, get_daily_readings_for_tag
-            project_folder = ensure_project_folder_exists(project_id)
+            # Llamar a la función de regeneración
+            result = regenerate_readings_func(asset_id, consumption_type, project_id, token_data, month_year)
             
-            # Crear componente de progreso
-            progress_div = html.Div([
-                html.P(f"Regenerando lecturas para el asset {asset_id}...", id="regenerate-progress-text"),
-                dbc.Progress(id="regenerate-progress-bar", value=0, striped=True, animated=True),
-                html.Div(id="regenerate-progress-details")
-            ])
-            
-            # Actualizar el componente de progreso para mostrar que estamos iniciando
-            progress_div.children[0] = html.P(f"Iniciando regeneración de lecturas para el asset {asset_id}...")
-            progress_div.children[1] = dbc.Progress(value=10, striped=True, animated=True)
-            
-            # Regenerar las lecturas para el asset y tag específicos
-            try:
-                debug_log(f"[DEBUG] regenerate_readings - Regenerando lecturas para asset {asset_id}, tag {tag}")
-                
-                # Actualizar progreso
-                progress_div.children[0] = html.P(f"Obteniendo información del sensor para el asset {asset_id}...")
-                progress_div.children[1] = dbc.Progress(value=20, striped=True, animated=True)
-                
-                # Eliminar archivo existente si lo hay
-                readings_file = os.path.join(project_folder, f"{asset_id}_{tag}.csv")
-                if os.path.exists(readings_file):
-                    try:
-                        os.remove(readings_file)
-                        debug_log(f"[DEBUG] regenerate_readings - Archivo existente eliminado: {readings_file}")
-                    except Exception as e:
-                        debug_log(f"[ERROR] regenerate_readings - Error al eliminar archivo existente: {str(e)}")
-                
-                # Actualizar progreso
-                progress_div.children[0] = html.P(f"Descargando nuevas lecturas para el asset {asset_id}...")
-                progress_div.children[1] = dbc.Progress(value=40, striped=True, animated=True)
-                
-                # Obtener nuevas lecturas
-                get_daily_readings_for_tag(asset_id, tag, project_folder, token)
-                
-                # Verificar si se creó el archivo
-                if os.path.exists(readings_file):
-                    # Actualizar progreso
-                    progress_div.children[0] = html.P(f"Lecturas regeneradas con éxito para el asset {asset_id}.")
-                    progress_div.children[1] = dbc.Progress(value=100, color="success")
-                    
-                    # Añadir mensaje de éxito
-                    progress_div.children.append(
-                        html.Div([
-                            html.P(f"Se han regenerado correctamente las lecturas para el asset {asset_id} y el tipo de consumo {consumption_type}.", className="text-success mt-3"),
-                            html.P("Para ver los cambios, haga clic en 'Refrescar Datos'.")
-                        ])
-                    )
-                    
-                    # Añadir botón para cerrar el modal
-                    progress_div.children.append(
-                        html.Div([
-                            dbc.Button("Cerrar", id="close-regenerate-readings-modal", className="mt-3")
-                        ], className="text-center")
-                    )
-                    
-                    # Añadir botón para refrescar los datos
-                    progress_div.children.append(
-                        html.Div([
-                            dbc.Button("Refrescar Datos", id="refresh-after-regenerate", color="primary", className="mt-3 me-2"),
-                            dbc.Button("Cerrar", id="close-regenerate-readings-modal", className="mt-3")
-                        ], className="text-center")
-                    )
-                    
-                    return progress_div, current_data
-                else:
-                    # Actualizar progreso con error
-                    progress_div.children[0] = html.P(f"Error: No se pudo crear el archivo de lecturas.", className="text-danger")
-                    progress_div.children[1] = dbc.Progress(value=100, color="danger")
-                    
-                    return progress_div, dash.no_update
-            except Exception as e:
-                # Actualizar progreso con error
-                error_message = html.Div([
-                    html.P(f"Error al regenerar lecturas: {str(e)}", className="text-danger"),
-                    dbc.Progress(value=100, color="danger")
+            if result.get("success"):
+                # Mostrar mensaje de éxito
+                status_component = html.Div([
+                    html.P("Regeneración completada con éxito", className="text-success"),
+                    html.P(result.get("message")),
+                    html.Button("Actualizar datos", id="refresh-after-regenerate", className="btn btn-primary mt-2")
                 ])
-                return error_message, dash.no_update
+                
+                # Devolver el componente de estado y los datos actuales (serán actualizados al hacer clic en el botón)
+                return status_component, current_data
+            else:
+                # Mostrar mensaje de error
+                status_component = html.Div([
+                    html.P("Error al regenerar lecturas", className="text-danger"),
+                    html.P(result.get("message")),
+                    html.Button("Actualizar datos", id="refresh-after-regenerate", className="btn btn-primary mt-2")
+                ])
+                
+                return status_component, current_data
             
         except Exception as e:
             import traceback
-            error_msg = f"Error al procesar la solicitud: {str(e)}"
+            error_msg = f"Error al regenerar lecturas: {str(e)}"
             debug_log(f"[ERROR] {error_msg}")
             debug_log(traceback.format_exc())
-            return html.Div(error_msg, className="alert alert-danger"), dash.no_update
+            
+            # Mostrar mensaje de error
+            status_component = html.Div([
+                html.P("Error al regenerar lecturas", className="text-danger"),
+                html.P(str(e)),
+                html.Button("Actualizar datos", id="refresh-after-regenerate", className="btn btn-primary mt-2")
+            ])
+            
+            return status_component, current_data
     
     # Callback para actualizar la tabla después de regenerar lecturas
     @app.callback(
@@ -4218,6 +4417,24 @@ def register_callbacks(app):
                     html.P("Por favor, contacte con el administrador del sistema para añadir este tipo de consumo al mapeo.")
                 ], className="alert alert-warning")
             
+            # Obtener el project_id del store de diagnóstico
+            # Esto es importante para evitar buscar en todas las carpetas
+            project_id = None
+            
+            # Intentar obtener el project_id del store de diagnóstico
+            try:
+                # Obtener el elemento del DOM
+                diagnosis_data_element = dash.callback_context.inputs.get('error-diagnosis-data.data')
+                if diagnosis_data_element:
+                    diagnosis_data = json.loads(diagnosis_data_element)
+                    project_id = diagnosis_data.get('project_id')
+                    debug_log(f"[INFO] Project ID obtenido del store de diagnóstico: {project_id}")
+            except Exception as e:
+                debug_log(f"[ERROR] Error al obtener project_id del store de diagnóstico: {str(e)}")
+            
+            # Si no se pudo obtener el project_id del store, buscarlo en las carpetas
+            if not project_id:
+                debug_log("[INFO] Buscando project_id en las carpetas de proyectos")
             # Buscar el proyecto al que pertenece el asset
             # Primero, buscar en todas las carpetas de proyectos
             analyzed_data_folder = os.path.join("data", "projects")
@@ -4230,7 +4447,6 @@ def register_callbacks(app):
                 ], className="alert alert-warning")
             
             # Buscar el proyecto que contiene el asset
-            project_id = None
             for folder_name in os.listdir(analyzed_data_folder):
                 folder_path = os.path.join(analyzed_data_folder, folder_name)
                 if os.path.isdir(folder_path):
@@ -4301,123 +4517,47 @@ def register_callbacks(app):
                 if not project_folder:
                     raise ValueError("La carpeta del proyecto no puede estar vacía")
                 
-                # Verificar que la carpeta del proyecto existe
-                if not os.path.exists(project_folder):
-                    os.makedirs(project_folder, exist_ok=True)
-                    logger.info(f"Se ha creado la carpeta del proyecto: {project_folder}")
+                # Llamar a la función para obtener las lecturas diarias
+                # Esta función se encargará de guardar los datos en un archivo CSV
+                df = get_daily_readings_for_tag(asset_id, consumption_tag, project_folder, token)
                 
-                # Importar explícitamente la función para asegurar que se está utilizando la correcta
-                from utils.api import get_daily_readings_for_tag
-                
-                # Mostrar los parámetros exactos que se están pasando
-                debug_log(f"[DEBUG] Parámetros para get_daily_readings_for_tag: asset_id='{asset_id}', tag_name='{consumption_tag}', project_folder='{project_folder}', token='{token[:10]}...' if token else 'None'")
-                logger.info(f"Parámetros para get_daily_readings_for_tag: asset_id='{asset_id}', tag_name='{consumption_tag}', project_folder='{project_folder}', token='{token[:10]}...' if token else 'None'")
-                
-                # Llamar a la función con los parámetros correctos
-                updated_data = get_daily_readings_for_tag(asset_id, consumption_tag, project_folder, token)
-                
-                # Mostrar el resultado exacto
-                if updated_data is not None:
-                    debug_log(f"[DEBUG] get_daily_readings_for_tag devolvió un DataFrame con {len(updated_data)} filas")
-                    logger.info(f"get_daily_readings_for_tag devolvió un DataFrame con {len(updated_data)} filas")
-                    # Mostrar las primeras filas para depuración
-                    debug_log(f"[DEBUG] Primeras filas del DataFrame: {updated_data.head().to_dict()}")
-                    logger.info(f"Primeras filas del DataFrame: {updated_data.head().to_dict()}")
-                else:
-                    debug_log("[DEBUG] get_daily_readings_for_tag devolvió None")
-                    logger.warning("get_daily_readings_for_tag devolvió None")
-
-                debug_log(f"[INFO] Resultado de get_daily_readings_for_tag: {'Datos actualizados' if updated_data is not None else 'Sin datos'}")
-                
-                # Verificar si se actualizaron los datos
-                if updated_data is not None:
-                    # Verificar si el archivo se creó correctamente
-                    file_name = f"daily_readings_{asset_id}_{consumption_tag}.csv"
-                    file_path = os.path.join(project_folder, file_name)
-                    if os.path.exists(file_path):
-                        logger.info(f"Archivo creado/actualizado correctamente: {file_path}")
-                        # Verificar el contenido del archivo
-                        try:
-                            df = pd.read_csv(file_path)
-                            logger.info(f"El archivo contiene {len(df)} registros")
-                            # Mostrar las primeras filas para depuración
-                            debug_log(f"[DEBUG] Primeras filas del archivo CSV: {df.head().to_dict()}")
-                            logger.info(f"Primeras filas del archivo CSV: {df.head().to_dict()}")
-                            
-                            # Verificar si hay registros para el mes actual
-                            current_month = datetime.now().strftime("%Y-%m")
-                            df['date'] = pd.to_datetime(df['date'])
-                            current_month_data = df[df['date'].dt.strftime("%Y-%m") == current_month]
-                            logger.info(f"Registros para el mes actual ({current_month}): {len(current_month_data)}")
-                        except Exception as e:
-                            logger.error(f"Error al leer el archivo creado: {str(e)}")
-                    else:
-                        logger.error(f"El archivo no se creó correctamente: {file_path}")
-                        
+                # Verificar si se obtuvieron datos
+                if df is None or df.empty:
                     return html.Div([
-                        html.H5("Lecturas actualizadas correctamente"),
-                        html.P(f"Asset ID: {asset_id}"),
-                        html.P(f"Tipo de consumo: {consumption_type}"),
-                        html.P(f"Tag: {consumption_tag}"),
-                        html.P(f"Proyecto: {project_id}"),
-                        html.Hr(),
-                        html.P("Las lecturas se han actualizado correctamente."),
-                        html.P("Para ver los cambios, cierre este modal y haga clic en 'Visualizar Consumos' en la página principal."),
-                        html.Div([
-                            dbc.Button(
-                                "Refrescar datos", 
-                                id="refresh-data-btn", 
-                                color="primary", 
-                                className="mt-3",
-                                n_clicks=0
-                            ),
-                            dcc.Store(
-                                id="refresh-data-store",
-                                data=json.dumps({
-                                    "asset_id": asset_id,
-                                    "consumption_type": consumption_type,
-                                    "project_id": project_id,
-                                    "tag": consumption_tag
-                                })
-                            )
-                        ])
-                    ], className="alert alert-success")
-                else:
-                    logger.error(f"No se pudieron actualizar las lecturas para asset_id={asset_id}, tag={consumption_tag}")
-                    return html.Div([
-                        html.H5("No se pudieron actualizar las lecturas"),
-                        html.P(f"Asset ID: {asset_id}"),
-                        html.P(f"Tipo de consumo: {consumption_type}"),
-                        html.P(f"Tag: {consumption_tag}"),
-                        html.P(f"Proyecto: {project_id}"),
-                        html.Hr(),
-                        html.P("No se pudieron obtener nuevas lecturas. Consulte los logs para más detalles.")
+                        html.H5("No se obtuvieron datos"),
+                        html.P(f"No se pudieron obtener lecturas para el asset {asset_id} y el tipo de consumo {consumption_type}."),
+                        html.P("Por favor, verifique la conexión con el sensor y los parámetros de consulta.")
                     ], className="alert alert-warning")
+                
+                # Mostrar mensaje de éxito
+                    return html.Div([
+                    html.H5("Lecturas actualizadas con éxito"),
+                    html.P(f"Se han actualizado las lecturas para el asset {asset_id} y el tipo de consumo {consumption_type}."),
+                    html.P(f"Se obtuvieron {len(df)} registros."),
+                    html.P("Para ver los cambios, cierre este modal y actualice la visualización de consumos.")
+                    ], className="alert alert-success")
+                
             except Exception as e:
                 import traceback
-                error_msg = f"Error al actualizar lecturas: {str(e)}"
+                error_msg = f"Error al actualizar las lecturas: {str(e)}"
                 debug_log(f"[ERROR] {error_msg}")
                 debug_log(traceback.format_exc())
+                logger.error(f"{error_msg}\n{traceback.format_exc()}")
                 return html.Div([
-                    html.H5("Error al actualizar lecturas"),
-                    html.P(f"Asset ID: {asset_id}"),
-                    html.P(f"Tipo de consumo: {consumption_type}"),
-                    html.P(f"Tag: {consumption_tag}"),
-                    html.P(f"Proyecto: {project_id}"),
-                    html.Hr(),
+                    html.H5("Error al actualizar las lecturas"),
                     html.P(error_msg),
-                    html.Pre(traceback.format_exc())
+                    html.P("Por favor, verifique los logs para más detalles.")
                 ], className="alert alert-danger")
         
         except Exception as e:
             import traceback
-            error_msg = f"Error al preparar la actualización de lecturas: {str(e)}"
+            error_msg = f"Error general al actualizar las lecturas: {str(e)}"
             debug_log(f"[ERROR] {error_msg}")
             debug_log(traceback.format_exc())
             return html.Div([
-                html.H5("Error al preparar la actualización de lecturas"),
+                html.H5("Error general"),
                 html.P(error_msg),
-                html.Pre(traceback.format_exc())
+                html.P("Por favor, verifique los logs para más detalles.")
             ], className="alert alert-danger")
 
     # Callback para refrescar los datos después de actualizar las lecturas
@@ -4630,8 +4770,7 @@ def register_callbacks(app):
     
     # Callback para mostrar el modal de regeneración masiva
     @app.callback(
-        [Output("bulk-regenerate-modal", "is_open"),
-         Output("bulk-regenerate-modal-body", "children")],
+        Output("bulk-regenerate-modal", "is_open"),
         [Input("bulk-regenerate-readings-btn", "n_clicks"),
          Input("cancel-bulk-regenerate", "n_clicks"),
          Input("confirm-bulk-regenerate", "n_clicks")],
@@ -4642,7 +4781,7 @@ def register_callbacks(app):
     def show_bulk_regenerate_modal(btn_clicks, cancel_clicks, confirm_clicks, is_open, json_data):
         ctx = dash.callback_context
         if not ctx.triggered:
-            return is_open, None
+            return is_open
         
         trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
         debug_log(f"[DEBUG] show_bulk_regenerate_modal - trigger_id: {trigger_id}")
@@ -4656,8 +4795,7 @@ def register_callbacks(app):
                 # Si no hay datos, mostrar un mensaje
                 if not json_data:
                     debug_log("[DEBUG] show_bulk_regenerate_modal - No hay datos disponibles")
-                    modal = create_bulk_regeneration_modal(None)
-                    return True, modal.children
+                    return True
                 
                 debug_log(f"[DEBUG] show_bulk_regenerate_modal - Tipo de json_data: {type(json_data)}")
                 debug_log(f"[DEBUG] show_bulk_regenerate_modal - Vista previa de json_data: {str(json_data)[:100]}...")
@@ -4707,8 +4845,7 @@ def register_callbacks(app):
                 
                 if df is None:
                     debug_log("[DEBUG] show_bulk_regenerate_modal - No se pudo crear un DataFrame")
-                    modal = create_bulk_regeneration_modal(None)
-                    return True, modal.children
+                    return True
                 
                 # Verificar que el DataFrame tenga las columnas necesarias
                 debug_log(f"[DEBUG] show_bulk_regenerate_modal - Columnas del DataFrame: {df.columns.tolist()}")
@@ -4758,32 +4895,31 @@ def register_callbacks(app):
                 error_data = analyze_readings_errors(df)
                 debug_log(f"[DEBUG] show_bulk_regenerate_modal - Análisis de errores: {error_data}")
                 
+                # Guardar los datos de error en el store
+                app.layout.children[-1].children.append(dcc.Store(id="error-analysis-data", data=json.dumps(error_data)))
+                
                 # Verificar si hay errores
                 if error_data['total_errors'] == 0:
                     debug_log("[DEBUG] show_bulk_regenerate_modal - No se encontraron errores")
-                    modal = create_bulk_regeneration_modal(error_data)
-                    return True, modal.children
                 
-                # Crear el modal con los datos de error
-                modal = create_bulk_regeneration_modal(error_data)
-                return True, modal.children
+                return True
             
             except Exception as e:
                 import traceback
                 error_msg = f"Error al preparar modal de regeneración masiva: {str(e)}"
                 debug_log(f"[ERROR] {error_msg}")
                 debug_log(traceback.format_exc())
-                return True, html.Div(error_msg, className="alert alert-danger")
+                return True
         
         elif trigger_id in ["cancel-bulk-regenerate", "confirm-bulk-regenerate"]:
-            return False, None
+            return False
         
-        return is_open, None
+        return is_open
 
     # Callback para previsualizar la regeneración masiva
     @app.callback(
-        [Output("bulk-regenerate-preview-container", "children"),
-         Output("filtered-errors-data", "data")],
+        [Output("bulk-regenerate-preview-container", "children", allow_duplicate=True),
+         Output("filtered-errors-data", "data", allow_duplicate=True)],
         [Input("preview-bulk-regenerate", "n_clicks"),
          Input("regeneration-mode", "value"),
          Input("filter-asset", "value"),
@@ -4843,16 +4979,18 @@ def register_callbacks(app):
         [Output("bulk-regenerate-progress-container", "children"),
          Output("bulk-regenerate-results-container", "children"),
          Output("metrics-data-store", "data", allow_duplicate=True)],
-        [Input("confirm-bulk-regenerate", "n_clicks"),
+        [Input("proceed-regeneration", "n_clicks"),
          Input("regeneration-progress-interval", "n_intervals")],
         [State("filtered-errors-data", "data"),
          State("metrics-project-filter", "value"),
          State("jwt-token-store", "data"),
          State("regeneration-mode", "value"),
+         State("only-errors", "value"),
+         State("continue-on-error", "value"),
          State("metrics-data-store", "data")],
         prevent_initial_call=True
     )
-    def execute_bulk_regeneration(n_clicks, n_intervals, filtered_errors_json, project_id, token_data, mode, current_data):
+    def execute_bulk_regeneration(n_clicks, n_intervals, filtered_errors_json, project_id, token_data, mode, only_errors, continue_on_error, current_data):
         ctx = dash.callback_context
         if not ctx.triggered:
             return dash.no_update, dash.no_update, dash.no_update
@@ -4860,7 +4998,7 @@ def register_callbacks(app):
         trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
         debug_log(f"[DEBUG] execute_bulk_regeneration - trigger_id: {trigger_id}")
         
-        if trigger_id == "confirm-bulk-regenerate":
+        if trigger_id == "proceed-regeneration" and n_clicks:
             try:
                 # Verificar si ya hay una regeneración en progreso
                 from utils.regeneration import regenerate_readings_in_bulk, get_regeneration_status, is_regeneration_in_progress
@@ -4893,8 +5031,8 @@ def register_callbacks(app):
                             error_list=filtered_errors.get('items', []),
                             project_id=project_id,
                             token_data=token_data,
-                            only_errors=True,  # Por ahora, siempre regenerar solo los errores
-                            continue_on_error=True  # Por ahora, siempre continuar en caso de error
+                            only_errors=only_errors if only_errors is not None else True,
+                            continue_on_error=continue_on_error if continue_on_error is not None else True
                         )
                         debug_log("[DEBUG] execute_bulk_regeneration - Regeneración completada")
                     except Exception as e:
@@ -4977,7 +5115,9 @@ def register_callbacks(app):
          Input("error-analysis-data", "data")],
         prevent_initial_call=True
     )
-    def update_filter_dropdowns(mode, error_data_json):
+    def update_regeneration_filters(mode, error_data_json):
+        debug_log(f"[DEBUG] update_regeneration_filters - mode: {mode}, error_data_json: {error_data_json is not None}")
+        
         # Valores por defecto
         asset_disabled = True
         consumption_type_disabled = True
@@ -4987,6 +5127,7 @@ def register_callbacks(app):
         period_options = []
         
         if not error_data_json:
+            debug_log("[DEBUG] update_regeneration_filters - No hay datos de error")
             return asset_disabled, consumption_type_disabled, period_disabled, asset_options, consumption_type_options, period_options
         
         try:
@@ -4994,63 +5135,47 @@ def register_callbacks(app):
             error_data = json.loads(error_data_json)
             
             # Preparar opciones para los dropdowns
-            asset_options = [{"label": asset, "value": asset} for asset in error_data.get('errors_by_asset', {}).keys()]
-            consumption_type_options = [{"label": ct, "value": ct} for ct in error_data.get('errors_by_consumption_type', {}).keys()]
-            period_options = [{"label": period, "value": period} for period in error_data.get('errors_by_period', {}).keys()]
+            errors_by_asset = error_data.get('errors_by_asset', {})
+            errors_by_consumption_type = error_data.get('errors_by_consumption_type', {})
+            errors_by_period = error_data.get('errors_by_period', {})
+            
+            asset_options = [{"label": f"{asset} ({count} errores)", "value": asset} for asset, count in errors_by_asset.items()]
+            consumption_type_options = [{"label": f"{ct} ({count} errores)", "value": ct} for ct, count in errors_by_consumption_type.items()]
+            period_options = [{"label": f"{period} ({count} errores)", "value": period} for period, count in errors_by_period.items()]
             
             # Actualizar estado de los dropdowns según el modo
             if mode == "by_asset":
-                error_data = error_data_json
-            else:
-                debug_log(f"[ERROR] Formato de datos no soportado: {type(error_data_json)}")
-                return html.Div("Formato de datos no soportado", className="alert alert-danger"), None
+                asset_disabled = False
+                consumption_type_disabled = True
+                period_disabled = True
+            elif mode == "by_consumption_type":
+                asset_disabled = True
+                consumption_type_disabled = False
+                period_disabled = True
+            elif mode == "by_period":
+                asset_disabled = True
+                consumption_type_disabled = True
+                period_disabled = False
+            else:  # all o complete_files
+                asset_disabled = True
+                consumption_type_disabled = True
+                period_disabled = True
             
-            # Verificar que los datos de error tengan la estructura esperada
-            if not error_data or not isinstance(error_data, dict):
-                debug_log(f"[ERROR] Datos de error inválidos: {error_data}")
-                return html.Div("Datos de error inválidos", className="alert alert-danger"), None
+            debug_log(f"[DEBUG] update_regeneration_filters - Opciones de asset: {len(asset_options)}")
+            debug_log(f"[DEBUG] update_regeneration_filters - Opciones de tipo de consumo: {len(consumption_type_options)}")
+            debug_log(f"[DEBUG] update_regeneration_filters - Opciones de período: {len(period_options)}")
             
-            # Crear criterios de filtrado
-            criteria = {
-                "mode": mode,
-                "asset_id": asset_id,
-                "consumption_type": consumption_type,
-                "period": period
-            }
-            debug_log(f"[DEBUG] preview_bulk_regenerate - Criterios de filtrado: {criteria}")
-            
-            # Filtrar errores según los criterios
-            filtered_errors = filter_errors_by_criteria(error_data, criteria)
-            debug_log(f"[DEBUG] preview_bulk_regenerate - Errores filtrados: {filtered_errors.get('total', 0) if filtered_errors else 'None'}")
-            
-            if not filtered_errors or filtered_errors.get('total', 0) == 0:
-                debug_log("[DEBUG] preview_bulk_regenerate - No hay errores que coincidan con los criterios")
-                return html.Div("No hay elementos que coincidan con los criterios seleccionados.", className="alert alert-warning"), None
-            
-            # Preparar datos para la previsualización
-            preview_data = prepare_regeneration_preview(filtered_errors)
-            debug_log(f"[DEBUG] preview_bulk_regenerate - Datos de previsualización: {preview_data.get('total', 0) if preview_data else 'None'}")
-            
-            if not preview_data or preview_data.get('total', 0) == 0:
-                debug_log("[DEBUG] preview_bulk_regenerate - No hay elementos para previsualizar")
-                return html.Div("No hay elementos para regenerar con los criterios seleccionados.", className="alert alert-warning"), None
-            
-            # Crear el componente de previsualización
-            preview_component = create_regeneration_preview(preview_data)
-            
-            # Devolver el componente de previsualización y los datos filtrados
-            return preview_component, json.dumps(filtered_errors)
+            return asset_disabled, consumption_type_disabled, period_disabled, asset_options, consumption_type_options, period_options
         
         except Exception as e:
             import traceback
-            error_msg = f"Error al previsualizar regeneración: {str(e)}"
-            debug_log(f"[ERROR] {error_msg}")
+            debug_log(f"[ERROR] Error al actualizar filtros de regeneración: {str(e)}")
             debug_log(traceback.format_exc())
-            return html.Div(error_msg, className="alert alert-danger"), None
+            return asset_disabled, consumption_type_disabled, period_disabled, asset_options, consumption_type_options, period_options
 
     # Callback para mostrar el modal de regeneración masiva
     @app.callback(
-        [Output("regeneration-preview-container", "children"),
+        [Output("regeneration-preview-container", "children", allow_duplicate=True),
          Output("filtered-errors-data", "data", allow_duplicate=True)],
         [Input("preview-bulk-regenerate", "n_clicks")],
         [State("regeneration-mode", "value"),
@@ -5134,3 +5259,454 @@ def register_callbacks(app):
             debug_log(f"[ERROR] {error_msg}")
             debug_log(traceback.format_exc())
             return html.Div(error_msg, className="alert alert-danger"), None
+    # Callback para llenar el cuerpo del modal de regeneración masiva
+    @app.callback(
+        Output("bulk-regenerate-modal-body", "children"),
+        [Input("bulk-regenerate-modal", "is_open")],
+        [State("metrics-data-store", "data")],
+        prevent_initial_call=True
+    )
+    def fill_bulk_regenerate_modal(is_open, json_data):
+        if not is_open:
+            return dash.no_update
+        
+        debug_log("[DEBUG] fill_bulk_regenerate_modal - Llenando el cuerpo del modal")
+        
+        try:
+            # Importar las funciones necesarias
+            from layouts.bulk_regeneration import create_bulk_regeneration_modal
+            from utils.error_analysis import analyze_readings_errors
+            
+            # Si no hay datos, mostrar un mensaje
+            if not json_data:
+                debug_log("[DEBUG] fill_bulk_regenerate_modal - No hay datos disponibles")
+                return html.Div("No hay datos disponibles para analizar.", className="alert alert-warning")
+            
+            debug_log(f"[DEBUG] fill_bulk_regenerate_modal - Tipo de json_data: {type(json_data)}")
+            
+            # Intentar convertir los datos JSON a DataFrame
+            df = None
+            
+            # Intento 1: Si json_data es un string JSON con formato split
+            try:
+                debug_log("[DEBUG] fill_bulk_regenerate_modal - Intento 1: Convertir string JSON con formato split")
+                data_dict = json.loads(json_data)
+                if "columns" in data_dict and "data" in data_dict:
+                    df = pd.DataFrame(data_dict["data"], columns=data_dict["columns"])
+                    debug_log(f"[DEBUG] fill_bulk_regenerate_modal - DataFrame creado con éxito (Intento 1). Shape: {df.shape}")
+            except Exception as e:
+                debug_log(f"[DEBUG] fill_bulk_regenerate_modal - Error en Intento 1: {str(e)}")
+            
+            # Intento 2: Si json_data es un string JSON con lista de objetos
+            if df is None:
+                try:
+                    debug_log("[DEBUG] fill_bulk_regenerate_modal - Intento 2: Convertir string JSON con lista de objetos")
+                    data = json.loads(json_data)
+                    if isinstance(data, list):
+                        df = pd.DataFrame(data)
+                        debug_log(f"[DEBUG] fill_bulk_regenerate_modal - DataFrame creado con éxito (Intento 2). Shape: {df.shape}")
+                except Exception as e:
+                    debug_log(f"[DEBUG] fill_bulk_regenerate_modal - Error en Intento 2: {str(e)}")
+            
+            # Intento 3: Si json_data ya es un diccionario
+            if df is None and isinstance(json_data, dict):
+                try:
+                    debug_log("[DEBUG] fill_bulk_regenerate_modal - Intento 3: Convertir diccionario a DataFrame")
+                    if 'data' in json_data and isinstance(json_data['data'], list):
+                        df = pd.DataFrame(json_data['data'])
+                        debug_log(f"[DEBUG] fill_bulk_regenerate_modal - DataFrame creado con éxito (Intento 3). Shape: {df.shape}")
+                except Exception as e:
+                    debug_log(f"[DEBUG] fill_bulk_regenerate_modal - Error en Intento 3: {str(e)}")
+            
+            # Intento 4: Si json_data es un string CSV
+            if df is None and isinstance(json_data, str):
+                try:
+                    debug_log("[DEBUG] fill_bulk_regenerate_modal - Intento 4: Convertir string CSV a DataFrame")
+                    from io import StringIO
+                    df = pd.read_csv(StringIO(json_data))
+                    debug_log(f"[DEBUG] fill_bulk_regenerate_modal - DataFrame creado con éxito (Intento 4). Shape: {df.shape}")
+                except Exception as e:
+                    debug_log(f"[DEBUG] fill_bulk_regenerate_modal - Error en Intento 4: {str(e)}")
+            
+            if df is None:
+                debug_log("[DEBUG] fill_bulk_regenerate_modal - No se pudo crear un DataFrame")
+                return html.Div("No se pudieron procesar los datos para análisis.", className="alert alert-danger")
+            
+            # Verificar que el DataFrame tenga las columnas necesarias
+            debug_log(f"[DEBUG] fill_bulk_regenerate_modal - Columnas del DataFrame: {df.columns.tolist()}")
+            
+            # Verificar y añadir columnas requeridas si no existen
+            required_columns = ['date', 'asset_id', 'consumption_type']
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            
+            if missing_columns:
+                debug_log(f"[DEBUG] fill_bulk_regenerate_modal - Faltan columnas: {missing_columns}")
+                
+                # Si falta la columna 'date', intentar encontrarla con otro nombre
+                if 'date' in missing_columns and 'fecha' in df.columns:
+                    df['date'] = df['fecha']
+                    missing_columns.remove('date')
+                
+                # Si falta la columna 'asset_id', intentar encontrarla con otro nombre
+                if 'asset_id' in missing_columns and 'id_asset' in df.columns:
+                    df['asset_id'] = df['id_asset']
+                    missing_columns.remove('asset_id')
+                
+                # Si falta la columna 'consumption_type', intentar encontrarla con otro nombre
+                if 'consumption_type' in missing_columns and 'tipo_consumo' in df.columns:
+                    df['consumption_type'] = df['tipo_consumo']
+                    missing_columns.remove('consumption_type')
+                
+                # Si todavía faltan columnas, crear columnas vacías
+                for col in missing_columns:
+                    debug_log(f"[DEBUG] fill_bulk_regenerate_modal - Creando columna vacía: {col}")
+                    df[col] = None
+            
+            # Asegurar que la columna de fecha esté en formato datetime
+            if 'date' in df.columns:
+                df['date'] = pd.to_datetime(df['date'], errors='coerce')
+            
+            # Asegurar que la columna de consumo exista
+            if 'consumption' not in df.columns and 'Consumo' in df.columns:
+                df['consumption'] = df['Consumo']
+            elif 'consumption' not in df.columns and 'consumo' in df.columns:
+                df['consumption'] = df['consumo']
+            elif 'consumption' not in df.columns:
+                # Crear una columna de consumo con valores de error para simular datos con errores
+                debug_log("[DEBUG] fill_bulk_regenerate_modal - Creando columna de consumo con errores simulados")
+                df['consumption'] = 'Error'
+            
+            # Analizar errores en las lecturas
+            error_data = analyze_readings_errors(df)
+            debug_log(f"[DEBUG] fill_bulk_regenerate_modal - Análisis de errores: {error_data}")
+            
+            # Guardar los datos de error en el store
+            if not any(child.id == "error-analysis-data" for child in app.layout.children if hasattr(child, 'id')):
+                app.layout.children.append(dcc.Store(id="error-analysis-data", data=json.dumps(error_data)))
+            else:
+                # Actualizar el store existente
+                for child in app.layout.children:
+                    if hasattr(child, 'id') and child.id == "error-analysis-data":
+                        child.data = json.dumps(error_data)
+                        break
+            
+            # Crear el contenido del modal
+            from layouts.bulk_regeneration import create_regeneration_options, create_regeneration_preview
+            
+            # Resumen de errores
+            if error_data and error_data.get('total_errors', 0) > 0:
+                total_errors = error_data.get('total_errors', 0)
+                errors_by_asset = error_data.get('errors_by_asset', {})
+                errors_by_consumption_type = error_data.get('errors_by_consumption_type', {})
+                errors_by_period = error_data.get('errors_by_period', {})
+                
+                # Crear resumen
+                summary = html.Div([
+                    html.H5("Resumen de errores encontrados", className="mb-3"),
+                    html.P(f"Se encontraron {total_errors} errores en total."),
+                    
+                    # Desglose por asset
+                    html.Div([
+                        html.H6("Errores por asset:"),
+                        html.Ul([
+                            html.Li(f"{asset}: {count} errores") 
+                            for asset, count in errors_by_asset.items()
+                        ])
+                    ], className="mb-3"),
+                    
+                    # Desglose por tipo de consumo
+                    html.Div([
+                        html.H6("Errores por tipo de consumo:"),
+                        html.Ul([
+                            html.Li(f"{consumption_type}: {count} errores") 
+                            for consumption_type, count in errors_by_consumption_type.items()
+                        ])
+                    ], className="mb-3"),
+                    
+                    # Desglose por período
+                    html.Div([
+                        html.H6("Errores por período:"),
+                        html.Ul([
+                            html.Li(f"{period}: {count} errores") 
+                            for period, count in errors_by_period.items()
+                        ])
+                    ], className="mb-3")
+                ], className="mb-4")
+                
+                # Opciones de regeneración
+                options = html.Div([
+                    html.H5("Opciones de regeneración", className="mb-3"),
+                    create_regeneration_options()
+                ], className="mb-4")
+                
+                # Contenedor para la vista previa
+                preview_container = html.Div(
+                    html.Div("Haga clic en 'Previsualizar' para ver los elementos que se regenerarán.", className="text-muted"),
+                    id="bulk-regenerate-preview-container",
+                    className="mb-4"
+                )
+                
+                # Contenedor para el progreso
+                progress_container = html.Div(id="bulk-regenerate-progress-container", className="mb-4")
+                
+                # Contenedor para los resultados
+                results_container = html.Div(id="bulk-regenerate-results-container", className="mb-4")
+                
+                # Almacenamiento de datos filtrados
+                filtered_errors_store = dcc.Store(id="filtered-errors-data", data=None)
+                
+                return html.Div([
+                    summary,
+                    options,
+                    preview_container,
+                    progress_container,
+                    results_container,
+                    filtered_errors_store
+                ])
+            else:
+                return html.Div("No se encontraron errores para regenerar.", className="alert alert-info mb-4")
+        
+        except Exception as e:
+            import traceback
+            error_msg = f"Error al preparar modal de regeneración masiva: {str(e)}"
+            debug_log(f"[ERROR] {error_msg}")
+            debug_log(traceback.format_exc())
+            return html.Div(error_msg, className="alert alert-danger")
+            
+    # Callback para previsualizar la regeneración masiva
+    # Callback para cerrar el modal de regeneración masiva
+    @app.callback(
+        Output("bulk-regenerate-modal", "is_open", allow_duplicate=True),
+        [Input("cancel-bulk-regenerate", "n_clicks"),
+         Input("close-results", "n_clicks")],
+        [State("bulk-regenerate-modal", "is_open")],
+        prevent_initial_call=True
+    )
+    def close_bulk_regenerate_modal(cancel_clicks, close_results_clicks, is_open):
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            return is_open
+        
+        trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        debug_log(f"[DEBUG] close_bulk_regenerate_modal - trigger_id: {trigger_id}")
+        
+        if trigger_id in ["cancel-bulk-regenerate", "close-results"] and is_open:
+            return False
+        
+        return is_open
+
+    # Callback para actualizar la vista previa cuando cambian los filtros
+    @app.callback(
+        Output("preview-container", "children"),
+        [Input("regeneration-mode", "value"),
+         Input("filter-asset", "value"),
+         Input("filter-consumption-type", "value"),
+         Input("filter-period", "value"),
+         Input("only-errors-switch", "value")],
+        [State("error-analysis-data", "data")],
+        prevent_initial_call=True
+    )
+    def update_preview_on_filter_change(mode, selected_asset, selected_consumption_type, 
+                                        selected_period, only_errors, error_data):
+        if not error_data:
+            return html.Div("No hay datos de error disponibles para previsualizar.", className="text-danger")
+        
+        debug_log(f"[DEBUG] update_preview_on_filter_change - mode: {mode}, asset: {selected_asset}, " +
+                 f"consumption_type: {selected_consumption_type}, period: {selected_period}, only_errors: {only_errors}")
+        
+        try:
+            # Convertir datos de error a DataFrame
+            error_df = pd.DataFrame()
+            if isinstance(error_data, str):
+                try:
+                    error_data = json.loads(error_data)
+                except:
+                    pass
+            
+            if isinstance(error_data, dict) and "errors" in error_data:
+                error_df = pd.DataFrame(error_data["errors"])
+            elif isinstance(error_data, list):
+                error_df = pd.DataFrame(error_data)
+            
+            if error_df.empty:
+                return html.Div("No se encontraron errores para previsualizar.", className="text-warning")
+            
+            # Filtrar según los criterios seleccionados
+            filtered_df = error_df.copy()
+            
+            if mode == "by_asset" and selected_asset:
+                filtered_df = filtered_df[filtered_df["asset_id"] == selected_asset]
+            elif mode == "by_consumption_type" and selected_consumption_type:
+                filtered_df = filtered_df[filtered_df["consumption_type"] == selected_consumption_type]
+            elif mode == "by_period" and selected_period:
+                # Asumiendo que period está en formato "YYYY-MM"
+                if "date" in filtered_df.columns:
+                    filtered_df["period"] = filtered_df["date"].str[:7]
+                    filtered_df = filtered_df[filtered_df["period"] == selected_period]
+            
+            if only_errors and "has_error" in filtered_df.columns:
+                filtered_df = filtered_df[filtered_df["has_error"] == True]
+            
+            # Crear resumen para previsualización
+            if filtered_df.empty:
+                return html.Div("No hay elementos que coincidan con los filtros seleccionados.", className="text-warning")
+            
+            # Contar elementos por tipo
+            asset_count = filtered_df["asset_id"].nunique() if "asset_id" in filtered_df.columns else 0
+            consumption_types = filtered_df["consumption_type"].unique().tolist() if "consumption_type" in filtered_df.columns else []
+            total_readings = len(filtered_df)
+            
+            # Crear tabla de resumen
+            summary_rows = [
+                html.Tr([html.Td("Activos afectados:"), html.Td(str(asset_count))]),
+                html.Tr([html.Td("Tipos de consumo:"), html.Td(", ".join(consumption_types))]),
+                html.Tr([html.Td("Total de lecturas:"), html.Td(str(total_readings))])
+            ]
+            
+            preview_content = [
+                html.H5("Vista previa de regeneración"),
+                html.Table(
+                    [html.Tbody(summary_rows)],
+                    className="table table-sm"
+                ),
+                html.Hr(),
+                html.P(f"Se regenerarán {total_readings} lecturas en total.", className="font-weight-bold")
+            ]
+            
+            return html.Div(preview_content)
+        
+        except Exception as e:
+            debug_log(f"[ERROR] update_preview_on_filter_change - {str(e)}")
+            return html.Div(f"Error al generar vista previa: {str(e)}", className="text-danger")
+
+    # Callback para habilitar/deshabilitar el botón de regeneración
+    @app.callback(
+        Output("confirm-bulk-regenerate", "disabled"),
+        [Input("regeneration-mode", "value"),
+         Input("filter-asset", "value"),
+         Input("filter-consumption-type", "value"),
+         Input("filter-period", "value")],
+        [State("error-analysis-data", "data")]
+    )
+    def toggle_regenerate_button(mode, selected_asset, selected_consumption_type, selected_period, error_data):
+        if not error_data:
+            return True
+        
+        # Verificar si hay selección según el modo
+        if mode == "by_asset" and not selected_asset:
+            return True
+        elif mode == "by_consumption_type" and not selected_consumption_type:
+            return True
+        elif mode == "by_period" and not selected_period:
+            return True
+        elif mode == "all":
+            # Para el modo "all" no se requiere selección adicional
+            pass
+        else:
+            # Si el modo no es reconocido o no hay selección adecuada
+            return True
+        
+        return False  # Habilitar el botón si hay selección válida
+
+    # Callback para mostrar confirmación antes de regenerar
+    @app.callback(
+        Output("confirm-regeneration-modal", "is_open"),
+        [Input("confirm-bulk-regenerate", "n_clicks"),
+         Input("cancel-confirmation", "n_clicks"),
+         Input("proceed-regeneration", "n_clicks")],
+        [State("confirm-regeneration-modal", "is_open")]
+    )
+    def toggle_confirmation_modal(confirm_clicks, cancel_clicks, proceed_clicks, is_open):
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            return is_open
+        
+        trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        
+        if trigger_id == "confirm-bulk-regenerate" and not is_open:
+            return True
+        elif trigger_id in ["cancel-confirmation", "proceed-regeneration"] and is_open:
+            return False
+        
+        return is_open
+
+    # Callback para actualizar el mensaje de confirmación
+    @app.callback(
+        Output("confirmation-message", "children"),
+        [Input("confirm-bulk-regenerate", "n_clicks")],
+        [State("preview-container", "children")]
+    )
+    def update_confirmation_message(n_clicks, preview_content):
+        if not n_clicks:
+            return ""
+        
+        # Extraer información del contenido de la vista previa
+        # Esto es una simplificación, podría necesitar ajustes según la estructura exacta
+        message = [
+            html.P("Está a punto de iniciar un proceso de regeneración masiva de lecturas."),
+            html.P("Este proceso puede tardar varios minutos dependiendo de la cantidad de datos."),
+            html.P("¿Está seguro de que desea continuar?", className="font-weight-bold text-danger")
+        ]
+        
+        return html.Div(message)
+
+    # Callback para actualizar los componentes cuando se cambia el período seleccionado
+    @app.callback(
+        [Output("daily-consumption-title", "children"),
+         Output("daily-consumption-chart", "figure"),
+         Output("consumption-stats-container", "children"),
+         Output("daily-readings-table-container", "children")],
+        [Input("year-selector", "value"),
+         Input("month-selector", "value")],
+        [State("complete-consumption-data", "data"),
+         State("error-diagnosis-data", "data")]
+    )
+    def update_period_components(selected_year, selected_month, complete_data_json, diagnosis_data_json):
+        """
+        Actualiza los componentes del modal de detalles cuando se cambia el período seleccionado.
+        
+        Args:
+            selected_year: Año seleccionado
+            selected_month: Mes seleccionado
+            complete_data_json: Datos completos en formato JSON
+            diagnosis_data_json: Datos de diagnóstico en formato JSON
+            
+        Returns:
+            tuple: Título actualizado, figura actualizada, estadísticas actualizadas, tabla actualizada
+        """
+        if not selected_year or not selected_month or not complete_data_json:
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        
+        try:
+            # Cargar los datos completos
+            from io import StringIO
+            import pandas as pd
+            import json
+            
+            df = pd.read_json(StringIO(complete_data_json), orient='split')
+            
+            # Cargar los datos de diagnóstico
+            diagnosis_data = json.loads(diagnosis_data_json)
+            asset_id = diagnosis_data.get("asset_id")
+            consumption_type = diagnosis_data.get("consumption_type")
+            
+            # Actualizar el título
+            title = f"Consumo diario - {selected_month}/{selected_year}"
+            
+            # Generar la figura actualizada
+            figure = generate_daily_consumption_chart(df, asset_id, selected_month, selected_year, consumption_type)
+            
+            # Generar las estadísticas actualizadas
+            stats = generate_consumption_stats(df, asset_id, selected_month, selected_year, consumption_type)
+            
+            # Generar la tabla actualizada
+            table = generate_daily_readings_table(df, asset_id, selected_month, selected_year, consumption_type)
+            
+            return title, figure, stats, table
+            
+        except Exception as e:
+            debug_log(f"[ERROR] Error al actualizar componentes por período: {str(e)}")
+            import traceback
+            debug_log(traceback.format_exc())
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+

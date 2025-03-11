@@ -71,32 +71,29 @@ def create_progress_bar(progress_value, success_count=0, failed_count=0, total_c
 
 def create_progress_chart(success_count, failed_count):
     """
-    Crea un gráfico de pastel que muestra la proporción de éxitos y fallos.
+    Crea un gráfico de pastel para mostrar el progreso de la regeneración.
     
     Args:
         success_count: Número de regeneraciones exitosas
         failed_count: Número de regeneraciones fallidas
         
     Returns:
-        dcc.Graph: Componente de gráfico
+        plotly.graph_objects.Figure: Figura de Plotly
     """
-    total = success_count + failed_count
-    if total == 0:
-        # Si no hay datos, mostrar un gráfico vacío
-        return html.Div("No hay datos para mostrar", className="text-center py-3")
+    # Crear los datos para el gráfico
+    labels = ['Exitosas', 'Fallidas']
+    values = [success_count, failed_count]
+    colors = ['#28a745', '#dc3545']  # Verde para éxito, rojo para fallo
     
-    # Crear el gráfico de pastel
-    fig = go.Figure(data=[
-        go.Pie(
-            labels=['Éxitos', 'Fallos'],
-            values=[success_count, failed_count],
-            hole=.3,
-            marker_colors=['#28a745', '#dc3545'],
-            textinfo='value+percent',
-            insidetextorientation='radial'
-        )
-    ])
+    # Crear el gráfico
+    fig = go.Figure(data=[go.Pie(
+        labels=labels,
+        values=values,
+        hole=.4,
+        marker_colors=colors
+    )])
     
+    # Personalizar el diseño
     fig.update_layout(
         margin=dict(l=20, r=20, t=30, b=20),
         height=250,
@@ -110,7 +107,8 @@ def create_progress_chart(success_count, failed_count):
         )
     )
     
-    return dcc.Graph(figure=fig, config={'displayModeBar': False})
+    # Devolver solo la figura, no el componente dcc.Graph
+    return fig
 
 def create_regeneration_progress_component(progress_data=None):
     """
@@ -155,7 +153,10 @@ def create_regeneration_progress_component(progress_data=None):
         
         # Mostrar el gráfico solo si hay datos procesados
         html.Div(
-            create_progress_chart(success, failed) if processed > 0 else None,
+            dcc.Graph(
+                figure=create_progress_chart(success, failed),
+                config={'displayModeBar': False}
+            ) if processed > 0 else None,
             className="mt-3"
         ),
         

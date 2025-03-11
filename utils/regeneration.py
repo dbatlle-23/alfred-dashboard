@@ -10,9 +10,10 @@ from datetime import datetime
 import traceback
 from io import StringIO
 import numpy as np
+import logging
 
 # Importar funciones de API necesarias
-from utils.api import get_daily_readings_for_year_multiple_tags_project_parallel
+from utils.api import get_daily_readings_for_year_multiple_tags_project_parallel, ensure_project_folder_exists, get_daily_readings_for_tag, clean_readings_file_errors
 from utils.error_analysis import group_errors_for_regeneration
 
 # Constantes
@@ -340,4 +341,82 @@ def is_regeneration_in_progress():
         bool: True si hay una regeneración en progreso, False en caso contrario
     """
     status = get_regeneration_status()
-    return status is not None and status.get('status') == 'in_progress' 
+    return status is not None and status.get('status') == 'in_progress'
+
+def regenerate_readings(asset_id, consumption_type, project_id, token_data, month_year=None):
+    """
+    Regenera las lecturas para un asset y tipo de consumo específicos.
+    
+    Args:
+        asset_id (str): ID del asset
+        consumption_type (str): Tipo de consumo
+        project_id (str): ID del proyecto
+        token_data (str): Token JWT
+        month_year (str, optional): Mes y año en formato MM_YYYY
+        
+    Returns:
+        dict: Resultado de la regeneración
+    """
+    # Configurar el logger
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Importar las funciones necesarias
+        from utils.api import ensure_project_folder_exists, get_daily_readings_for_tag, clean_readings_file_errors
+        
+        # Importar el diccionario de tags desde layouts/metrics.py
+        from layouts.metrics import ConsumptionTags
+        
+        # Crear el diccionario TAGS_TO_CONSUMPTION_TYPE a partir de ConsumptionTags
+        TAGS_TO_CONSUMPTION_TYPE = {
+            ConsumptionTags.DOMESTIC_COLD_WATER.value: "Agua fría doméstica",
+            ConsumptionTags.DOMESTIC_ENERGY_GENERAL.value: "Energía general",
+            ConsumptionTags.DOMESTIC_HOT_WATER.value: "Agua caliente doméstica",
+            ConsumptionTags.DOMESTIC_WATER_GENERAL.value: "Agua general",
+            ConsumptionTags.PEOPLE_FLOW_IN.value: "Flujo de personas (entrada)",
+            ConsumptionTags.PEOPLE_FLOW_OUT.value: "Flujo de personas (salida)",
+            ConsumptionTags.THERMAL_ENERGY_COOLING.value: "Energía térmica frío",
+            ConsumptionTags.THERMAL_ENERGY_HEAT.value: "Energía térmica calor"
+        }
+        
+        # Obtener el tag correspondiente al tipo de consumo
+        tag = None
+        for tag_value, consumption_name in TAGS_TO_CONSUMPTION_TYPE.items():
+            if consumption_name == consumption_type:
+                tag = tag_value
+                break
+        
+        if not tag:
+            logger.error(f"No se encontró el tag para el tipo de consumo {consumption_type}")
+            return {"success": False, "message": f"No se encontró el tag para el tipo de consumo {consumption_type}"}
+        
+        # Asegurar que existe la carpeta del proyecto
+        project_folder = ensure_project_folder_exists(project_id)
+        
+        # Nombre del archivo de lecturas
+        file_name = f"daily_readings_{asset_id}_{tag}.csv"
+        file_path = os.path.join(project_folder, file_name)
+        
+        # Verificar si el archivo existe y limpiar errores si es necesario
+        if os.path.exists(file_path):
+            logger.info(f"Verificando y limpiando errores en el archivo {file_name}")
+            clean_data, error_dates = clean_readings_file_errors(file_path)
+            if error_dates:
+                logger.info(f"Se encontraron {len(error_dates)} fechas con errores que se intentarán regenerar.")
+        
+        # Regenerar las lecturas
+        logger.info(f"Regenerando lecturas para asset_id={asset_id}, consumption_type={consumption_type}, tag={tag}")
+        result = get_daily_readings_for_tag(asset_id, tag, project_folder, token_data)
+        
+        if result is not None:
+            logger.info(f"Regeneración completada con éxito. Se obtuvieron {len(result)} registros.")
+            return {"success": True, "message": f"Regeneración completada con éxito. Se obtuvieron {len(result)} registros."}
+        else:
+            logger.error(f"Error al regenerar lecturas para asset_id={asset_id}, consumption_type={consumption_type}")
+            return {"success": False, "message": "Error al regenerar lecturas."}
+    
+    except Exception as e:
+        import traceback
+        logger.error(f"Error al regenerar lecturas: {str(e)}")
+        logger.error(traceback.format_exc())
+        return {"success": False, "message": f"Error al regenerar lecturas: {str(e)}"} 

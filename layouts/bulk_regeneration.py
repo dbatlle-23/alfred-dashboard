@@ -11,93 +11,73 @@ import json
 
 def create_bulk_regeneration_modal(error_data=None):
     """
-    Crea un modal para la regeneración masiva de lecturas con errores.
+    Crea el modal para la regeneración masiva de lecturas.
     
     Args:
         error_data: Datos de análisis de errores
-            {
-                'total_errors': número total de errores,
-                'errors_by_asset': errores agrupados por asset,
-                'errors_by_consumption_type': errores agrupados por tipo de consumo,
-                'errors_by_period': errores agrupados por período
-            }
-        
-    Returns:
-        dbc.Modal: Modal de regeneración masiva
     """
-    print(f"[DEBUG] create_bulk_regeneration_modal - error_data: {error_data}")
-    
-    # Crear el contenido del modal
-    modal_header = dbc.ModalHeader(dbc.ModalTitle("Regeneración masiva de lecturas con errores"))
+    # Encabezado del modal
+    modal_header = dbc.ModalHeader(dbc.ModalTitle("Regeneración Masiva de Lecturas"), close_button=True)
     
     # Contenido del cuerpo del modal
     modal_body_content = []
     
-    # Resumen de errores
+    # Si hay datos de error, mostrar resumen
     if error_data and error_data.get('total_errors', 0) > 0:
-        total_errors = error_data.get('total_errors', 0)
-        errors_by_asset = error_data.get('errors_by_asset', {})
-        errors_by_consumption_type = error_data.get('errors_by_consumption_type', {})
-        errors_by_period = error_data.get('errors_by_period', {})
+        # Añadir resumen de errores
+        modal_body_content.append(html.Div([
+            html.H5("Resumen de errores"),
+            html.P(f"Total de errores encontrados: {error_data['total_errors']}"),
+            html.Div([
+                html.Div([
+                    html.H6("Por asset:"),
+                    html.Ul([html.Li(f"{asset}: {count}") for asset, count in error_data.get('by_asset', {}).items()])
+                ], className="col"),
+                html.Div([
+                    html.H6("Por tipo de consumo:"),
+                    html.Ul([html.Li(f"{consumption_type}: {count}") for consumption_type, count in error_data.get('by_consumption_type', {}).items()])
+                ], className="col"),
+                html.Div([
+                    html.H6("Por período:"),
+                    html.Ul([html.Li(f"{period}: {count}") for period, count in error_data.get('by_period', {}).items()])
+                ], className="col")
+            ], className="row")
+        ], className="mb-4"))
         
-        # Crear resumen
-        summary = html.Div([
-            html.H5("Resumen de errores encontrados", className="mb-3"),
-            html.P(f"Se encontraron {total_errors} errores en total."),
-            
-            # Desglose por asset
-            html.Div([
-                html.H6("Errores por asset:"),
-                html.Ul([
-                    html.Li(f"{asset}: {count} errores") 
-                    for asset, count in errors_by_asset.items()
-                ])
-            ], className="mb-3"),
-            
-            # Desglose por tipo de consumo
-            html.Div([
-                html.H6("Errores por tipo de consumo:"),
-                html.Ul([
-                    html.Li(f"{consumption_type}: {count} errores") 
-                    for consumption_type, count in errors_by_consumption_type.items()
-                ])
-            ], className="mb-3"),
-            
-            # Desglose por período
-            html.Div([
-                html.H6("Errores por período:"),
-                html.Ul([
-                    html.Li(f"{period}: {count} errores") 
-                    for period, count in errors_by_period.items()
-                ])
-            ], className="mb-3")
-        ], className="mb-4")
+        # Añadir opciones de regeneración
+        modal_body_content.append(create_regeneration_options())
         
-        modal_body_content.append(summary)
+        # Añadir contenedor para la previsualización
+        modal_body_content.append(html.Div(id="bulk-regenerate-preview-container", className="mb-4"))
+        
+        # Añadir contenedor para el progreso
+        modal_body_content.append(html.Div(id="bulk-regenerate-progress-container", className="mb-4"))
+        
+        # Añadir contenedor para los resultados
+        modal_body_content.append(html.Div(id="bulk-regenerate-results-container", className="mb-4"))
+        
+        # Añadir intervalo para actualizar el progreso
+        modal_body_content.append(dcc.Interval(
+            id="bulk-regenerate-interval",
+            interval=2000,  # 2 segundos
+            n_intervals=0,
+            disabled=True
+        ))
     else:
-        modal_body_content.append(html.Div("No se encontraron errores para regenerar.", className="alert alert-info mb-4"))
+        # Si no hay errores, mostrar mensaje
+        modal_body_content.append(html.Div([
+            html.P("No se encontraron errores para regenerar."),
+            html.P("Por favor, realice un análisis de errores primero.")
+        ], className="alert alert-warning"))
     
-    # Opciones de regeneración
-    modal_body_content.append(html.Div([
-        html.H5("Opciones de regeneración", className="mb-3"),
-        create_regeneration_options()
-    ], className="mb-4"))
-    
-    # Contenedor para la vista previa
-    modal_body_content.append(html.Div(
-        html.Div("Haga clic en 'Previsualizar' para ver los elementos que se regenerarán.", className="text-muted"),
-        id="bulk-regenerate-preview-container",
-        className="mb-4"
-    ))
-    
-    # Contenedor para el progreso
-    modal_body_content.append(html.Div(id="bulk-regenerate-progress-container", className="mb-4"))
-    
-    # Contenedor para los resultados
-    modal_body_content.append(html.Div(id="bulk-regenerate-results-container", className="mb-4"))
-    
-    # Almacenamiento de datos de análisis de errores
+    # Añadir store para datos de error
     modal_body_content.append(dcc.Store(id="error-analysis-data", data=json.dumps(error_data) if error_data else None))
+    
+    # Añadir store para datos filtrados
+    modal_body_content.append(dcc.Store(id="filtered-errors-data"))
+    
+    # Añadir store para datos de regeneración
+    modal_body_content.append(dcc.Store(id="bulk-regenerate-data"))
     
     modal_body = dbc.ModalBody(modal_body_content)
     

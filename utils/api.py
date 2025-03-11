@@ -646,6 +646,12 @@ def get_sensors_with_tags(asset_id, token=None):
                     "gateway_id": gateway_id,
                     "device_id": device_id
                 })
+            
+            # Registrar información sobre los sensores encontrados
+            logger.info(f"Se encontraron {len(sensor_list)} sensores para el asset {asset_id}")
+            for s in sensor_list:
+                logger.debug(f"Sensor: tag={s['tag_name']}, gateway={s['gateway_id']}, device={s['device_id']}, sensor={s['sensor_id']}")
+            
             return sensor_list
     else:
         logger.error(f"Error al obtener sensores: {response.status_code}, {response.text}")
@@ -769,6 +775,7 @@ def get_daily_readings_for_tag(asset_id, tag_name, project_folder, token=None):
     """
     Obtiene lecturas diarias de un sensor asociado a un tag durante un año.
     Actualiza el archivo existente si ya hay datos guardados, solo a partir del último día registrado y hasta el día actual.
+    También limpia los registros con errores e intenta obtener nuevos valores para esas fechas.
     
     Args:
         asset_id (str): ID del asset
@@ -776,124 +783,301 @@ def get_daily_readings_for_tag(asset_id, tag_name, project_folder, token=None):
         project_folder (str): Ruta a la carpeta del proyecto
         token (str, optional): Token JWT para autenticación
     """
-    # Obtener el sensor UUID desde el tag
-    sensors = get_sensors_with_tags(asset_id, token)
-    sensor = next((s for s in sensors if s.get("tag_name") == tag_name), None)
-    if not sensor:
-        logger.error(f"No se encontró un sensor con el tag '{tag_name}' para el asset {asset_id}.")
-        return
-
-    sensor_uuid = sensor.get("sensor_uuid")
-    logger.info(f"Obteniendo lecturas diarias para el sensor {sensor_uuid} ({tag_name}) en el asset {asset_id}.")
-
-    # Configurar rango de fechas
-    start_date = datetime(2024, 1, 1)
-    end_date = datetime.now()  # Hasta hoy si el año actual, o el 31 de diciembre
-
     # Nombre del archivo donde se guardan las lecturas
     file_name = f"daily_readings_{asset_id}_{tag_name}.csv"
     file_path = os.path.join(project_folder, file_name)
+    
+    # Verificar si el archivo existe y limpiar errores si es necesario
+    if os.path.exists(file_path):
+        logger.info(f"Verificando y limpiando errores en el archivo {file_name}")
+        clean_data, error_dates = clean_readings_file_errors(file_path)
+        if error_dates:
+            logger.info(f"Se encontraron {len(error_dates)} fechas con errores que se intentarán actualizar.")
+    
+    # Obtener el sensor UUID desde el tag
+    sensors = get_sensors_with_tags(asset_id, token)
+    logger.debug(f"Sensores obtenidos para el asset {asset_id}: {sensors}")
+    
+    sensor = next((s for s in sensors if s.get("tag_name") == tag_name), None)
+    if not sensor:
+        logger.warning(f"Sensor no encontrado ({tag_name}) en el asset {asset_id}. Intentando obtener información del sensor directamente.")
+        
+        # Intentar obtener información del sensor directamente desde la API
+        try:
+            # Llamar a la API para obtener los sensores disponibles
+            url = f'{BASE_URL}/data/assets/{asset_id}/available-utilities-sensors'
+            headers = get_auth_headers(token)
+            response = requests.get(url, headers=headers)
+            
+            if response.status_code == 200:
+                api_sensors = response.json().get('data', [])
+                logger.debug(f"Sensores obtenidos directamente de la API: {api_sensors}")
+                
+                # Buscar el sensor con el tag específico
+                api_sensor = next((s for s in api_sensors if s.get("tag_name") == tag_name), None)
+                
+                if api_sensor:
+                    logger.info(f"Sensor encontrado directamente en la API: {api_sensor}")
+                    gateway_id = api_sensor.get('gateway_id')
+                    device_id = api_sensor.get('device_id')
+                    sensor_id = api_sensor.get('sensor_id')
+                    
+                    # Intentar obtener lecturas usando los parámetros del sensor
+                    return get_daily_readings_with_sensor_params(asset_id, gateway_id, device_id, sensor_id, tag_name, project_folder, token)
+            
+            logger.error(f"No se pudo encontrar el sensor con tag {tag_name} para el asset {asset_id} ni siquiera consultando directamente la API.")
+        except Exception as e:
+            logger.error(f"Error al intentar obtener información del sensor directamente: {str(e)}")
+        
+        # Crear un DataFrame vacío para indicar que no hay datos pero no es un error
+        empty_df = pd.DataFrame(columns=["date", "value", "timestamp"])
+        return empty_df
 
+    # Obtener los parámetros del sensor
+    gateway_id = sensor.get("gateway_id")
+    device_id = sensor.get("device_id")
+    sensor_id = sensor.get("sensor_id")
+    sensor_uuid = sensor.get("sensor_uuid")
+    
+    logger.info(f"Obteniendo lecturas diarias para el sensor {sensor_uuid} ({tag_name}) en el asset {asset_id}.")
+    logger.info(f"Parámetros del sensor: gateway_id={gateway_id}, device_id={device_id}, sensor_id={sensor_id}")
+    
+    # Usar la función get_daily_readings_with_sensor_params para obtener las lecturas
+    return get_daily_readings_with_sensor_params(asset_id, gateway_id, device_id, sensor_id, tag_name, project_folder, token)
+
+def get_daily_readings_with_sensor_params(asset_id, gateway_id, device_id, sensor_id, tag_name, project_folder, token=None):
+    """
+    Obtiene lecturas diarias usando los parámetros del sensor directamente.
+    
+    Args:
+        asset_id (str): ID del asset
+        gateway_id (str): ID del gateway
+        device_id (str): ID del dispositivo
+        sensor_id (str): ID del sensor
+        tag_name (str): Nombre del tag
+        project_folder (str): Ruta a la carpeta del proyecto
+        token (str, optional): Token JWT para autenticación
+        
+    Returns:
+        pd.DataFrame: DataFrame con las lecturas diarias
+    """
+    logger.info(f"Obteniendo lecturas diarias con parámetros directos: asset_id={asset_id}, gateway_id={gateway_id}, device_id={device_id}, sensor_id={sensor_id}")
+    
+    # Configurar rango de fechas
+    start_date = datetime(2024, 1, 1)
+    end_date = datetime.now()
+    
+    # Nombre del archivo donde se guardan las lecturas
+    file_name = f"daily_readings_{asset_id}_{tag_name}.csv"
+    file_path = os.path.join(project_folder, file_name)
+    
     # Verificar si el archivo ya existe y cargarlo
     existing_data = None
+    error_dates = []
     if os.path.exists(file_path):
-        existing_data = pd.read_csv(file_path)
         try:
-            existing_data["date"] = pd.to_datetime(existing_data["date"], errors='coerce')  # Manejar errores de conversión
+            # Cargar el archivo existente
+            existing_data = pd.read_csv(file_path)
+            
+            # Verificar si hay registros con errores
+            error_rows = existing_data[existing_data['value'] == 'Error']
+            if not error_rows.empty:
+                logger.info(f"Se encontraron {len(error_rows)} registros con errores en el archivo existente.")
+                
+                # Guardar las fechas con errores para intentar actualizarlas
+                error_dates = error_rows['date'].tolist()
+                
+                # Eliminar los registros con errores
+                existing_data = existing_data[existing_data['value'] != 'Error']
+                logger.info(f"Se eliminaron los registros con errores. Quedan {len(existing_data)} registros válidos.")
+                
+                # Guardar el archivo limpio
+                existing_data.to_csv(file_path, index=False)
+                logger.info(f"Se guardó el archivo limpio: {file_path}")
+            
+            # Convertir la columna de fecha a datetime
+            existing_data["date"] = pd.to_datetime(existing_data["date"], errors='coerce')
+            
+            # Verificar si hay fechas inválidas
+            invalid_dates = existing_data[existing_data["date"].isnull()]
+            if not invalid_dates.empty:
+                logger.warning(f"Se encontraron {len(invalid_dates)} fechas inválidas en el archivo existente.")
+                existing_data = existing_data[~existing_data["date"].isnull()]
+                logger.info(f"Se eliminaron las fechas inválidas. Quedan {len(existing_data)} registros válidos.")
+            
+            logger.info(f"Archivo existente encontrado: {file_name}. Actualizando lecturas faltantes.")
         except Exception as e:
-            logger.error(f"Error al convertir las fechas del archivo existente: {e}")
-            return
-
-        logger.info(f"Archivo existente encontrado: {file_name}. Actualizando lecturas faltantes.")
-
+            logger.error(f"Error al procesar el archivo existente: {e}")
+            existing_data = None
+    
     # Determinar la fecha de inicio para las nuevas lecturas
     if existing_data is not None and not existing_data.empty:
         last_recorded_date = existing_data["date"].max()
-
-        # Asegurar que last_recorded_date es datetime y calcular start_date
         if pd.notnull(last_recorded_date) and isinstance(last_recorded_date, pd.Timestamp):
-            start_date = max(start_date, last_recorded_date + timedelta(days=1))
+            # Si hay fechas con errores, asegurarse de que start_date sea anterior a la primera fecha con error
+            if error_dates:
+                error_dates_dt = pd.to_datetime(error_dates, errors='coerce')
+                error_dates_dt = error_dates_dt[~pd.isnull(error_dates_dt)]
+                if not error_dates_dt.empty:
+                    min_error_date = min(error_dates_dt)
+                    start_date = min(start_date, min_error_date)
+                    logger.info(f"Ajustando fecha de inicio a {start_date.strftime('%Y-%m-%d')} para incluir fechas con errores.")
+            else:
+                start_date = max(start_date, last_recorded_date + timedelta(days=1))
+                logger.info(f"Última fecha registrada: {last_recorded_date.strftime('%Y-%m-%d')}. Nueva fecha de inicio: {start_date.strftime('%Y-%m-%d')}")
         else:
             logger.error(f"La última fecha registrada no es válida: {last_recorded_date}")
-            return
-
-    # Validar que start_date y end_date son datetime antes de comparar
+            if existing_data is not None:
+                return existing_data
+    
+    # Validar fechas
     if not isinstance(start_date, datetime):
         start_date = pd.to_datetime(start_date)
-
     if not isinstance(end_date, datetime):
         end_date = pd.to_datetime(end_date)
-
-    # Si la fecha de inicio es posterior a la fecha de finalización, no hay nada que actualizar
-    if start_date > end_date:
-        logger.info(f"Todas las lecturas están actualizadas hasta el día de hoy ({end_date.strftime('%Y-%m-%d')}).")
+    
+    # Si la fecha de inicio es posterior a la fecha de finalización y no hay fechas con errores, no hay nada que actualizar
+    if start_date > end_date and not error_dates:
+        logger.info(f"No hay nuevas lecturas para actualizar. Última fecha registrada: {start_date.strftime('%Y-%m-%d')}")
         return existing_data
-
-    # Generar rango de fechas faltantes
-    missing_dates = [start_date + timedelta(days=i) for i in range((end_date - start_date).days + 1)]
-
-    # Obtener lecturas para fechas faltantes
-    daily_readings = []
-    with tqdm(total=len(missing_dates), desc="Obteniendo lecturas faltantes") as pbar:
-        for date in missing_dates:
-            # Usar formato MM-DD-YYYY que es el que espera el servidor
-            formatted_date = date.strftime("%m-%d-%Y")
-            logger.debug(f"Obteniendo lectura para fecha {formatted_date}")
-            value, timestamp = get_sensor_value_for_date(asset_id, sensor.get("device_id"), sensor.get("sensor_id"), sensor.get("gateway_id"), formatted_date, token)
+    
+    # Formatear fechas para la API
+    from_date = start_date.strftime("%m-%d-%Y")
+    until_date = end_date.strftime("%m-%d-%Y")
+    
+    # Construir la URL para obtener las lecturas
+    url = f"{BASE_URL}/data/assets/time-series/{asset_id}"
+    
+    # Parámetros de la consulta
+    params = {
+        "from": from_date,
+        "until": until_date,
+        "sensor": "",
+        "device_id": device_id,
+        "sensor_id": sensor_id,
+        "gateway_id": gateway_id
+    }
+    
+    # Usar el token proporcionado o intentar obtenerlo del servicio de autenticación
+    if not token:
+        token = auth_service.get_token()
+    
+    # Si no hay token disponible, registrar un error y devolver None
+    if not token:
+        logger.error(f"No se pudo obtener un token JWT válido para consultar lecturas del asset {asset_id}")
+        return existing_data if existing_data is not None else None
+    
+    # Usar get_auth_headers para obtener los headers de autenticación
+    headers = get_auth_headers(token)
+    
+    # Realizar la solicitud a la API
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            readings = data.get("data", [])
             
-            # Añadir más información al log, especialmente cuando no hay datos disponibles
-            sensor_info = f"asset_id:{asset_id}, device_id:{sensor.get('device_id')}, sensor_id:{sensor.get('sensor_id')}, gateway_id:{sensor.get('gateway_id')}"
-            if value == "Sin datos disponibles":
-                logger.info(f"t:{formatted_date}:v:{value} - {sensor_info}")
+            if not readings:
+                logger.warning(f"No se encontraron lecturas para el período {from_date} a {until_date}")
+                return existing_data if existing_data is not None else pd.DataFrame(columns=["date", "value", "timestamp"])
+            
+            # Procesar las lecturas
+            processed_readings = []
+            for reading in readings:
+                timestamp = reading.get("ts")
+                value = reading.get("v")
+                
+                if timestamp and value:
+                    date = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
+                    processed_readings.append({
+                        "date": date,
+                        "value": value,
+                        "timestamp": timestamp
+                    })
+            
+            # Crear DataFrame con las nuevas lecturas
+            new_data = pd.DataFrame(processed_readings)
+            if new_data.empty:
+                logger.warning("No se pudieron procesar las lecturas obtenidas")
+                return existing_data if existing_data is not None else None
+            
+            # Convertir la columna de fecha a datetime
+            new_data["date"] = pd.to_datetime(new_data["date"])
+            
+            # Agrupar por fecha y tomar el último valor de cada día
+            new_data = new_data.sort_values("timestamp").groupby("date").last().reset_index()
+            
+            # Combinar con datos existentes si los hay
+            if existing_data is not None and not existing_data.empty:
+                # Eliminar fechas duplicadas (preferir nuevas lecturas)
+                existing_data = existing_data[~existing_data["date"].isin(new_data["date"])]
+                combined_data = pd.concat([existing_data, new_data], ignore_index=True)
+                combined_data = combined_data.sort_values("date")
             else:
-                logger.info(f"t:{formatted_date}:v:{value}")
-
-            if value != "Sin datos disponibles":
-                daily_readings.append({
-                    "date": date.strftime("%Y-%m-%d"),
-                    "value": value,
-                    "timestamp": timestamp
-                })
-            pbar.update(1)
-
-    # Crear DataFrame con lecturas nuevas
-    new_data = pd.DataFrame(daily_readings)
-    if not new_data.empty:
-        logger.info(f"Lecturas faltantes obtenidas: {len(new_data)} días.")
-
-        # Convertir la columna 'date' de ambos DataFrame a datetime
-        if existing_data is not None:
-            existing_data["date"] = pd.to_datetime(existing_data["date"], errors='coerce')
-        new_data["date"] = pd.to_datetime(new_data["date"], errors='coerce')
-
-        # Combinar con los datos existentes (si los hay)
-        if existing_data is not None:
-            updated_data = pd.concat([existing_data, new_data]).drop_duplicates(subset=["date"]).sort_values(by="date")
+                combined_data = new_data
+            
+            # Guardar los datos combinados
+            combined_data.to_csv(file_path, index=False)
+            logger.info(f"Lecturas guardadas en {file_path}. Total de registros: {len(combined_data)}")
+            
+            # Verificar si se actualizaron las fechas con errores
+            if error_dates:
+                error_dates_dt = pd.to_datetime(error_dates, errors='coerce')
+                error_dates_dt = error_dates_dt[~pd.isnull(error_dates_dt)]
+                updated_error_dates = combined_data[combined_data["date"].isin(error_dates_dt)]
+                logger.info(f"Se actualizaron {len(updated_error_dates)} de {len(error_dates_dt)} fechas que tenían errores.")
+            
+            return combined_data
         else:
-            updated_data = new_data
+            logger.error(f"Error al obtener lecturas: {response.status_code} - {response.text}")
+            return existing_data if existing_data is not None else None
+    
+    except Exception as e:
+        logger.error(f"Error al obtener lecturas: {str(e)}")
+        return existing_data if existing_data is not None else None
 
-        # Verificar que las fechas son consistentes después de la combinación
-        if updated_data["date"].isnull().any():
-            logger.error("Se encontraron fechas inválidas en el DataFrame combinado. Por favor, verifica los datos.")
-            return
-
-        # Guardar los datos actualizados
-        updated_data.to_csv(file_path, index=False)
-        logger.info(f"Archivo actualizado: {file_path}.")
-
-        # Validar el archivo guardado
-        validated_data = pd.read_csv(file_path)
-        validated_data["date"] = pd.to_datetime(validated_data["date"], errors='coerce')
-        if validated_data["date"].isnull().any():
-            logger.error("Error: Las fechas en el archivo actualizado no son válidas.")
-            return
-
-        # Mostrar primeras filas como ejemplo
-        logger.info("\nEjemplo de datos:")
-        logger.info(validated_data.head())
-        return updated_data
-    else:
-        logger.error(f"No se obtuvieron nuevas lecturas para el sensor {sensor_uuid} ({tag_name}).")
+def clean_readings_file_errors(file_path):
+    """
+    Limpia los registros con errores de un archivo de lecturas.
+    
+    Args:
+        file_path (str): Ruta al archivo de lecturas
+        
+    Returns:
+        tuple: (DataFrame limpio, lista de fechas con errores)
+    """
+    if not os.path.exists(file_path):
+        logger.warning(f"El archivo {file_path} no existe.")
+        return None, []
+    
+    try:
+        # Cargar el archivo
+        data = pd.read_csv(file_path)
+        
+        # Verificar si hay registros con errores
+        error_rows = data[data['value'] == 'Error']
+        if error_rows.empty:
+            logger.info(f"No se encontraron registros con errores en el archivo {file_path}.")
+            return data, []
+        
+        # Guardar las fechas con errores
+        error_dates = error_rows['date'].tolist()
+        logger.info(f"Se encontraron {len(error_dates)} registros con errores en el archivo {file_path}.")
+        
+        # Eliminar los registros con errores
+        clean_data = data[data['value'] != 'Error']
+        logger.info(f"Se eliminaron los registros con errores. Quedan {len(clean_data)} registros válidos.")
+        
+        # Guardar el archivo limpio
+        clean_data.to_csv(file_path, index=False)
+        logger.info(f"Se guardó el archivo limpio: {file_path}")
+        
+        return clean_data, error_dates
+    
+    except Exception as e:
+        logger.error(f"Error al limpiar el archivo {file_path}: {str(e)}")
+        return None, []
 
 def get_sensor_uuid(gateway_id, device_id, sensor_id, token=None):
     """
