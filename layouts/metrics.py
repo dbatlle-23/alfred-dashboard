@@ -61,25 +61,41 @@ CONSUMPTION_TAGS_MAPPING = {
 
 def debug_log(message):
     """
-    Función para mostrar logs de depuración solo cuando la aplicación está en modo debug
+    Función para registrar mensajes de depuración.
+    Imprime el mensaje en la consola y lo guarda en un archivo de log.
     
     Args:
-        message: Mensaje a mostrar
+        message: El mensaje a registrar
     """
     # Mostrar siempre el mensaje en la consola
     print(message)
     
     # Guardar el mensaje en un archivo de log
     try:
-        with open('debug_log.txt', 'a') as f:
-            import datetime
-            timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            f.write(f"[{timestamp}] {message}\n")
+        # Crear directorio de logs si no existe
+        os.makedirs('logs', exist_ok=True)
+        
+        # Obtener la fecha actual para el nombre del archivo
+        current_date = datetime.now().strftime('%Y-%m-%d')
+        log_file = f'logs/debug_{current_date}.log'
+        
+        # Añadir timestamp al mensaje
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        log_message = f'[{timestamp}] {message}\n'
+        
+        # Escribir en el archivo
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(log_message)
     except Exception as e:
-        print(f"Error al escribir en el archivo de log: {str(e)}")
+        print(f"Error al escribir en el archivo de log: {e}")
 
 # Layout para la página de Metrics
 layout = html.Div([
+    # Componentes ocultos para almacenar datos
+    dcc.Store(id="metrics-data-store"),
+    dcc.Store(id="error-analysis-data"),
+    dcc.Store(id="filtered-errors-data"),
+    
     dbc.Row([
         dbc.Col([
             html.H1("Análisis de Consumos", className="mb-4"),
@@ -267,7 +283,16 @@ layout = html.Div([
                         dbc.Card([
                             dbc.CardHeader("Lecturas Mensuales por Asset"),
                             dbc.CardBody([
+                                html.Div([
+                                    dbc.Button(
+                                        [html.I(className="fas fa-sync-alt me-2"), "Regenerar lecturas con errores"],
+                                        id="bulk-regenerate-readings-btn",
+                                        color="warning",
+                                        className="mb-3",
+                                        style={"float": "right"}
+                                    ),
                                 html.Div(id="metrics-monthly-readings-table")
+                                ])
                             ])
                         ], className="shadow-sm")
                     ], className="mb-4"),
@@ -1792,6 +1817,24 @@ def register_callbacks(app):
                 ),
                 # Store para datos de regeneración
                 dcc.Store(id="regenerate-readings-data"),
+                
+                # Modal para regeneración masiva de lecturas
+                dbc.Modal(
+                    [
+                        dbc.ModalHeader(dbc.ModalTitle("Regeneración Masiva de Lecturas"), close_button=True),
+                        dbc.ModalBody(id="bulk-regenerate-modal-body"),
+                        dbc.ModalFooter([
+                            dbc.Button("Cancelar", id="cancel-bulk-regenerate", className="me-2"),
+                            dbc.Button("Previsualizar", id="preview-bulk-regenerate", color="warning", className="me-2"),
+                            dbc.Button("Regenerar", id="confirm-bulk-regenerate", color="primary")
+                        ]),
+                    ],
+                    id="bulk-regenerate-modal",
+                    size="lg",
+                    is_open=False,
+                ),
+                # Store para datos de regeneración masiva
+                dcc.Store(id="bulk-regenerate-data"),
             ])
         
         except Exception as e:
@@ -2427,11 +2470,11 @@ def register_callbacks(app):
                         month_year = "_".join(link_parts[2:])
                         
                         debug_log(f"[DEBUG] Parámetros extraídos del enlace: asset_id={asset_id}, consumption_type={consumption_type}, month_year={month_year}")
-                else:
-                    # Si no se reconoce la acción, no hacer nada
-                    debug_log(f"[DEBUG] Acción no reconocida: {cell_value}")
-                    debug_log("=== FIN DEL CALLBACK show_consumption_detail_modal (Acción no reconocida) ===")
-                    return detail_is_open, None, "", update_is_open, None, None, False, None, None
+                    else:
+                        # Si no se reconoce la acción, no hacer nada
+                            debug_log(f"[DEBUG] Acción no reconocida: {cell_value}")
+                            debug_log("=== FIN DEL CALLBACK show_consumption_detail_modal (Acción no reconocida) ===")
+                            return detail_is_open, None, "", update_is_open, None, None, False, None, None
             
 # Obtener datos básicos de la fila si no se han obtenido de los enlaces
             if "asset_id" not in locals() or "consumption_type" not in locals() or "month_year" not in locals():
@@ -2441,7 +2484,7 @@ def register_callbacks(app):
                 debug_log(f"[DEBUG] Datos básicos obtenidos de la fila: asset_id={asset_id}, consumption_type={consumption_type}, month_year={month_year}")
             else:
                 debug_log(f"[DEBUG] Usando datos básicos obtenidos de los enlaces: asset_id={asset_id}, consumption_type={consumption_type}, month_year={month_year}")
-
+            
             # Extraer el mes y el año
             year, month = month_year.split("-")
             
@@ -2521,13 +2564,13 @@ def register_callbacks(app):
                             dbc.Button(
                                 "Ver logs de error", 
                                 id="view-error-logs-btn", 
-                                color="warning", 
+                                color="warning",
                                 className="me-2"
                             ),
                             dbc.Button(
                                 "Obtener lecturas en tiempo real", 
                                 id="get-realtime-readings-btn", 
-                                color="success", 
+                                color="success",
                                 className="me-2"
                             ),
                             dbc.Button(
@@ -2539,9 +2582,9 @@ def register_callbacks(app):
                         ], className="mb-3"),
                         html.Div(id="error-diagnosis-results"),
                         dcc.Store(id="error-diagnosis-data", data=json.dumps({
-                            "asset_id": asset_id,
-                            "consumption_type": consumption_type,
-                            "year": year,
+                                "asset_id": asset_id,
+                                "consumption_type": consumption_type,
+                                "year": year,
                             "month": month,
                             "project_id": project_id
                         }))
@@ -2584,7 +2627,7 @@ def register_callbacks(app):
             
             debug_log("=== FIN DEL CALLBACK show_consumption_detail_modal (Ver detalles) ===")
             return True, modal_content, modal_title, False, None, None, False, None, None
-            
+        
         except Exception as e:
             debug_log(f"[ERROR] Error en callback show_consumption_detail_modal: {str(e)}")
             import traceback
@@ -3813,13 +3856,12 @@ def register_callbacks(app):
                 progress_div.children[0] = html.P(f"Obteniendo información del sensor para el asset {asset_id}...")
                 progress_div.children[1] = dbc.Progress(value=20, striped=True, animated=True)
                 
-                # Eliminar el archivo existente si existe
-                file_name = f"daily_readings_{asset_id}_{tag}.csv"
-                file_path = os.path.join(project_folder, file_name)
-                if os.path.exists(file_path):
+                # Eliminar archivo existente si lo hay
+                readings_file = os.path.join(project_folder, f"{asset_id}_{tag}.csv")
+                if os.path.exists(readings_file):
                     try:
-                        os.remove(file_path)
-                        debug_log(f"[DEBUG] regenerate_readings - Archivo existente eliminado: {file_path}")
+                        os.remove(readings_file)
+                        debug_log(f"[DEBUG] regenerate_readings - Archivo existente eliminado: {readings_file}")
                     except Exception as e:
                         debug_log(f"[ERROR] regenerate_readings - Error al eliminar archivo existente: {str(e)}")
                 
@@ -3830,16 +3872,19 @@ def register_callbacks(app):
                 # Obtener nuevas lecturas
                 get_daily_readings_for_tag(asset_id, tag, project_folder, token)
                 
-                # Actualizar progreso
-                progress_div.children[0] = html.P(f"Procesando datos...")
-                progress_div.children[1] = dbc.Progress(value=80, striped=True, animated=True)
-                
-                # Verificar si el archivo se creó correctamente
-                if os.path.exists(file_path):
+                # Verificar si se creó el archivo
+                if os.path.exists(readings_file):
                     # Actualizar progreso
-                    progress_div.children[0] = html.P(f"Lecturas regeneradas con éxito para el asset {asset_id}.", className="text-success")
+                    progress_div.children[0] = html.P(f"Lecturas regeneradas con éxito para el asset {asset_id}.")
                     progress_div.children[1] = dbc.Progress(value=100, color="success")
-                    progress_div.children.append(html.P("Haga clic en 'Visualizar Consumos' para ver los datos actualizados.", className="text-info mt-3"))
+                    
+                    # Añadir mensaje de éxito
+                    progress_div.children.append(
+                        html.Div([
+                            html.P(f"Se han regenerado correctamente las lecturas para el asset {asset_id} y el tipo de consumo {consumption_type}.", className="text-success mt-3"),
+                            html.P("Para ver los cambios, haga clic en 'Refrescar Datos'.")
+                        ])
+                    )
                     
                     # Añadir botón para cerrar el modal
                     progress_div.children.append(
@@ -3870,7 +3915,7 @@ def register_callbacks(app):
                     dbc.Progress(value=100, color="danger")
                 ])
                 return error_message, dash.no_update
-                
+            
         except Exception as e:
             import traceback
             error_msg = f"Error al procesar la solicitud: {str(e)}"
@@ -4574,14 +4619,518 @@ def register_callbacks(app):
         
         return is_open
 
-    # Callback para refrescar los datos después de regenerar
     @app.callback(
         Output("metrics-analyze-button", "n_clicks"),
         [Input("refresh-after-regenerate", "n_clicks")],
         prevent_initial_call=True
     )
     def refresh_after_regenerate(n_clicks):
-        if n_clicks:
-            # Simular un clic en el botón "Visualizar Consumos"
-            return 1
-        return dash.no_update
+        # Simular un clic en el botón de visualizar consumos
+        return 1
+    
+    # Callback para mostrar el modal de regeneración masiva
+    @app.callback(
+        [Output("bulk-regenerate-modal", "is_open"),
+         Output("bulk-regenerate-modal-body", "children")],
+        [Input("bulk-regenerate-readings-btn", "n_clicks"),
+         Input("cancel-bulk-regenerate", "n_clicks"),
+         Input("confirm-bulk-regenerate", "n_clicks")],
+        [State("bulk-regenerate-modal", "is_open"),
+         State("metrics-data-store", "data")],
+        prevent_initial_call=True
+    )
+    def show_bulk_regenerate_modal(btn_clicks, cancel_clicks, confirm_clicks, is_open, json_data):
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            return is_open, None
+        
+        trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        debug_log(f"[DEBUG] show_bulk_regenerate_modal - trigger_id: {trigger_id}")
+        
+        if trigger_id == "bulk-regenerate-readings-btn" and btn_clicks:
+            try:
+                # Importar las funciones necesarias
+                from layouts.bulk_regeneration import create_bulk_regeneration_modal
+                from utils.error_analysis import analyze_readings_errors
+                
+                # Si no hay datos, mostrar un mensaje
+                if not json_data:
+                    debug_log("[DEBUG] show_bulk_regenerate_modal - No hay datos disponibles")
+                    modal = create_bulk_regeneration_modal(None)
+                    return True, modal.children
+                
+                debug_log(f"[DEBUG] show_bulk_regenerate_modal - Tipo de json_data: {type(json_data)}")
+                debug_log(f"[DEBUG] show_bulk_regenerate_modal - Vista previa de json_data: {str(json_data)[:100]}...")
+                
+                # Intentar convertir los datos JSON a DataFrame
+                df = None
+                
+                # Intento 1: Si json_data es un string JSON con formato split
+                try:
+                    debug_log("[DEBUG] show_bulk_regenerate_modal - Intento 1: Convertir string JSON con formato split")
+                    data_dict = json.loads(json_data)
+                    if "columns" in data_dict and "data" in data_dict:
+                        df = pd.DataFrame(data_dict["data"], columns=data_dict["columns"])
+                        debug_log(f"[DEBUG] show_bulk_regenerate_modal - DataFrame creado con éxito (Intento 1). Shape: {df.shape}")
+                except Exception as e:
+                    debug_log(f"[DEBUG] show_bulk_regenerate_modal - Error en Intento 1: {str(e)}")
+                
+                # Intento 2: Si json_data es un string JSON con lista de objetos
+                if df is None:
+                    try:
+                        debug_log("[DEBUG] show_bulk_regenerate_modal - Intento 2: Convertir string JSON con lista de objetos")
+                        data = json.loads(json_data)
+                        if isinstance(data, list):
+                            df = pd.DataFrame(data)
+                            debug_log(f"[DEBUG] show_bulk_regenerate_modal - DataFrame creado con éxito (Intento 2). Shape: {df.shape}")
+                    except Exception as e:
+                        debug_log(f"[DEBUG] show_bulk_regenerate_modal - Error en Intento 2: {str(e)}")
+                
+                # Intento 3: Si json_data ya es un diccionario
+                if df is None and isinstance(json_data, dict):
+                    try:
+                        debug_log("[DEBUG] show_bulk_regenerate_modal - Intento 3: Convertir diccionario a DataFrame")
+                        if 'data' in json_data and isinstance(json_data['data'], list):
+                            df = pd.DataFrame(json_data['data'])
+                            debug_log(f"[DEBUG] show_bulk_regenerate_modal - DataFrame creado con éxito (Intento 3). Shape: {df.shape}")
+                    except Exception as e:
+                        debug_log(f"[DEBUG] show_bulk_regenerate_modal - Error en Intento 3: {str(e)}")
+                
+                # Intento 4: Si json_data es un string CSV
+                if df is None and isinstance(json_data, str):
+                    try:
+                        debug_log("[DEBUG] show_bulk_regenerate_modal - Intento 4: Convertir string CSV a DataFrame")
+                        df = pd.read_csv(StringIO(json_data))
+                        debug_log(f"[DEBUG] show_bulk_regenerate_modal - DataFrame creado con éxito (Intento 4). Shape: {df.shape}")
+                    except Exception as e:
+                        debug_log(f"[DEBUG] show_bulk_regenerate_modal - Error en Intento 4: {str(e)}")
+                
+                if df is None:
+                    debug_log("[DEBUG] show_bulk_regenerate_modal - No se pudo crear un DataFrame")
+                    modal = create_bulk_regeneration_modal(None)
+                    return True, modal.children
+                
+                # Verificar que el DataFrame tenga las columnas necesarias
+                debug_log(f"[DEBUG] show_bulk_regenerate_modal - Columnas del DataFrame: {df.columns.tolist()}")
+                
+                # Verificar y añadir columnas requeridas si no existen
+                required_columns = ['date', 'asset_id', 'consumption_type']
+                missing_columns = [col for col in required_columns if col not in df.columns]
+                
+                if missing_columns:
+                    debug_log(f"[DEBUG] show_bulk_regenerate_modal - Faltan columnas: {missing_columns}")
+                    
+                    # Si falta la columna 'date', intentar encontrarla con otro nombre
+                    if 'date' in missing_columns and 'fecha' in df.columns:
+                        df['date'] = df['fecha']
+                        missing_columns.remove('date')
+                    
+                    # Si falta la columna 'asset_id', intentar encontrarla con otro nombre
+                    if 'asset_id' in missing_columns and 'id_asset' in df.columns:
+                        df['asset_id'] = df['id_asset']
+                        missing_columns.remove('asset_id')
+                    
+                    # Si falta la columna 'consumption_type', intentar encontrarla con otro nombre
+                    if 'consumption_type' in missing_columns and 'tipo_consumo' in df.columns:
+                        df['consumption_type'] = df['tipo_consumo']
+                        missing_columns.remove('consumption_type')
+                    
+                    # Si todavía faltan columnas, crear columnas vacías
+                    for col in missing_columns:
+                        debug_log(f"[DEBUG] show_bulk_regenerate_modal - Creando columna vacía: {col}")
+                        df[col] = None
+                
+                # Asegurar que la columna de fecha esté en formato datetime
+                if 'date' in df.columns:
+                    df['date'] = pd.to_datetime(df['date'], errors='coerce')
+                
+                # Asegurar que la columna de consumo exista
+                if 'consumption' not in df.columns and 'Consumo' in df.columns:
+                    df['consumption'] = df['Consumo']
+                elif 'consumption' not in df.columns and 'consumo' in df.columns:
+                    df['consumption'] = df['consumo']
+                elif 'consumption' not in df.columns:
+                    # Crear una columna de consumo con valores de error para simular datos con errores
+                    debug_log("[DEBUG] show_bulk_regenerate_modal - Creando columna de consumo con errores simulados")
+                    df['consumption'] = 'Error'
+                
+                # Analizar errores en las lecturas
+                error_data = analyze_readings_errors(df)
+                debug_log(f"[DEBUG] show_bulk_regenerate_modal - Análisis de errores: {error_data}")
+                
+                # Verificar si hay errores
+                if error_data['total_errors'] == 0:
+                    debug_log("[DEBUG] show_bulk_regenerate_modal - No se encontraron errores")
+                    modal = create_bulk_regeneration_modal(error_data)
+                    return True, modal.children
+                
+                # Crear el modal con los datos de error
+                modal = create_bulk_regeneration_modal(error_data)
+                return True, modal.children
+            
+            except Exception as e:
+                import traceback
+                error_msg = f"Error al preparar modal de regeneración masiva: {str(e)}"
+                debug_log(f"[ERROR] {error_msg}")
+                debug_log(traceback.format_exc())
+                return True, html.Div(error_msg, className="alert alert-danger")
+        
+        elif trigger_id in ["cancel-bulk-regenerate", "confirm-bulk-regenerate"]:
+            return False, None
+        
+        return is_open, None
+
+    # Callback para previsualizar la regeneración masiva
+    @app.callback(
+        [Output("bulk-regenerate-preview-container", "children"),
+         Output("filtered-errors-data", "data")],
+        [Input("preview-bulk-regenerate", "n_clicks"),
+         Input("regeneration-mode", "value"),
+         Input("filter-asset", "value"),
+         Input("filter-consumption-type", "value"),
+         Input("filter-period", "value")],
+        [State("error-analysis-data", "data")],
+        prevent_initial_call=True
+    )
+    def preview_bulk_regeneration(n_clicks, mode, asset_id, consumption_type, period, error_data_json):
+        debug_log(f"[DEBUG] preview_bulk_regeneration - n_clicks: {n_clicks}, mode: {mode}, asset_id: {asset_id}, consumption_type: {consumption_type}, period: {period}")
+        
+        if not n_clicks or not error_data_json:
+            debug_log(f"[DEBUG] preview_bulk_regeneration - No hay clicks o datos de error")
+            return html.Div("Haga clic en 'Previsualizar' para ver los elementos que se regenerarán.", className="text-muted"), None
+        
+        try:
+            # Importar las funciones necesarias
+            from utils.error_analysis import filter_errors_by_criteria, prepare_regeneration_preview
+            from layouts.bulk_regeneration import create_regeneration_preview
+            
+            # Cargar los datos de error
+            debug_log(f"[DEBUG] preview_bulk_regeneration - Cargando datos de error: {error_data_json[:100]}...")
+            error_data = json.loads(error_data_json)
+            
+            # Crear criterios de filtrado
+            criteria = {
+                "mode": mode,
+                "asset_id": asset_id,
+                "consumption_type": consumption_type,
+                "period": period
+            }
+            debug_log(f"[DEBUG] preview_bulk_regenerate - Criterios de filtrado: {criteria}")
+            
+            # Filtrar errores según los criterios
+            filtered_errors = filter_errors_by_criteria(error_data, criteria)
+            debug_log(f"[DEBUG] preview_bulk_regenerate - Errores filtrados: {filtered_errors}")
+            
+            # Preparar datos para la previsualización
+            preview_data = prepare_regeneration_preview(filtered_errors)
+            debug_log(f"[DEBUG] preview_bulk_regenerate - Datos de previsualización: {preview_data}")
+            
+            # Crear el componente de previsualización
+            preview_component = create_regeneration_preview(preview_data)
+            
+            # Devolver el componente de previsualización y los datos filtrados
+            return preview_component, json.dumps(filtered_errors)
+        
+        except Exception as e:
+            import traceback
+            error_msg = f"Error al previsualizar regeneración: {str(e)}"
+            debug_log(f"[ERROR] {error_msg}")
+            debug_log(traceback.format_exc())
+            return html.Div(error_msg, className="alert alert-danger"), None
+    
+    # Callback para iniciar la regeneración masiva
+    @app.callback(
+        [Output("bulk-regenerate-progress-container", "children"),
+         Output("bulk-regenerate-results-container", "children"),
+         Output("metrics-data-store", "data", allow_duplicate=True)],
+        [Input("confirm-bulk-regenerate", "n_clicks"),
+         Input("regeneration-progress-interval", "n_intervals")],
+        [State("filtered-errors-data", "data"),
+         State("metrics-project-filter", "value"),
+         State("jwt-token-store", "data"),
+         State("regeneration-mode", "value"),
+         State("metrics-data-store", "data")],
+        prevent_initial_call=True
+    )
+    def execute_bulk_regeneration(n_clicks, n_intervals, filtered_errors_json, project_id, token_data, mode, current_data):
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            return dash.no_update, dash.no_update, dash.no_update
+        
+        trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        debug_log(f"[DEBUG] execute_bulk_regeneration - trigger_id: {trigger_id}")
+        
+        if trigger_id == "confirm-bulk-regenerate":
+            try:
+                # Verificar si ya hay una regeneración en progreso
+                from utils.regeneration import regenerate_readings_in_bulk, get_regeneration_status, is_regeneration_in_progress
+                from components.regeneration_progress import create_regeneration_progress_component
+                
+                if is_regeneration_in_progress():
+                    debug_log("[DEBUG] execute_bulk_regeneration - Ya hay una regeneración en progreso")
+                    return html.Div("Ya hay una regeneración en progreso. Por favor, espere a que termine.", className="alert alert-warning"), dash.no_update, dash.no_update
+                
+                # Verificar si hay errores para regenerar
+                if not filtered_errors_json:
+                    debug_log("[DEBUG] execute_bulk_regeneration - No hay errores para regenerar")
+                    return html.Div("No hay errores para regenerar. Por favor, previsualice primero.", className="alert alert-warning"), dash.no_update, dash.no_update
+                
+                # Cargar los errores filtrados
+                filtered_errors = json.loads(filtered_errors_json)
+                debug_log(f"[DEBUG] execute_bulk_regeneration - Errores filtrados: {filtered_errors}")
+                
+                if not filtered_errors.get('items', []):
+                    debug_log("[DEBUG] execute_bulk_regeneration - No hay elementos para regenerar")
+                    return html.Div("No hay elementos para regenerar con los filtros seleccionados.", className="alert alert-warning"), dash.no_update, dash.no_update
+                
+                # Iniciar la regeneración en un hilo separado
+                import threading
+                
+                def regeneration_thread():
+                    try:
+                        debug_log("[DEBUG] execute_bulk_regeneration - Iniciando hilo de regeneración")
+                        regenerate_readings_in_bulk(
+                            error_list=filtered_errors.get('items', []),
+                            project_id=project_id,
+                            token_data=token_data,
+                            only_errors=True,  # Por ahora, siempre regenerar solo los errores
+                            continue_on_error=True  # Por ahora, siempre continuar en caso de error
+                        )
+                        debug_log("[DEBUG] execute_bulk_regeneration - Regeneración completada")
+                    except Exception as e:
+                        debug_log(f"[ERROR] Error en hilo de regeneración: {str(e)}")
+                        import traceback
+                        debug_log(traceback.format_exc())
+                
+                # Iniciar el hilo
+                thread = threading.Thread(target=regeneration_thread)
+                thread.daemon = True
+                thread.start()
+                debug_log("[DEBUG] execute_bulk_regeneration - Hilo de regeneración iniciado")
+                
+                # Inicializar datos de progreso
+                progress_data = {
+                    'total': len(filtered_errors.get('items', [])),
+                    'processed': 0,
+                    'success': 0,
+                    'failed': 0,
+                    'status': 'in_progress'
+                }
+                
+                progress_component = create_regeneration_progress_component(progress_data)
+                
+                return progress_component, dash.no_update, dash.no_update
+            
+            except Exception as e:
+                import traceback
+                error_msg = f"Error al iniciar regeneración masiva: {str(e)}"
+                debug_log(f"[ERROR] {error_msg}")
+                debug_log(traceback.format_exc())
+                return html.Div(error_msg, className="alert alert-danger"), dash.no_update, dash.no_update
+        
+        elif trigger_id == "regeneration-progress-interval":
+            try:
+                debug_log("[DEBUG] execute_bulk_regeneration - Actualizando progreso")
+                # Obtener el estado actual de la regeneración
+                from utils.regeneration import get_regeneration_status
+                from components.regeneration_progress import create_regeneration_progress_component
+                
+                status = get_regeneration_status()
+                debug_log(f"[DEBUG] execute_bulk_regeneration - Estado de regeneración: {status}")
+                
+                if not status:
+                    debug_log("[DEBUG] execute_bulk_regeneration - No hay estado de regeneración")
+                    return dash.no_update, dash.no_update, dash.no_update
+                
+                # Actualizar el componente de progreso
+                progress_component = create_regeneration_progress_component(status)
+                
+                # Si la regeneración ha terminado, mostrar los resultados
+                if status.get('status') == 'completed':
+                    debug_log("[DEBUG] execute_bulk_regeneration - Regeneración completada, mostrando resultados")
+                    from layouts.bulk_regeneration import create_results_summary
+                    results_component = create_results_summary(status)
+                    
+                    # Actualizar los datos para reflejar los cambios
+                    # Esto activará la recarga de la tabla
+                    return progress_component, results_component, current_data
+                
+                return progress_component, dash.no_update, dash.no_update
+            
+            except Exception as e:
+                debug_log(f"[ERROR] Error al actualizar progreso: {str(e)}")
+                import traceback
+                debug_log(traceback.format_exc())
+                return dash.no_update, dash.no_update, dash.no_update
+        
+        return dash.no_update, dash.no_update, dash.no_update
+
+    # Callback para actualizar los dropdowns de filtro basados en el modo de regeneración
+    @app.callback(
+        [Output("filter-asset", "disabled"),
+         Output("filter-consumption-type", "disabled"),
+         Output("filter-period", "disabled"),
+         Output("filter-asset", "options"),
+         Output("filter-consumption-type", "options"),
+         Output("filter-period", "options")],
+        [Input("regeneration-mode", "value"),
+         Input("error-analysis-data", "data")],
+        prevent_initial_call=True
+    )
+    def update_filter_dropdowns(mode, error_data_json):
+        # Valores por defecto
+        asset_disabled = True
+        consumption_type_disabled = True
+        period_disabled = True
+        asset_options = []
+        consumption_type_options = []
+        period_options = []
+        
+        if not error_data_json:
+            return asset_disabled, consumption_type_disabled, period_disabled, asset_options, consumption_type_options, period_options
+        
+        try:
+            # Cargar los datos de error
+            error_data = json.loads(error_data_json)
+            
+            # Preparar opciones para los dropdowns
+            asset_options = [{"label": asset, "value": asset} for asset in error_data.get('errors_by_asset', {}).keys()]
+            consumption_type_options = [{"label": ct, "value": ct} for ct in error_data.get('errors_by_consumption_type', {}).keys()]
+            period_options = [{"label": period, "value": period} for period in error_data.get('errors_by_period', {}).keys()]
+            
+            # Actualizar estado de los dropdowns según el modo
+            if mode == "by_asset":
+                error_data = error_data_json
+            else:
+                debug_log(f"[ERROR] Formato de datos no soportado: {type(error_data_json)}")
+                return html.Div("Formato de datos no soportado", className="alert alert-danger"), None
+            
+            # Verificar que los datos de error tengan la estructura esperada
+            if not error_data or not isinstance(error_data, dict):
+                debug_log(f"[ERROR] Datos de error inválidos: {error_data}")
+                return html.Div("Datos de error inválidos", className="alert alert-danger"), None
+            
+            # Crear criterios de filtrado
+            criteria = {
+                "mode": mode,
+                "asset_id": asset_id,
+                "consumption_type": consumption_type,
+                "period": period
+            }
+            debug_log(f"[DEBUG] preview_bulk_regenerate - Criterios de filtrado: {criteria}")
+            
+            # Filtrar errores según los criterios
+            filtered_errors = filter_errors_by_criteria(error_data, criteria)
+            debug_log(f"[DEBUG] preview_bulk_regenerate - Errores filtrados: {filtered_errors.get('total', 0) if filtered_errors else 'None'}")
+            
+            if not filtered_errors or filtered_errors.get('total', 0) == 0:
+                debug_log("[DEBUG] preview_bulk_regenerate - No hay errores que coincidan con los criterios")
+                return html.Div("No hay elementos que coincidan con los criterios seleccionados.", className="alert alert-warning"), None
+            
+            # Preparar datos para la previsualización
+            preview_data = prepare_regeneration_preview(filtered_errors)
+            debug_log(f"[DEBUG] preview_bulk_regenerate - Datos de previsualización: {preview_data.get('total', 0) if preview_data else 'None'}")
+            
+            if not preview_data or preview_data.get('total', 0) == 0:
+                debug_log("[DEBUG] preview_bulk_regenerate - No hay elementos para previsualizar")
+                return html.Div("No hay elementos para regenerar con los criterios seleccionados.", className="alert alert-warning"), None
+            
+            # Crear el componente de previsualización
+            preview_component = create_regeneration_preview(preview_data)
+            
+            # Devolver el componente de previsualización y los datos filtrados
+            return preview_component, json.dumps(filtered_errors)
+        
+        except Exception as e:
+            import traceback
+            error_msg = f"Error al previsualizar regeneración: {str(e)}"
+            debug_log(f"[ERROR] {error_msg}")
+            debug_log(traceback.format_exc())
+            return html.Div(error_msg, className="alert alert-danger"), None
+
+    # Callback para mostrar el modal de regeneración masiva
+    @app.callback(
+        [Output("regeneration-preview-container", "children"),
+         Output("filtered-errors-data", "data", allow_duplicate=True)],
+        [Input("preview-bulk-regenerate", "n_clicks")],
+        [State("regeneration-mode", "value"),
+         State("regeneration-asset-filter", "value"),
+         State("regeneration-consumption-type-filter", "value"),
+         State("regeneration-period-filter", "value"),
+         State("error-analysis-data", "data")],
+        prevent_initial_call=True
+    )
+    def preview_bulk_regeneration_callback(n_clicks, mode, asset_id, consumption_type, period, error_data_json):
+        """
+        Callback para previsualizar la regeneración masiva de lecturas.
+        """
+        debug_log(f"[DEBUG] preview_bulk_regeneration_callback - n_clicks: {n_clicks}, mode: {mode}, asset_id: {asset_id}, consumption_type: {consumption_type}, period: {period}")
+        
+        if not n_clicks or not error_data_json:
+            debug_log(f"[DEBUG] preview_bulk_regeneration_callback - No hay clicks o datos de error")
+            return html.Div("Haga clic en 'Previsualizar' para ver los elementos que se regenerarán.", className="text-muted"), None
+        
+        try:
+            # Importar las funciones necesarias
+            from utils.error_analysis import filter_errors_by_criteria, prepare_regeneration_preview
+            from layouts.bulk_regeneration import create_regeneration_preview
+            
+            # Cargar los datos de error
+            debug_log(f"[DEBUG] preview_bulk_regeneration_callback - Tipo de datos de error: {type(error_data_json)}")
+            debug_log(f"[DEBUG] preview_bulk_regeneration_callback - Vista previa de datos: {str(error_data_json)[:100]}...")
+            
+            # Manejar diferentes formatos de datos
+            if isinstance(error_data_json, str):
+                try:
+                    error_data = json.loads(error_data_json)
+                except json.JSONDecodeError as e:
+                    debug_log(f"[ERROR] Error al decodificar JSON: {e}")
+                    return html.Div(f"Error al procesar datos: {str(e)}", className="alert alert-danger"), None
+            elif isinstance(error_data_json, dict):
+                error_data = error_data_json
+            else:
+                debug_log(f"[ERROR] Formato de datos no soportado: {type(error_data_json)}")
+                return html.Div("Formato de datos no soportado", className="alert alert-danger"), None
+            
+            # Verificar que los datos de error tengan la estructura esperada
+            if not error_data or not isinstance(error_data, dict):
+                debug_log(f"[ERROR] Datos de error inválidos: {error_data}")
+                return html.Div("Datos de error inválidos", className="alert alert-danger"), None
+            
+            # Crear criterios de filtrado
+            criteria = {
+                "mode": mode,
+                "asset_id": asset_id,
+                "consumption_type": consumption_type,
+                "period": period
+            }
+            debug_log(f"[DEBUG] preview_bulk_regenerate_callback - Criterios de filtrado: {criteria}")
+            
+            # Filtrar errores según los criterios
+            filtered_errors = filter_errors_by_criteria(error_data, criteria)
+            debug_log(f"[DEBUG] preview_bulk_regenerate_callback - Errores filtrados: {filtered_errors.get('total', 0) if filtered_errors else 'None'}")
+            
+            if not filtered_errors or filtered_errors.get('total', 0) == 0:
+                debug_log("[DEBUG] preview_bulk_regenerate_callback - No hay errores que coincidan con los criterios")
+                return html.Div("No hay elementos que coincidan con los criterios seleccionados.", className="alert alert-warning"), None
+            
+            # Preparar datos para la previsualización
+            preview_data = prepare_regeneration_preview(filtered_errors)
+            debug_log(f"[DEBUG] preview_bulk_regenerate_callback - Datos de previsualización: {preview_data.get('total', 0) if preview_data else 'None'}")
+            
+            if not preview_data or preview_data.get('total', 0) == 0:
+                debug_log("[DEBUG] preview_bulk_regenerate_callback - No hay elementos para previsualizar")
+                return html.Div("No hay elementos para regenerar con los criterios seleccionados.", className="alert alert-warning"), None
+            
+            # Crear el componente de previsualización
+            preview_component = create_regeneration_preview(preview_data)
+            
+            # Devolver el componente de previsualización y los datos filtrados
+            return preview_component, json.dumps(filtered_errors)
+        
+        except Exception as e:
+            import traceback
+            error_msg = f"Error al previsualizar regeneración: {str(e)}"
+            debug_log(f"[ERROR] {error_msg}")
+            debug_log(traceback.format_exc())
+            return html.Div(error_msg, className="alert alert-danger"), None
