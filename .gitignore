@@ -60,3 +60,8 @@ temp/
 
 # O ignorar solo los archivos en una carpeta específica
 data/analyzed_data/*.csv
+# Archivos temporales y de prueba
+data/
+debug_log.txt
+test_regeneration.py
+logs/
