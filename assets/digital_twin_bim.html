@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alfred Smart - Digital Twin BIM</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden;
+        }
+        canvas { 
+            display: block; 
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 20px;
+            border-radius: 5px;
+            font-family: Arial, sans-serif;
+        }
+        #info {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: white;
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 5px;
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+        }
+        #header {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            z-index: 100;
+            font-family: Arial, sans-serif;
+        }
+        #logo {
+            height: 40px;
+            margin-right: 15px;
+        }
+        #title {
+            font-size: 20px;
+            font-weight: bold;
+            margin: 0;
+        }
+        #subtitle {
+            font-size: 14px;
+            margin: 0 0 0 10px;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header con logo y título -->
+    <div id="header">
+        <img id="logo" src="/assets/img/AlfredSmart Blue.png" alt="Alfred Smart Logo">
+        <div>
+            <h1 id="title">Digital Twin</h1>
+            <p id="subtitle">Visualizador de modelos BIM</p>
+        </div>
+    </div>
+
+    <!-- Contenedor para Three.js -->
+    <div id="container"></div>
+    
+    <!-- Indicador de carga -->
+    <div id="loading">Cargando modelo BIM...</div>
+    
+    <!-- Información -->
+    <div id="info">
+        <div>Controles: Arrastrar para rotar | Rueda del ratón para zoom | Shift+Arrastrar para mover</div>
+        <div id="model-info">Modelo: -</div>
+    </div>
+
+    <!-- Importar Three.js y sus extensiones desde CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/loaders/DRACOLoader.js"></script>
+    
+    <!-- Importar bibliotecas para IFC -->
+    <script src="https://unpkg.com/web-ifc@0.0.36/web-ifc-api.js"></script>
+    <script src="https://unpkg.com/three-mesh-bvh@0.5.23/build/three-mesh-bvh.js"></script>
+    <script src="https://unpkg.com/web-ifc-three@0.0.125/IFCLoader.js"></script>
+    
+    <script>
+        // Variables globales
+        let scene, camera, renderer, controls, mixer;
+        let clock = new THREE.Clock();
+        let modelUrl = 'https://threejs.org/examples/models/gltf/LittlestTokyo.glb'; // URL por defecto
+        
+        // Función para obtener parámetros de la URL
+        function getUrlParameter(name) {
+            name = name.replace(/[\[]/, '\\[').replace(/[\]]/, '\\]');
+            var regex = new RegExp('[\\?&]' + name + '=([^&#]*)');
+            var results = regex.exec(location.search);
+            return results === null ? '' : decodeURIComponent(results[1].replace(/\+/g, ' '));
+        }
+        
+        // Función de inicialización
+        function init() {
+            // Comprobar si hay una URL de modelo en los parámetros
+            const urlModel = getUrlParameter('model');
+            if (urlModel) {
+                modelUrl = urlModel;
+            }
+            
+            // Crear escena
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x333333);
+            
+            // Crear cámara
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(5, 5, 10);
+            
+            // Crear renderizador
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true;
+            document.getElementById('container').appendChild(renderer.domElement);
+            
+            // Añadir controles de órbita
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            
+            // Añadir luces
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(5, 10, 7.5);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            scene.add(directionalLight);
+            
+            // Añadir grid helper
+            const gridHelper = new THREE.GridHelper(50, 50);
+            scene.add(gridHelper);
+            
+            // Cargar modelo BIM
+            loadModel(modelUrl);
+            
+            // Manejar redimensionamiento de ventana
+            window.addEventListener('resize', onWindowResize, false);
+            
+            // Escuchar mensajes desde la aplicación Dash
+            window.addEventListener('message', function(event) {
+                if (event.data && event.data.modelUrl) {
+                    // Cargar nuevo modelo si se recibe una URL
+                    loadModel(event.data.modelUrl);
+                }
+            });
+            
+            // Iniciar animación
+            animate();
+            
+            // Actualizar título con el nombre del modelo cuando se carga
+            if (urlModel) {
+                const modelName = urlModel.split('/').pop();
+                document.title = `Alfred Smart - Digital Twin - ${modelName}`;
+            }
+        }
+        
+        // Función para cargar modelo
+        function loadModel(url) {
+            // Mostrar indicador de carga
+            document.getElementById('loading').style.display = 'block';
+            
+            // Determinar el tipo de archivo
+            const fileExtension = url.split('.').pop().toLowerCase();
+            
+            if (fileExtension === 'ifc') {
+                // Cargar modelo IFC
+                loadIFCModel(url);
+            } else {
+                // Cargar modelo GLTF/GLB
+                loadGLTFModel(url);
+            }
+        }
+        
+        // Función para cargar modelo GLTF/GLB
+        function loadGLTFModel(url) {
+            // Crear cargador GLTF
+            const loader = new THREE.GLTFLoader();
+            
+            // Configurar cargador DRACO para compresión (opcional)
+            const dracoLoader = new THREE.DRACOLoader();
+            dracoLoader.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
+            loader.setDRACOLoader(dracoLoader);
+            
+            // Cargar modelo
+            loader.load(
+                url,
+                function (gltf) {
+                    // Limpiar modelos anteriores
+                    clearModels();
+                    
+                    const model = gltf.scene;
+                    
+                    // Centrar y escalar el modelo
+                    centerModel(model);
+                    
+                    // Añadir modelo a la escena
+                    scene.add(model);
+                    
+                    // Configurar animaciones si existen
+                    if (gltf.animations && gltf.animations.length) {
+                        mixer = new THREE.AnimationMixer(model);
+                        const action = mixer.clipAction(gltf.animations[0]);
+                        action.play();
+                    }
+                    
+                    // Actualizar información del modelo
+                    const modelName = url.split('/').pop();
+                    document.getElementById('model-info').textContent = 'Modelo: ' + modelName;
+                    document.title = `Alfred Smart - Digital Twin - ${modelName}`;
+                    
+                    // Ocultar indicador de carga
+                    document.getElementById('loading').style.display = 'none';
+                },
+                function (xhr) {
+                    // Progreso de carga
+                    const percent = (xhr.loaded / xhr.total * 100).toFixed(0);
+                    document.getElementById('loading').textContent = `Cargando modelo BIM: ${percent}%`;
+                },
+                function (error) {
+                    console.error('Error al cargar el modelo GLTF:', error);
+                    document.getElementById('loading').textContent = 'Error al cargar el modelo';
+                }
+            );
+        }
+        
+        // Función para cargar modelo IFC
+        function loadIFCModel(url) {
+            try {
+                // Verificar si IFCLoader está disponible
+                if (typeof window.IFCLoader === 'undefined') {
+                    console.error('IFCLoader no está disponible');
+                    document.getElementById('loading').textContent = 'Error: IFCLoader no disponible. Verifica la consola para más detalles.';
+                    return;
+                }
+                
+                // Crear cargador IFC
+                const ifcLoader = new window.IFCLoader();
+                ifcLoader.ifcManager.setWasmPath('https://unpkg.com/web-ifc@0.0.36/');
+                
+                // Cargar modelo
+                ifcLoader.load(
+                    url,
+                    function (model) {
+                        // Limpiar modelos anteriores
+                        clearModels();
+                        
+                        // Centrar y escalar el modelo
+                        centerModel(model);
+                        
+                        // Añadir modelo a la escena
+                        scene.add(model);
+                        
+                        // Actualizar información del modelo
+                        const modelName = url.split('/').pop();
+                        document.getElementById('model-info').textContent = 'Modelo: ' + modelName;
+                        document.title = `Alfred Smart - Digital Twin - ${modelName}`;
+                        
+                        // Ocultar indicador de carga
+                        document.getElementById('loading').style.display = 'none';
+                    },
+                    function (xhr) {
+                        // Progreso de carga
+                        const percent = (xhr.loaded / xhr.total * 100).toFixed(0);
+                        document.getElementById('loading').textContent = `Cargando modelo IFC: ${percent}%`;
+                    },
+                    function (error) {
+                        console.error('Error al cargar el modelo IFC:', error);
+                        document.getElementById('loading').textContent = 'Error al cargar el modelo IFC: ' + error.message;
+                    }
+                );
+            } catch (error) {
+                console.error('Error al inicializar IFCLoader:', error);
+                document.getElementById('loading').textContent = 'Error al inicializar IFCLoader: ' + error.message;
+            }
+        }
+        
+        // Función para limpiar modelos anteriores
+        function clearModels() {
+            // Buscar y eliminar modelos anteriores
+            scene.traverse(function (child) {
+                if (child.isMesh || child.isGroup) {
+                    if (child.parent === scene) {
+                        scene.remove(child);
+                    }
+                }
+            });
+            
+            // Reiniciar mixer de animación
+            if (mixer) {
+                mixer = null;
+            }
+        }
+        
+        // Función para centrar y escalar el modelo
+        function centerModel(model) {
+            // Calcular bounding box
+            const box = new THREE.Box3().setFromObject(model);
+            const size = box.getSize(new THREE.Vector3());
+            const center = box.getCenter(new THREE.Vector3());
+            
+            // Calcular escala para que el modelo tenga un tamaño razonable
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const scale = 10 / maxDim;
+            model.scale.set(scale, scale, scale);
+            
+            // Centrar el modelo
+            model.position.x = -center.x * scale;
+            model.position.y = -center.y * scale;
+            model.position.z = -center.z * scale;
+            
+            // Ajustar controles
+            controls.target.set(0, 0, 0);
+            controls.update();
+        }
+        
+        // Función para manejar redimensionamiento
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        
+        // Función de animación
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Actualizar controles
+            controls.update();
+            
+            // Actualizar animaciones
+            if (mixer) {
+                mixer.update(clock.getDelta());
+            }
+            
+            // Renderizar escena
+            renderer.render(scene, camera);
+        }
+        
+        // Iniciar cuando el DOM esté cargado
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html> 
