@@ -1681,7 +1681,7 @@ def register_callbacks(app):
                 'asset_id': 'Asset ID',
                 'year_month': 'Mes',
                 'consumption_type': 'Tipo de Consumo',
-                'consumption': 'Consumo',
+                'consumption': 'Lectura Sensor',
                 'date': 'Fecha de Lectura',
                 'regenerate': 'Acción',
                 'row_id': 'row_id'
@@ -1698,7 +1698,7 @@ def register_callbacks(app):
                 data=[
                     {
                         **row,
-                        'Acción': f"[Regenerar](regenerate_{row['Asset ID']}_{row['Tipo de Consumo']}_{row['Mes']})" if row['Consumo'] == 'Error' else 
+                        'Acción': f"[Regenerar](regenerate_{row['Asset ID']}_{row['Tipo de Consumo']}_{row['Mes']})" if row['Lectura Sensor'] == 'Error' else 
                                 f"[Ver detalles](details_{row['Asset ID']}_{row['Tipo de Consumo']}_{row['Mes']}) | [Actualizar](update_{row['Asset ID']}_{row['Tipo de Consumo']}_{row['Mes']})"
                     } 
                     for i, row in enumerate(table_data.to_dict('records'))
@@ -1721,7 +1721,7 @@ def register_callbacks(app):
                         'backgroundColor': 'rgb(248, 248, 248)'
                     },
                     {
-                        'if': {'filter_query': '{Consumo} = "Error"'},
+                        'if': {'filter_query': '{Lectura Sensor} = "Error"'},
                         'backgroundColor': '#ffcccc',  # Fondo rojo claro para errores
                         'color': '#990000'  # Texto rojo oscuro
                     },
@@ -1731,7 +1731,7 @@ def register_callbacks(app):
                         'width': '120px'
                     },
                     {
-                        'if': {'column_id': 'Acción', 'filter_query': '{Consumo} = "Error"'},
+                        'if': {'column_id': 'Acción', 'filter_query': '{Lectura Sensor} = "Error"'},
                         'cursor': 'pointer',
                         'textDecoration': 'none'
                     }
@@ -1749,7 +1749,7 @@ def register_callbacks(app):
                 tooltip_data=[
                     {
                         column: {'value': 'Haz clic para ver detalles' if column != 'Acción' else 
-                                ('Haz clic en un icono: 👁️ Ver detalles | 🔄 Actualizar lecturas' if row['Consumo'] != 'Error' else 
+                                ('Haz clic en un icono: 👁️ Ver detalles | 🔄 Actualizar lecturas' if row['Lectura Sensor'] != 'Error' else 
                                  '🔄 Regenerar lectura con error'), 
                                 'type': 'text'}
                         for column in table_data.columns
@@ -2071,7 +2071,7 @@ def register_callbacks(app):
                 fig.update_layout(
                     title=f"Consumo diario - {asset_id} - {month}/{year} - {consumption_type}",
                     xaxis_title="Fecha",
-                    yaxis_title="Consumo",
+                    yaxis_title="Lectura Sensor",
                     plot_bgcolor='white',
                     height=400
                 )
@@ -2086,14 +2086,14 @@ def register_callbacks(app):
                 x='date', 
                 y='consumption',
                 title=f"Consumo diario - {asset_id} - {month}/{year} - {consumption_type}",
-                labels={'date': 'Fecha', 'consumption': 'Consumo'},
+                labels={'date': 'Fecha', 'consumption': 'Lectura Sensor'},
                 markers=True
             )
             
             # Personalizar el diseño
             fig.update_layout(
                 xaxis_title="Fecha",
-                yaxis_title="Consumo",
+                yaxis_title="Lectura Sensor",
                 plot_bgcolor='white',
                 hovermode='closest',
                 height=400
@@ -2115,7 +2115,7 @@ def register_callbacks(app):
             fig.update_layout(
                 title=f"Error - Consumo diario - {asset_id} - {month}/{year} - {consumption_type}",
                 xaxis_title="Fecha",
-                yaxis_title="Consumo",
+                yaxis_title="Lectura Sensor",
                 plot_bgcolor='white',
                 height=400
             )
@@ -2156,7 +2156,7 @@ def register_callbacks(app):
                 fig.update_layout(
                     title=f"Consumo histórico completo - {asset_id} - {consumption_type}",
                     xaxis_title="Fecha",
-                    yaxis_title="Consumo",
+                    yaxis_title="Lectura Sensor",
                     plot_bgcolor='white',
                     height=400
                 )
@@ -2182,7 +2182,7 @@ def register_callbacks(app):
                 mode='markers',
                 name='Datos diarios',
                 marker=dict(size=4, color='rgba(0, 123, 255, 0.5)'),
-                hovertemplate='%{x|%Y-%m-%d}<br>Consumo: %{y:.2f}<extra></extra>'
+                hovertemplate='%{x|%Y-%m-%d}<br>Lectura Sensor: %{y:.2f}<extra></extra>'
             ))
             
             # Traza de resumen mensual (línea)
@@ -2191,16 +2191,16 @@ def register_callbacks(app):
                 y=monthly_sum['consumption'],
                 mode='lines+markers',
                 name='Consumo mensual',
-                line=dict(width=2, color='rgb(255, 99, 71)'),
-                marker=dict(size=8, color='rgb(255, 99, 71)'),
-                hovertemplate='%{x|%Y-%m}<br>Consumo mensual: %{y:.2f}<extra></extra>'
+                line=dict(color='blue', width=2),
+                marker=dict(size=8, color='blue'),
+                hovertemplate='%{x|%Y-%m}<br>Lectura Sensor mensual: %{y:.2f}<extra></extra>'
             ))
             
             # Personalizar el diseño
             fig.update_layout(
                 title=f"Consumo histórico completo - {consumption_type}",
                 xaxis_title="Fecha",
-                yaxis_title="Consumo",
+                yaxis_title="Lectura Sensor",
                 plot_bgcolor='white',
                 hovermode='closest',
                 height=500,
@@ -2241,7 +2241,7 @@ def register_callbacks(app):
             fig.update_layout(
                 title=f"Error - Consumo histórico completo - {asset_id} - {consumption_type}",
                 xaxis_title="Fecha",
-                yaxis_title="Consumo",
+                yaxis_title="Lectura Sensor",
                 plot_bgcolor='white',
                 height=400
             )
@@ -2356,11 +2356,11 @@ def register_callbacks(app):
             # Renombrar las columnas
             table_df = table_df.rename(columns={
                 'date': 'Fecha',
-                'consumption': 'Consumo'
+                'consumption': 'Lectura Sensor'
             })
             
             # Formatear valores numéricos
-            table_df['Consumo'] = table_df['Consumo'].apply(
+            table_df['Lectura Sensor'] = table_df['Lectura Sensor'].apply(
                 lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x
             )
             

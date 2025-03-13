@@ -96,7 +96,7 @@ from layouts.login import register_callbacks as register_login_callbacks
 from components.navbar import register_callbacks as register_navbar_callbacks
 
 # Registrar callbacks de las vistas principales
-from layouts.metrics import register_callbacks as register_metrics_callbacks
+from layouts.metrics_refactored import register_callbacks as register_metrics_callbacks
 from layouts.lock import register_callbacks as register_lock_callbacks
 from layouts.spaces import register_callbacks as register_spaces_callbacks
 from layouts.api_test import register_callbacks as register_api_test_callbacks
@@ -138,7 +138,7 @@ def display_page(pathname, token_data):
     from layouts.db_explorer import layout as db_explorer_layout
     from layouts.ui_demo import layout as ui_demo_layout
     from layouts.login import layout as login_layout
-    from layouts.metrics import layout as metrics_layout
+    from layouts.metrics_refactored import layout as metrics_layout
     from layouts.lock import layout as lock_layout
     from layouts.spaces import layout as spaces_layout
     from layouts.api_test import layout as api_test_layout

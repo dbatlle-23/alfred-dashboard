@@ -199,6 +199,49 @@ def load_csv_data(file_path: str) -> Optional[pd.DataFrame]:
         # Convertir la columna de fecha a datetime
         df['date'] = pd.to_datetime(df['date'], errors='coerce')
         
+        # Manejar valores de error en la columna 'value'
+        # Primero, identificar filas con valores no numéricos
+        # Convertir la columna 'value' a string para manejar diferentes tipos de datos
+        df['value'] = df['value'].astype(str)
+        
+        # Identificar valores que contienen 'Error', 'error', 'Sin datos', etc.
+        error_mask = df['value'].str.contains('Error|error|Sin datos|sin datos|N/A|n/a', case=False, na=False)
+        
+        # Identificar valores que no se pueden convertir a números
+        numeric_mask = pd.to_numeric(df['value'], errors='coerce').notna()
+        non_numeric_mask = ~numeric_mask
+        
+        # Combinar ambas máscaras
+        problem_mask = error_mask | non_numeric_mask
+        error_count = problem_mask.sum()
+        
+        debug_log(f"[DEBUG DETALLADO] load_csv_data - Se encontraron {error_count} valores problemáticos en la columna 'value' del archivo {file_path}")
+        
+        if error_count > 0:
+            debug_log(f"[DEBUG DETALLADO] load_csv_data - Se encontraron {error_count} valores problemáticos en la columna 'value' del archivo {file_path}")
+            print(f"Se encontraron {error_count} valores problemáticos en la columna 'value' del archivo {file_path}")
+            
+            # Convertir valores problemáticos a NaN
+            df.loc[problem_mask, 'value'] = np.nan
+            
+            # Intentar interpolar valores faltantes (solo si hay suficientes datos válidos)
+            valid_data_ratio = df['value'].notna().sum() / len(df)
+            debug_log(f"[DEBUG DETALLADO] load_csv_data - Ratio de datos válidos: {valid_data_ratio:.2f}")
+            
+            if valid_data_ratio > 0.5:  # Si más del 50% de los datos son válidos
+                # Convertir a numérico antes de interpolar
+                df['value'] = pd.to_numeric(df['value'], errors='coerce')
+                # Interpolar valores faltantes
+                df['value'] = df['value'].interpolate(method='linear')
+                debug_log(f"[DEBUG DETALLADO] load_csv_data - Se interpolaron valores faltantes en la columna 'value'")
+            else:
+                # Si no hay suficientes datos para interpolar, reemplazar NaN con 0
+                df['value'] = pd.to_numeric(df['value'], errors='coerce').fillna(0)
+                debug_log(f"[DEBUG DETALLADO] load_csv_data - Se reemplazaron valores NaN con 0 en la columna 'value'")
+        else:
+            # Si no hay valores problemáticos, asegurarse de que la columna sea numérica
+            df['value'] = pd.to_numeric(df['value'], errors='coerce')
+        
         # Añadir columna de timestamp (útil para algunas visualizaciones)
         df['timestamp'] = df['date'].astype(int) // 10**9
         
@@ -219,7 +262,7 @@ def load_csv_data(file_path: str) -> Optional[pd.DataFrame]:
             debug_log(f"[DEBUG DETALLADO] load_csv_data - No se pudo extraer project_id del path: {file_path}")
         
         # Renombrar 'value' a 'consumption' para mayor claridad
-        df['consumption'] = df['value']
+        df['consumption'] = pd.to_numeric(df['value'], errors='coerce').fillna(0)
         
         # Añadir columna de mes para facilitar agrupaciones
         df['month'] = df['date'].dt.to_period('M')
