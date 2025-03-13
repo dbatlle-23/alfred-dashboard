@@ -409,4 +409,109 @@ p, div, span {
         margin-bottom: 0.5rem;
         width: 100%;
     }
-} 
+}
+
+/* Estilos para los botones de exportación */
+.btn-group .btn {
+    margin-right: 2px;
+    transition: all 0.2s ease;
+    border-radius: 0.375rem;
+}
+
+.btn-group .btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.btn-group .btn i {
+    font-size: 0.9rem;
+}
+
+/* Botón principal de exportación */
+.export-main-btn {
+    font-weight: 500;
+    letter-spacing: 0.3px;
+}
+
+.export-main-btn:hover {
+    background-color: #0a3d62;
+    color: white;
+    border-color: #0a3d62;
+}
+
+/* Colores específicos para los botones de exportación */
+#export-csv-btn {
+    color: #0d6efd;
+}
+
+#export-csv-btn:hover {
+    background-color: rgba(13, 110, 253, 0.1);
+    font-weight: 500;
+}
+
+#export-excel-btn {
+    color: #198754;
+}
+
+#export-excel-btn:hover {
+    background-color: rgba(25, 135, 84, 0.1);
+    font-weight: 500;
+}
+
+#export-pdf-btn {
+    color: #dc3545;
+}
+
+#export-pdf-btn:hover {
+    background-color: rgba(220, 53, 69, 0.1);
+    font-weight: 500;
+}
+
+#export-png-btn {
+    color: #0dcaf0;
+}
+
+#export-png-btn:hover {
+    background-color: rgba(13, 202, 240, 0.1);
+    font-weight: 500;
+}
+
+/* Estilos para el toast de notificación */
+.toast {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border: none;
+    border-radius: 0.5rem;
+    overflow: hidden;
+}
+
+.toast-header {
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    font-weight: 600;
+    padding: 0.75rem 1rem;
+}
+
+.toast-body {
+    font-size: 0.9rem;
+    padding: 0.75rem 1rem;
+    line-height: 1.5;
+}
+
+/* Estilos para el contenedor de errores de exportación */
+#export-error-container {
+    display: none;
+}
+
+#export-error-container.show {
+    display: block;
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Estilos para los iconos en los toasts */
+.toast .bi {
+    margin-right: 0.5rem;
+}

@@ -6,6 +6,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import numpy as np
+import html
 
 from utils.api import get_daily_readings_for_year_multiple_tags_project_parallel
 from utils.metrics.data_processing import (
@@ -581,3 +582,209 @@ def register_chart_callbacks(app):
         )
         
         return fig
+
+    # Callbacks para exportar datos
+    @app.callback(
+        [Output("download-monthly-data", "data"),
+         Output("export-error-container", "children"),
+         Output("export-error-container", "className")],
+        [Input("export-csv-btn", "n_clicks"),
+         Input("export-excel-btn", "n_clicks"),
+         Input("export-pdf-btn", "n_clicks"),
+         Input("export-png-btn", "n_clicks")],
+        [State("metrics-data-store", "data"),
+         State("metrics-client-filter", "value"),
+         State("metrics-project-filter", "value"),
+         State("metrics-consumption-tags-filter", "value"),
+         State("metrics-date-range", "start_date"),
+         State("metrics-date-range", "end_date")],
+        prevent_initial_call=True
+    )
+    def export_monthly_data(csv_clicks, excel_clicks, pdf_clicks, png_clicks, 
+                           json_data, client_id, project_id, consumption_tags, start_date, end_date):
+        """Export monthly data in different formats."""
+        # Determinar qué botón fue clickeado
+        ctx = callback_context
+        if not ctx.triggered:
+            return dash.no_update, dash.no_update, dash.no_update
+            
+        button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        
+        # Verificar que realmente se hizo clic en un botón
+        if (button_id == "export-csv-btn" and not csv_clicks) or \
+           (button_id == "export-excel-btn" and not excel_clicks) or \
+           (button_id == "export-pdf-btn" and not pdf_clicks) or \
+           (button_id == "export-png-btn" and not png_clicks):
+            return dash.no_update, dash.no_update, dash.no_update
+        
+        try:
+            # Convertir JSON a DataFrame
+            if not json_data or json_data == "[]":
+                # Si no hay datos, mostrar un mensaje de error
+                error_msg = html.Div([
+                    html.I(className="fas fa-exclamation-circle me-2"),
+                    "No hay datos disponibles para exportar. Por favor, asegúrese de que hay datos cargados."
+                ], className="alert alert-warning")
+                return dash.no_update, error_msg, "mb-3 show"
+                
+            df = pd.DataFrame(json.loads(json_data))
+            
+            # Procesar datos según filtros
+            filtered_df = process_metrics_data(
+                df, 
+                client_id=client_id, 
+                project_id=project_id, 
+                consumption_tags=consumption_tags, 
+                start_date=start_date, 
+                end_date=end_date
+            )
+            
+            # Generar resumen mensual
+            monthly_summary = generate_monthly_consumption_summary(filtered_df, start_date, end_date)
+            
+            # Verificar que el resumen mensual no esté vacío
+            if monthly_summary.empty:
+                error_msg = html.Div([
+                    html.I(className="fas fa-exclamation-circle me-2"),
+                    "No hay datos de consumo para el período seleccionado. Por favor, seleccione otro período."
+                ], className="alert alert-warning")
+                return dash.no_update, error_msg, "mb-3 show"
+            
+            # Preparar los datos para exportación
+            from utils.metrics.data_processing import prepare_data_for_export
+            export_data = prepare_data_for_export(monthly_summary)
+            
+            # Generar nombre de archivo con fecha actual
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"consumo_mensual_{timestamp}"
+            
+            # Exportar según el formato seleccionado
+            if button_id == "export-csv-btn":
+                return dcc.send_data_frame(export_data.to_csv, f"{filename}.csv", index=False), None, "mb-3"
+            elif button_id == "export-excel-btn":
+                return dcc.send_data_frame(export_data.to_excel, f"{filename}.xlsx", index=False), None, "mb-3"
+            elif button_id == "export-pdf-btn":
+                # Para PDF, necesitamos convertir a HTML primero y luego a PDF
+                try:
+                    import io
+                    from reportlab.lib.pagesizes import letter
+                    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+                    from reportlab.lib import colors
+                    from reportlab.lib.styles import getSampleStyleSheet
+                    
+                    # Crear un buffer para el PDF
+                    buffer = io.BytesIO()
+                    
+                    # Configurar el documento
+                    doc = SimpleDocTemplate(buffer, pagesize=letter)
+                    elements = []
+                    
+                    # Añadir título
+                    styles = getSampleStyleSheet()
+                    elements.append(Paragraph(f"Resumen Mensual de Consumos - {timestamp}", styles['Title']))
+                    elements.append(Spacer(1, 12))
+                    
+                    # Convertir DataFrame a lista para la tabla
+                    data = [export_data.columns.tolist()] + export_data.values.tolist()
+                    
+                    # Crear tabla
+                    table = Table(data)
+                    
+                    # Estilo de la tabla
+                    style = TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+                    ])
+                    table.setStyle(style)
+                    
+                    # Añadir tabla al documento
+                    elements.append(table)
+                    
+                    # Construir PDF
+                    doc.build(elements)
+                    
+                    # Obtener el contenido del buffer
+                    buffer.seek(0)
+                    
+                    return dcc.send_bytes(buffer.getvalue(), f"{filename}.pdf"), None, "mb-3"
+                except Exception as e:
+                    error_msg = html.Div([
+                        html.I(className="fas fa-exclamation-triangle me-2"),
+                        f"Error al generar PDF: {str(e)}"
+                    ], className="alert alert-danger")
+                    return dash.no_update, error_msg, "mb-3 show"
+            elif button_id == "export-png-btn":
+                # Para PNG, necesitamos capturar los gráficos
+                # Esto es más complejo y requiere JavaScript para capturar el DOM
+                info_msg = html.Div([
+                    html.I(className="fas fa-info-circle me-2"),
+                    "La exportación a PNG estará disponible próximamente. Por favor, utilice otro formato."
+                ], className="alert alert-info")
+                return dash.no_update, info_msg, "mb-3 show"
+            
+            return dash.no_update, None, "mb-3"
+            
+        except Exception as e:
+            import traceback
+            print(f"[ERROR METRICS] export_monthly_data: {str(e)}")
+            print(traceback.format_exc())
+            
+            error_msg = html.Div([
+                html.I(className="fas fa-exclamation-triangle me-2"),
+                f"Error al exportar datos: {str(e)}"
+            ], className="alert alert-danger")
+            
+            return dash.no_update, error_msg, "mb-3 show"
+
+    # Callback para mostrar notificaciones de exportación
+    @app.callback(
+        [Output("export-notification", "is_open"),
+         Output("export-notification", "children"),
+         Output("export-notification", "header"),
+         Output("export-error-notification", "is_open"),
+         Output("export-error-notification", "children"),
+         Output("export-error-notification", "header")],
+        [Input("export-csv-btn", "n_clicks"),
+         Input("export-excel-btn", "n_clicks"),
+         Input("export-pdf-btn", "n_clicks"),
+         Input("export-png-btn", "n_clicks")],
+        [State("metrics-data-store", "data")],
+        prevent_initial_call=True
+    )
+    def show_export_notification(csv_clicks, excel_clicks, pdf_clicks, png_clicks, json_data):
+        """Mostrar notificación cuando se exportan datos."""
+        # Determinar qué botón fue clickeado
+        ctx = callback_context
+        if not ctx.triggered:
+            return False, "", "", False, "", ""
+            
+        button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        
+        # Verificar que realmente se hizo clic en un botón
+        if (button_id == "export-csv-btn" and not csv_clicks) or \
+           (button_id == "export-excel-btn" and not excel_clicks) or \
+           (button_id == "export-pdf-btn" and not pdf_clicks) or \
+           (button_id == "export-png-btn" and not png_clicks):
+            return False, "", "", False, "", ""
+        
+        # Verificar si hay datos para exportar
+        if not json_data or json_data == "[]":
+            return False, "", "", True, "No hay datos disponibles para exportar. Por favor, asegúrese de que hay datos cargados.", "Error de Exportación"
+        
+        # Mostrar notificación según el formato seleccionado
+        if button_id == "export-csv-btn":
+            return True, "Los datos han sido exportados en formato CSV.", "Exportación CSV", False, "", ""
+        elif button_id == "export-excel-btn":
+            return True, "Los datos han sido exportados en formato Excel.", "Exportación Excel", False, "", ""
+        elif button_id == "export-pdf-btn":
+            return True, "Los datos han sido exportados en formato PDF.", "Exportación PDF", False, "", ""
+        elif button_id == "export-png-btn":
+            return False, "", "", True, "La exportación a PNG estará disponible próximamente. Por favor, utilice otro formato.", "Funcionalidad no disponible"
+        
+        return False, "", "", False, "", ""

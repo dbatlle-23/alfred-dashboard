@@ -1,6 +1,11 @@
+import dash
 from dash import Output, Input, State, callback_context
 import json
 import pandas as pd
+import dash_bootstrap_components as dbc
+import numpy as np
+from datetime import datetime
+import io
 
 from utils.metrics.data_processing import generate_monthly_readings_by_consumption_type, generate_monthly_consumption_summary, process_metrics_data
 from components.metrics.tables import create_monthly_readings_by_consumption_type, create_monthly_readings_table, create_monthly_summary_table
@@ -475,3 +480,261 @@ def register_table_callbacks(app):
             print(f"[INFO METRICS] update_monthly_summary_table - Created sample DataFrame with {len(monthly_summary)} rows")
             
             return create_monthly_summary_table(monthly_summary)
+
+    # Importaciones necesarias para los callbacks de exportación
+    from dash import dcc, html
+    
+    # Callback para exportar datos de lecturas mensuales
+    @app.callback(
+        [Output("download-monthly-readings", "data"),
+         Output("monthly-readings-error-container", "children"),
+         Output("monthly-readings-error-container", "className")],
+        [Input("export-monthly-readings-csv-btn", "n_clicks"),
+         Input("export-monthly-readings-excel-btn", "n_clicks"),
+         Input("export-monthly-readings-pdf-btn", "n_clicks")],
+        [State("metrics-data-store", "data"),
+         State("metrics-client-filter", "value"),
+         State("metrics-project-filter", "value"),
+         State("metrics-asset-filter", "value"),
+         State("metrics-consumption-tags-filter", "value"),
+         State("metrics-date-range", "start_date"),
+         State("metrics-date-range", "end_date")],
+        prevent_initial_call=True
+    )
+    def export_monthly_readings(csv_clicks, excel_clicks, pdf_clicks, 
+                               json_data, client_id, project_id, asset_id, consumption_tags, start_date, end_date):
+        """Export monthly readings data in different formats."""
+        # Determinar qué botón fue clickeado
+        ctx = callback_context
+        if not ctx.triggered:
+            return dash.no_update, dash.no_update, dash.no_update
+            
+        button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        
+        # Verificar que realmente se hizo clic en un botón
+        if (button_id == "export-monthly-readings-csv-btn" and not csv_clicks) or \
+           (button_id == "export-monthly-readings-excel-btn" and not excel_clicks) or \
+           (button_id == "export-monthly-readings-pdf-btn" and not pdf_clicks):
+            return dash.no_update, dash.no_update, dash.no_update
+        
+        try:
+            # Convertir JSON a DataFrame
+            if not json_data or json_data == "[]":
+                # Si no hay datos, mostrar un mensaje de error
+                error_msg = html.Div([
+                    html.I(className="fas fa-exclamation-circle me-2"),
+                    "No hay datos disponibles para exportar. Por favor, asegúrese de que hay datos cargados."
+                ], className="alert alert-warning")
+                return dash.no_update, error_msg, "mb-3 show"
+                
+            df = pd.DataFrame(json.loads(json_data))
+            
+            # Procesar datos según filtros
+            filtered_df = process_metrics_data(
+                df, 
+                client_id=client_id, 
+                project_id=project_id,
+                asset_id=asset_id,
+                consumption_tags=consumption_tags, 
+                start_date=start_date, 
+                end_date=end_date
+            )
+            
+            # Verificar que el DataFrame no esté vacío
+            if filtered_df.empty:
+                error_msg = html.Div([
+                    html.I(className="fas fa-exclamation-circle me-2"),
+                    "No hay datos de lecturas para el período seleccionado. Por favor, seleccione otro período."
+                ], className="alert alert-warning")
+                return dash.no_update, error_msg, "mb-3 show"
+            
+            # Preparar los datos para exportación - crear una tabla pivotada por mes
+            # Asegurarse de que la columna date es datetime
+            if 'date' in filtered_df.columns:
+                if not pd.api.types.is_datetime64_any_dtype(filtered_df['date']):
+                    filtered_df['date'] = pd.to_datetime(filtered_df['date'], errors='coerce')
+            
+            # Crear una columna de mes
+            filtered_df['month'] = filtered_df['date'].dt.strftime('%Y-%m')
+            
+            # Pivotar la tabla para tener los meses como columnas
+            pivot = filtered_df.pivot_table(
+                index='asset_id',
+                columns='month',
+                values='consumption',
+                aggfunc='sum'
+            ).reset_index()
+            
+            # Generar nombre de archivo con fecha actual
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"lecturas_mensuales_{timestamp}"
+            
+            # Exportar según el formato seleccionado
+            if button_id == "export-monthly-readings-csv-btn":
+                try:
+                    return dcc.send_data_frame(pivot.to_csv, f"{filename}.csv", index=False), None, "mb-3"
+                except Exception as e:
+                    print(f"[ERROR METRICS] Error al exportar a CSV: {str(e)}")
+                    import traceback
+                    print(traceback.format_exc())
+                    error_msg = html.Div([
+                        html.I(className="fas fa-exclamation-triangle me-2"),
+                        f"Error al exportar a CSV: {str(e)}"
+                    ], className="alert alert-danger")
+                    return dash.no_update, error_msg, "mb-3 show"
+            elif button_id == "export-monthly-readings-excel-btn":
+                try:
+                    # Verificar si openpyxl está instalado
+                    try:
+                        import openpyxl
+                    except ImportError:
+                        print("[ERROR METRICS] openpyxl no está instalado")
+                        error_msg = html.Div([
+                            html.I(className="fas fa-exclamation-triangle me-2"),
+                            "Error al exportar a Excel: El módulo openpyxl no está instalado. Por favor, contacte al administrador."
+                        ], className="alert alert-danger")
+                        return dash.no_update, error_msg, "mb-3 show"
+                    
+                    return dcc.send_data_frame(pivot.to_excel, f"{filename}.xlsx", index=False), None, "mb-3"
+                except Exception as e:
+                    print(f"[ERROR METRICS] Error al exportar a Excel: {str(e)}")
+                    import traceback
+                    print(traceback.format_exc())
+                    error_msg = html.Div([
+                        html.I(className="fas fa-exclamation-triangle me-2"),
+                        f"Error al exportar a Excel: {str(e)}"
+                    ], className="alert alert-danger")
+                    return dash.no_update, error_msg, "mb-3 show"
+            elif button_id == "export-monthly-readings-pdf-btn":
+                # Para PDF, necesitamos convertir a HTML primero y luego a PDF
+                try:
+                    # Verificar si ReportLab está instalado
+                    try:
+                        from reportlab.lib.pagesizes import letter, landscape
+                        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+                        from reportlab.lib import colors
+                        from reportlab.lib.styles import getSampleStyleSheet
+                    except ImportError as e:
+                        print(f"[ERROR METRICS] ReportLab no está instalado o hay un problema con la importación: {str(e)}")
+                        error_msg = html.Div([
+                            html.I(className="fas fa-exclamation-triangle me-2"),
+                            "Error al generar PDF: ReportLab no está instalado correctamente. Por favor, contacte al administrador."
+                        ], className="alert alert-danger")
+                        return dash.no_update, error_msg, "mb-3 show"
+                    
+                    # Crear un buffer para el PDF
+                    buffer = io.BytesIO()
+                    
+                    # Configurar el documento
+                    doc = SimpleDocTemplate(buffer, pagesize=landscape(letter))
+                    elements = []
+                    
+                    # Añadir título
+                    styles = getSampleStyleSheet()
+                    elements.append(Paragraph(f"Lecturas Mensuales - {timestamp}", styles['Title']))
+                    elements.append(Spacer(1, 12))
+                    
+                    # Convertir DataFrame a lista para la tabla
+                    data = [pivot.columns.tolist()] + pivot.values.tolist()
+                    
+                    # Crear tabla
+                    table = Table(data)
+                    
+                    # Estilo de la tabla
+                    style = TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+                    ])
+                    table.setStyle(style)
+                    
+                    # Añadir tabla al documento
+                    elements.append(table)
+                    
+                    try:
+                        # Construir PDF
+                        doc.build(elements)
+                        
+                        # Obtener el contenido del buffer
+                        buffer.seek(0)
+                        
+                        return dcc.send_bytes(buffer.getvalue(), f"{filename}.pdf"), None, "mb-3"
+                    except Exception as e:
+                        print(f"[ERROR METRICS] Error al construir el PDF: {str(e)}")
+                        import traceback
+                        print(traceback.format_exc())
+                        error_msg = html.Div([
+                            html.I(className="fas fa-exclamation-triangle me-2"),
+                            f"Error al generar PDF: {str(e)}"
+                        ], className="alert alert-danger")
+                        return dash.no_update, error_msg, "mb-3 show"
+                except Exception as e:
+                    print(f"[ERROR METRICS] Error general al generar PDF: {str(e)}")
+                    import traceback
+                    print(traceback.format_exc())
+                    error_msg = html.Div([
+                        html.I(className="fas fa-exclamation-triangle me-2"),
+                        f"Error al generar PDF: {str(e)}"
+                    ], className="alert alert-danger")
+                    return dash.no_update, error_msg, "mb-3 show"
+            
+            return dash.no_update, None, "mb-3"
+            
+        except Exception as e:
+            import traceback
+            print(f"[ERROR METRICS] export_monthly_readings: {str(e)}")
+            print(traceback.format_exc())
+            
+            error_msg = html.Div([
+                html.I(className="fas fa-exclamation-triangle me-2"),
+                f"Error al exportar datos: {str(e)}"
+            ], className="alert alert-danger")
+            
+            return dash.no_update, error_msg, "mb-3 show"
+    
+    # Callback para mostrar notificaciones de exportación de lecturas mensuales
+    @app.callback(
+        [Output("monthly-readings-export-notification", "is_open"),
+         Output("monthly-readings-export-notification", "children"),
+         Output("monthly-readings-export-notification", "header"),
+         Output("monthly-readings-export-error-notification", "is_open"),
+         Output("monthly-readings-export-error-notification", "children"),
+         Output("monthly-readings-export-error-notification", "header")],
+        [Input("export-monthly-readings-csv-btn", "n_clicks"),
+         Input("export-monthly-readings-excel-btn", "n_clicks"),
+         Input("export-monthly-readings-pdf-btn", "n_clicks")],
+        [State("metrics-data-store", "data")],
+        prevent_initial_call=True
+    )
+    def show_monthly_readings_export_notification(csv_clicks, excel_clicks, pdf_clicks, json_data):
+        """Mostrar notificación cuando se exportan datos de lecturas mensuales."""
+        # Determinar qué botón fue clickeado
+        ctx = callback_context
+        if not ctx.triggered:
+            return False, "", "", False, "", ""
+            
+        button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        
+        # Verificar que realmente se hizo clic en un botón
+        if (button_id == "export-monthly-readings-csv-btn" and not csv_clicks) or \
+           (button_id == "export-monthly-readings-excel-btn" and not excel_clicks) or \
+           (button_id == "export-monthly-readings-pdf-btn" and not pdf_clicks):
+            return False, "", "", False, "", ""
+        
+        # Verificar si hay datos para exportar
+        if not json_data or json_data == "[]":
+            return False, "", "", True, "No hay datos disponibles para exportar. Por favor, asegúrese de que hay datos cargados.", "Error de Exportación"
+        
+        # Mostrar notificación según el formato seleccionado
+        if button_id == "export-monthly-readings-csv-btn":
+            return True, "Los datos de lecturas mensuales han sido exportados en formato CSV.", "Exportación CSV", False, "", ""
+        elif button_id == "export-monthly-readings-excel-btn":
+            return True, "Los datos de lecturas mensuales han sido exportados en formato Excel.", "Exportación Excel", False, "", ""
+        elif button_id == "export-monthly-readings-pdf-btn":
+            return True, "Los datos de lecturas mensuales han sido exportados en formato PDF.", "Exportación PDF", False, "", ""
+        
+        return False, "", "", False, "", ""

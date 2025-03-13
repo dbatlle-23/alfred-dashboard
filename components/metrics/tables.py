@@ -16,7 +16,12 @@ def create_monthly_readings_table(df, title="Lecturas Mensuales"):
     """
     if df is None or df.empty:
         return html.Div([
-            html.H5(title),
+            html.Div([
+                dbc.Row([
+                    dbc.Col(html.H5(title, className="mb-0"), width="auto"),
+                    dbc.Col(width="auto", className="ms-auto")
+                ], className="d-flex align-items-center"),
+            ], className="mb-3"),
             html.P("No hay datos disponibles", className="text-muted")
         ])
     
@@ -96,8 +101,39 @@ def create_monthly_readings_table(df, title="Lecturas Mensuales"):
         export_format='csv'
     )
     
+    # Crear el encabezado con título y botones de exportación
+    header = html.Div([
+        dbc.Row([
+            dbc.Col(html.H5(title, className="mb-0"), width="auto"),
+            dbc.Col(
+                dbc.ButtonGroup([
+                    dbc.Button(
+                        [html.I(className="fas fa-file-export me-2"), "Exportar"],
+                        id="export-monthly-readings-btn",
+                        color="primary",
+                        outline=True,
+                        size="sm",
+                        className="d-flex align-items-center export-main-btn"
+                    ),
+                    dbc.DropdownMenu(
+                        [
+                            dbc.DropdownMenuItem([html.I(className="fas fa-file-csv me-2"), "CSV"], id="export-monthly-readings-csv-btn"),
+                            dbc.DropdownMenuItem([html.I(className="fas fa-file-excel me-2"), "Excel"], id="export-monthly-readings-excel-btn"),
+                            dbc.DropdownMenuItem([html.I(className="fas fa-file-pdf me-2"), "PDF"], id="export-monthly-readings-pdf-btn"),
+                        ],
+                        size="sm",
+                        group=True,
+                        right=True,
+                    ),
+                ]),
+                width="auto",
+                className="ms-auto"
+            ),
+        ], className="d-flex align-items-center"),
+    ], className="mb-3")
+    
     return html.Div([
-        html.H5(title),
+        header,
         table
     ])
 

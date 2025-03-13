@@ -239,8 +239,41 @@ def create_layout():
                 
                 # Resumen Mensual de Consumos
                 dbc.Card([
-                    dbc.CardHeader("Resumen Mensual de Consumos"),
+                    dbc.CardHeader([
+                        dbc.Row([
+                            dbc.Col(html.H5("Resumen Mensual de Consumos", className="mb-0"), width="auto"),
+                            dbc.Col(
+                                dbc.ButtonGroup([
+                                    dbc.Button(
+                                        [html.I(className="fas fa-file-export me-2"), "Exportar"],
+                                        id="export-monthly-data-btn",
+                                        color="primary",
+                                        outline=True,
+                                        size="sm",
+                                        className="d-flex align-items-center export-main-btn"
+                                    ),
+                                    dbc.DropdownMenu(
+                                        [
+                                            dbc.DropdownMenuItem([html.I(className="fas fa-file-csv me-2"), "CSV"], id="export-csv-btn"),
+                                            dbc.DropdownMenuItem([html.I(className="fas fa-file-excel me-2"), "Excel"], id="export-excel-btn"),
+                                            dbc.DropdownMenuItem([html.I(className="fas fa-file-pdf me-2"), "PDF"], id="export-pdf-btn"),
+                                            dbc.DropdownMenuItem(divider=True),
+                                            dbc.DropdownMenuItem([html.I(className="fas fa-chart-bar me-2"), "Imagen PNG"], id="export-png-btn"),
+                                        ],
+                                        size="sm",
+                                        group=True,
+                                        right=True,
+                                    ),
+                                ]),
+                                width="auto",
+                                className="ms-auto"
+                            ),
+                        ], className="d-flex align-items-center"),
+                    ]),
                     dbc.CardBody([
+                        # Alerta para errores de exportación
+                        html.Div(id="export-error-container", className="mb-3"),
+                        
                         dbc.Row([
                             # Gráfico de totales mensuales
                             dbc.Col([
@@ -269,7 +302,32 @@ def create_layout():
                                 html.H5("Tabla de Resumen Mensual", className="mt-4"),
                                 html.Div(id="metrics-monthly-summary-table")
                             ], width=12)
-                        ])
+                        ]),
+                        
+                        # Componente para descargar archivos
+                        dcc.Download(id="download-monthly-data"),
+                        
+                        # Toast para notificaciones de éxito
+                        dbc.Toast(
+                            id="export-notification",
+                            header="Exportación",
+                            is_open=False,
+                            dismissable=True,
+                            duration=4000,
+                            icon="success",
+                            style={"position": "fixed", "top": 66, "right": 10, "width": 350, "zIndex": 1000},
+                        ),
+                        
+                        # Toast para notificaciones de error
+                        dbc.Toast(
+                            id="export-error-notification",
+                            header="Error de Exportación",
+                            is_open=False,
+                            dismissable=True,
+                            duration=6000,
+                            icon="danger",
+                            style={"position": "fixed", "top": 66, "right": 10, "width": 350, "zIndex": 1000},
+                        ),
                     ])
                 ], className="mb-4"),
                 
@@ -277,7 +335,35 @@ def create_layout():
                 dbc.Card([
                     dbc.CardHeader("Lecturas Mensuales"),
                     dbc.CardBody([
-                        html.Div(id="metrics-monthly-readings-table")
+                        # Alerta para errores de exportación
+                        html.Div(id="monthly-readings-error-container", className="mb-3"),
+                        
+                        html.Div(id="metrics-monthly-readings-table"),
+                        
+                        # Componente para descargar archivos
+                        dcc.Download(id="download-monthly-readings"),
+                        
+                        # Toast para notificaciones de éxito
+                        dbc.Toast(
+                            id="monthly-readings-export-notification",
+                            header="Exportación",
+                            is_open=False,
+                            dismissable=True,
+                            duration=4000,
+                            icon="success",
+                            style={"position": "fixed", "top": 66, "right": 10, "width": 350, "zIndex": 1000},
+                        ),
+                        
+                        # Toast para notificaciones de error
+                        dbc.Toast(
+                            id="monthly-readings-export-error-notification",
+                            header="Error de Exportación",
+                            is_open=False,
+                            dismissable=True,
+                            duration=6000,
+                            icon="danger",
+                            style={"position": "fixed", "top": 66, "right": 10, "width": 350, "zIndex": 1000},
+                        ),
                     ])
                 ], className="mb-4"),
                 
