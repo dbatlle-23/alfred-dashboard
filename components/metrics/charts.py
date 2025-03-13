@@ -3,6 +3,31 @@ import plotly.graph_objects as go
 from config.metrics_config import CHART_CONFIG
 import pandas as pd
 
+def _limit_bar_width(fig, num_bars):
+    """
+    Helper function to limit the width of bars in bar charts with few bars.
+    
+    Args:
+        fig (plotly.graph_objects.Figure): The figure to modify
+        num_bars (int): Number of bars in the chart
+        
+    Returns:
+        plotly.graph_objects.Figure: The modified figure
+    """
+    # Only apply width limitation if there are few bars
+    if num_bars <= 6:
+        # For bar charts with few bars, set a custom width
+        # The width decreases as the number of bars decreases
+        # but never exceeds 0.3 (30% of the available space)
+        for trace in fig.data:
+            if trace.type == 'bar':
+                # Calculate width based on number of bars
+                width = min(0.3, 0.7 / (7 - num_bars))
+                # Apply the width to the trace
+                trace.width = width
+    
+    return fig
+
 def create_time_series_chart(df, color_column=None, title="Evolución temporal del consumo"):
     """Creates a time series chart from the given DataFrame."""
     if df.empty:
@@ -43,14 +68,25 @@ def create_bar_chart(df, group_column, title="Comparativa de consumo"):
         fig.update_layout(title=title, **CHART_CONFIG)
         return fig
 
+    # Create bar chart with px.bar
     fig = px.bar(
         df,
         x=group_column,
         y='consumption',
         title=title,
-        labels={group_column: 'Categoría', 'consumption': 'Consumo'}
+        labels={group_column: 'Categoría', 'consumption': 'Consumo'},
+        color_discrete_sequence=['royalblue']
     )
-    fig.update_layout(**CHART_CONFIG)
+    
+    # Limit bar width for better aesthetics
+    fig = _limit_bar_width(fig, len(df))
+    
+    # Update layout with bargap for better aesthetics
+    fig.update_layout(
+        bargap=0.3,
+        **CHART_CONFIG
+    )
+    
     return fig
 
 def create_consumption_comparison_chart(df, group_column, title="Comparativa de consumo"):
@@ -66,14 +102,26 @@ def create_consumption_comparison_chart(df, group_column, title="Comparativa de 
         return fig
 
     grouped_df = df.groupby(group_column)['consumption'].sum().reset_index()
+    
+    # Create bar chart with px.bar
     fig = px.bar(
         grouped_df,
         x=group_column,
         y='consumption',
         title=title,
-        labels={group_column: 'Categoría', 'consumption': 'Consumo Total'}
+        labels={group_column: 'Categoría', 'consumption': 'Consumo Total'},
+        color_discrete_sequence=['royalblue']
     )
-    fig.update_layout(**CHART_CONFIG)
+    
+    # Limit bar width for better aesthetics
+    fig = _limit_bar_width(fig, len(grouped_df))
+    
+    # Update layout with bargap for better aesthetics
+    fig.update_layout(
+        bargap=0.3,
+        **CHART_CONFIG
+    )
+    
     return fig
 
 def create_consumption_trend_chart(df, time_period='M', group_column=None, title="Tendencias de consumo"):
@@ -180,43 +228,27 @@ def create_monthly_totals_chart(df, title="Total de Consumo por Mes"):
     Returns:
         plotly.graph_objects.Figure: The monthly totals chart
     """
-    print("=====================================================")
-    print("DEBUGGING MONTHLY TOTALS CHART - FUNCTION CALLED")
-    print("=====================================================")
-    print(f"[DEBUG] create_monthly_totals_chart - Starting")
-    print(f"[DEBUG] create_monthly_totals_chart - DataFrame type: {type(df)}")
-    
+    # Si no hay datos, mostrar un mensaje
     if df is None or df.empty:
-        print(f"[DEBUG] create_monthly_totals_chart - DataFrame is empty or None")
-        if df is None:
-            print(f"[DEBUG] create_monthly_totals_chart - DataFrame is None")
-        elif df.empty:
-            print(f"[DEBUG] create_monthly_totals_chart - DataFrame is empty")
         fig = go.Figure()
         fig.add_annotation(
             text="No hay datos disponibles",
             xref="paper", yref="paper",
             x=0.5, y=0.5, showarrow=False
         )
-        fig.update_layout(title=title, **CHART_CONFIG)
         return fig
     
-    print(f"[DEBUG] create_monthly_totals_chart - DataFrame columns: {df.columns.tolist()}")
-    print(f"[DEBUG] create_monthly_totals_chart - DataFrame shape: {df.shape}")
-    
-    # Check if required columns exist
+    # Verificar si existen las columnas necesarias
     if 'month' not in df.columns or 'total_consumption' not in df.columns:
-        print(f"[ERROR] create_monthly_totals_chart - Required columns missing. Available columns: {df.columns.tolist()}")
         fig = go.Figure()
         fig.add_annotation(
             text="Error en los datos: faltan columnas requeridas",
             xref="paper", yref="paper",
             x=0.5, y=0.5, showarrow=False
         )
-        fig.update_layout(title=title, **CHART_CONFIG)
         return fig
     
-    # Create the bar chart
+    # Crear el gráfico de barras de la forma más simple posible
     fig = go.Figure()
     
     fig.add_trace(
@@ -228,20 +260,16 @@ def create_monthly_totals_chart(df, title="Total de Consumo por Mes"):
         )
     )
     
-    # Set layout
+    # Configuración básica
     fig.update_layout(
         title=title,
-        xaxis=dict(
-            title='Mes',
-            tickformat='%b %Y'
-        ),
-        yaxis=dict(
-            title='Consumo Total'
-        ),
-        **CHART_CONFIG
+        xaxis_title="Mes",
+        yaxis_title="Consumo Total",
+        height=400,
+        plot_bgcolor='white',
+        paper_bgcolor='white'
     )
     
-    print(f"[DEBUG] create_monthly_totals_chart - Chart created successfully")
     return fig
 
 def create_monthly_averages_chart(df, title="Promedio de Consumo por Mes"):
@@ -255,35 +283,27 @@ def create_monthly_averages_chart(df, title="Promedio de Consumo por Mes"):
     Returns:
         plotly.graph_objects.Figure: The monthly averages chart
     """
-    print(f"[DEBUG] create_monthly_averages_chart - Starting")
-    
+    # Si no hay datos, mostrar un mensaje
     if df is None or df.empty:
-        print(f"[DEBUG] create_monthly_averages_chart - DataFrame is empty or None")
         fig = go.Figure()
         fig.add_annotation(
             text="No hay datos disponibles",
             xref="paper", yref="paper",
             x=0.5, y=0.5, showarrow=False
         )
-        fig.update_layout(title=title, **CHART_CONFIG)
         return fig
     
-    print(f"[DEBUG] create_monthly_averages_chart - DataFrame columns: {df.columns.tolist()}")
-    print(f"[DEBUG] create_monthly_averages_chart - DataFrame shape: {df.shape}")
-    
-    # Check if required columns exist
+    # Verificar si existen las columnas necesarias
     if 'month' not in df.columns or 'average_consumption' not in df.columns:
-        print(f"[ERROR] create_monthly_averages_chart - Required columns missing. Available columns: {df.columns.tolist()}")
         fig = go.Figure()
         fig.add_annotation(
             text="Error en los datos: faltan columnas requeridas",
             xref="paper", yref="paper",
             x=0.5, y=0.5, showarrow=False
         )
-        fig.update_layout(title=title, **CHART_CONFIG)
         return fig
     
-    # Create the line chart
+    # Crear el gráfico de línea de la forma más simple posible
     fig = go.Figure()
     
     fig.add_trace(
@@ -291,24 +311,20 @@ def create_monthly_averages_chart(df, title="Promedio de Consumo por Mes"):
             x=df['month'],
             y=df['average_consumption'],
             mode='lines+markers',
-            line=dict(color='green', width=2),
             marker=dict(size=8),
+            line=dict(color='green', width=2),
             name='Consumo Promedio'
         )
     )
     
-    # Set layout
+    # Configuración básica
     fig.update_layout(
         title=title,
-        xaxis=dict(
-            title='Mes',
-            tickformat='%b %Y'
-        ),
-        yaxis=dict(
-            title='Consumo Promedio'
-        ),
-        **CHART_CONFIG
+        xaxis_title="Mes",
+        yaxis_title="Consumo Promedio",
+        height=400,
+        plot_bgcolor='white',
+        paper_bgcolor='white'
     )
     
-    print(f"[DEBUG] create_monthly_averages_chart - Chart created successfully")
     return fig

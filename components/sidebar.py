@@ -11,137 +11,157 @@ def create_sidebar():
     # Crear el sidebar con opciones por defecto
     sidebar = html.Div([
         html.Div([
-            html.H5("Filtros", className="sidebar-title"),
-            html.Hr(),
-            
-            # Filtro de cliente
+            # Sección de Filtros
             html.Div([
-                html.Label("Cliente:", className="filter-label"),
-                dcc.Dropdown(
-                    id="sidebar-client-dropdown",
-                    options=[{"label": "Cargando...", "value": "all"}],
-                    value="all",
-                    clearable=False,
-                    className="sidebar-dropdown"
-                )
-            ], className="sidebar-filter"),
-            
-            # Filtro de proyecto
-            html.Div([
-                html.Label("Proyecto:", className="filter-label"),
-                dcc.Dropdown(
-                    id="sidebar-project-dropdown",
-                    options=[{"label": "Cargando...", "value": "all"}],
-                    value="all",
-                    clearable=False,
-                    className="sidebar-dropdown"
-                )
-            ], className="sidebar-filter"),
-            
-            # Botón para aplicar filtros
-            html.Div([
-                dbc.Button(
-                    "Aplicar Filtros",
-                    id="apply-filters-button",
-                    color="primary",
-                    className="w-100 mt-3"
-                )
-            ]),
-            
-            html.Hr(),
+                html.H5("FILTROS", className="sidebar-title"),
+                html.Hr(className="my-2"),
+                
+                # Filtro de cliente
+                html.Div([
+                    html.Label("Cliente", className="filter-label"),
+                    dcc.Dropdown(
+                        id="sidebar-client-dropdown",
+                        options=[{"label": "Cargando...", "value": "all"}],
+                        value="all",
+                        clearable=False,
+                        className="sidebar-dropdown"
+                    )
+                ], className="sidebar-filter"),
+                
+                # Filtro de proyecto
+                html.Div([
+                    html.Label("Proyecto", className="filter-label"),
+                    dcc.Dropdown(
+                        id="sidebar-project-dropdown",
+                        options=[{"label": "Cargando...", "value": "all"}],
+                        value="all",
+                        clearable=False,
+                        className="sidebar-dropdown"
+                    )
+                ], className="sidebar-filter"),
+                
+                # Botón para aplicar filtros
+                html.Div([
+                    dbc.Button(
+                        "Aplicar Filtros",
+                        id="apply-filters-button",
+                        color="primary",
+                        className="w-100 mt-2"
+                    )
+                ]),
+            ], className="mb-4"),
             
             # Sección de Navegación
-            html.H5("Navegación", className="sidebar-title"),
-            dbc.Nav(
-                [
-                    dbc.NavLink(
-                        [html.I(className="fas fa-home me-2"), "Inicio"],
-                        href="/",
-                        active="exact",
-                        className="sidebar-link"
-                    ),
-                ],
-                vertical=True,
-                pills=True,
-                className="sidebar-nav mb-3"
-            ),
+            html.Div([
+                html.H5("NAVEGACIÓN", className="sidebar-title"),
+                html.Hr(className="my-2"),
+                dbc.Nav(
+                    [
+                        dbc.NavLink(
+                            [html.I(className="fas fa-home me-2"), "Inicio"],
+                            href="/",
+                            active="exact",
+                            className="sidebar-link"
+                        ),
+                    ],
+                    vertical=True,
+                    pills=True,
+                    className="sidebar-nav"
+                ),
+            ], className="mb-4"),
             
             # Sección de Apps
-            html.H5("Apps", className="sidebar-title"),
-            dbc.Nav(
-                [
-                    dbc.NavLink(
-                        [html.I(className="fas fa-building me-2"), "Spaces"],
-                        href="/spaces",
-                        active="exact",
-                        className="sidebar-link"
-                    ),
-                    dbc.NavLink(
-                        [html.I(className="fas fa-lock me-2"), "Lock"],
-                        href="/lock",
-                        active="exact",
-                        className="sidebar-link"
-                    ),
-                    dbc.NavLink(
-                        [html.I(className="fas fa-chart-bar me-2"), "Metrics"],
-                        href="/metrics",
-                        active="exact",
-                        className="sidebar-link"
-                    ),
-                ],
-                vertical=True,
-                pills=True,
-                className="sidebar-nav mb-3"
-            ),
+            html.Div([
+                html.H5("APPS", className="sidebar-title"),
+                html.Hr(className="my-2"),
+                dbc.Nav(
+                    [
+                        dbc.NavLink(
+                            [html.I(className="fas fa-building me-2"), "Spaces"],
+                            href="/spaces",
+                            active="exact",
+                            className="sidebar-link"
+                        ),
+                        dbc.NavLink(
+                            [html.I(className="fas fa-lock me-2"), "Lock"],
+                            href="/lock",
+                            active="exact",
+                            className="sidebar-link"
+                        ),
+                        dbc.NavLink(
+                            [html.I(className="fas fa-chart-bar me-2"), "Metrics"],
+                            href="/metrics",
+                            active="exact",
+                            className="sidebar-link"
+                        ),
+                    ],
+                    vertical=True,
+                    pills=True,
+                    className="sidebar-nav"
+                ),
+            ], className="mb-4"),
             
             # Sección de Configuración
-            html.H5("Configuración", className="sidebar-title"),
-            dbc.Nav(
-                [
-                    dbc.NavLink(
-                        [html.I(className="fas fa-database me-2"), "Explorador DB"],
-                        href="/db-explorer",
-                        active="exact",
-                        className="sidebar-link"
-                    ),
-                    dbc.NavLink(
-                        [html.I(className="fas fa-cog me-2"), "Configuración DB"],
-                        href="/db-config",
-                        active="exact",
-                        className="sidebar-link"
-                    ),
-                    dbc.NavLink(
-                        [html.I(className="fas fa-flask me-2"), "Test API"],
-                        href="/api-test",
-                        active="exact",
-                        className="sidebar-link"
-                    ),
-                ],
-                vertical=True,
-                pills=True,
-                className="sidebar-nav mb-3"
-            ),
+            html.Div([
+                html.H5("CONFIGURACIÓN", className="sidebar-title"),
+                html.Hr(className="my-2"),
+                dbc.Nav(
+                    [
+                        dbc.NavLink(
+                            [html.I(className="fas fa-database me-2"), "Explorador DB"],
+                            href="/db-explorer",
+                            active="exact",
+                            className="sidebar-link"
+                        ),
+                        dbc.NavLink(
+                            [html.I(className="fas fa-cog me-2"), "Configuración DB"],
+                            href="/db-config",
+                            active="exact",
+                            className="sidebar-link"
+                        ),
+                        dbc.NavLink(
+                            [html.I(className="fas fa-flask me-2"), "Test API"],
+                            href="/api-test",
+                            active="exact",
+                            className="sidebar-link"
+                        ),
+                    ],
+                    vertical=True,
+                    pills=True,
+                    className="sidebar-nav"
+                ),
+            ], className="mb-4"),
             
             # Sección de Developer
-            html.H5("Developer", className="sidebar-title"),
-            dbc.Nav(
-                [
-                    dbc.NavLink(
-                        [html.I(className="fas fa-palette me-2"), "Demo UI"],
-                        href="/ui-demo",
-                        active="exact",
-                        className="sidebar-link"
-                    ),
-                ],
-                vertical=True,
-                pills=True,
-                className="sidebar-nav"
-            ),
+            html.Div([
+                html.H5("DEVELOPER", className="sidebar-title"),
+                html.Hr(className="my-2"),
+                dbc.Nav(
+                    [
+                        dbc.NavLink(
+                            [html.I(className="fas fa-palette me-2"), "Demo UI"],
+                            href="/ui-demo",
+                            active="exact",
+                            className="sidebar-link"
+                        ),
+                    ],
+                    vertical=True,
+                    pills=True,
+                    className="sidebar-nav"
+                ),
+            ]),
+            
+            # Versión en la parte inferior
+            html.Div([
+                html.Hr(className="my-3"),
+                html.P("v1.0.0", className="text-muted text-center small")
+            ], className="mt-auto pt-4"),
+            
         ], className="sidebar-content"),
         
         # Store para la selección de cliente/proyecto
         dcc.Store(id="selected-client-store", data={"client_id": "all", "project_id": "all"})
-    ], className="sidebar")
+    ], className="sidebar", style={"font-family": "Inter, system-ui, Avenir, Helvetica, Arial, sans-serif"})
     
     return sidebar
 
@@ -323,8 +343,7 @@ def register_callbacks(app):
     
     # Callback para aplicar los filtros del sidebar
     @app.callback(
-        [Output("selected-client-store", "data", allow_duplicate=True),
-         Output("global-client-selection", "data", allow_duplicate=True)],
+        Output("selected-client-store", "data", allow_duplicate=True),
         [Input("apply-filters-button", "n_clicks")],
         [State("sidebar-client-dropdown", "value"), State("sidebar-project-dropdown", "value")],
         prevent_initial_call=True
@@ -334,5 +353,5 @@ def register_callbacks(app):
             selection = {"client_id": client_id, "project_id": project_id}
             if os.environ.get('DASH_DEBUG') == 'true':
                 print(f"[DEBUG SIDEBAR] Aplicando filtros: {selection}")
-            return selection, selection
-        return dash.no_update, dash.no_update
+            return selection
+        return dash.no_update

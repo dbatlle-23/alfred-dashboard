@@ -1,7 +1,6 @@
 from dash import html, dcc, callback_context
 import dash_bootstrap_components as dbc
 from utils.auth import auth_service
-from components.client_selector import create_client_selector
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -17,7 +16,7 @@ def create_navbar():
     logout_button = dbc.Button(
         [html.I(className="fas fa-sign-out-alt me-2"), "Cerrar Sesión"],
         id="logout-button",
-        color="light",
+        color="dark",
         outline=True,
         size="sm",
         className="ms-2"
@@ -31,8 +30,8 @@ def create_navbar():
                 html.Span(id="user-type-display")
             ], header=True),
             dbc.DropdownMenuItem(divider=True),
-            dbc.DropdownMenuItem("Perfil", href="#"),
-            dbc.DropdownMenuItem("Configuración", href="#"),
+            dbc.DropdownMenuItem([html.I(className="fas fa-user-cog me-2"), "Perfil"], href="#"),
+            dbc.DropdownMenuItem([html.I(className="fas fa-cog me-2"), "Configuración"], href="#"),
             dbc.DropdownMenuItem(divider=True),
             dbc.DropdownMenuItem(logout_button, className="p-0")
         ],
@@ -42,31 +41,21 @@ def create_navbar():
         ]),
         nav=True,
         align_end=True,
+        style={"font-family": "Inter, system-ui, Avenir, Helvetica, Arial, sans-serif"}
     )
     
-    # Crear el selector de cliente/proyecto
-    client_selector = create_client_selector()
-    
-    # Crear la barra de navegación
+    # Crear la barra de navegación con logo pequeño
     navbar = dbc.Navbar(
         dbc.Container(
             [
-                # Logo y nombre de la aplicación
+                # Logo de la aplicación (versión muy reducida)
                 html.A(
-                    dbc.Row(
-                        [
-                            dbc.Col(html.Img(src="/assets/img/logo.svg", height="30px")),
-                            dbc.Col(dbc.NavbarBrand("Alfred Dashboard", className="ms-2")),
-                        ],
-                        align="center",
-                        className="g-0",
+                    html.Img(
+                        src="/assets/img/AlfredSmart Blue.png",
+                        style={"height": "20px", "width": "auto", "margin": "5px 0"}
                     ),
                     href="/",
-                    style={"textDecoration": "none"},
                 ),
-                
-                # Selector de cliente/proyecto (nuevo)
-                client_selector,
                 
                 # Elementos a la derecha
                 dbc.NavbarToggler(id="navbar-toggler"),
@@ -88,9 +77,10 @@ def create_navbar():
             ],
             fluid=True,
         ),
-        color="dark",
-        dark=True,
-        className="mb-4",
+        color="light",
+        dark=False,
+        className="mb-4 shadow-sm",
+        style={"background-color": "#f8f9fa", "font-family": "Inter, system-ui, Avenir, Helvetica, Arial, sans-serif"}
     )
     
     return navbar
@@ -104,10 +94,6 @@ def register_callbacks(app):
     """
     from dash.dependencies import Input, Output, State
     import dash
-    
-    # Importar y registrar callbacks del selector de cliente/proyecto
-    from components.client_selector import register_callbacks as register_client_selector_callbacks
-    register_client_selector_callbacks(app)
     
     # Callback para actualizar la información del usuario en la barra de navegación
     @app.callback(

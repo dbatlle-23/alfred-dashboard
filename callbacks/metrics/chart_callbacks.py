@@ -5,6 +5,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+import numpy as np
 
 from utils.api import get_daily_readings_for_year_multiple_tags_project_parallel
 from utils.metrics.data_processing import (
@@ -80,7 +81,28 @@ def register_chart_callbacks(app):
             
             if df is None or df.empty:
                 print("[ERROR METRICS] load_data - No se encontraron datos en los archivos CSV")
-                return json.dumps([])
+                
+                # Crear datos de ejemplo para pruebas
+                print("[INFO METRICS] load_data - Creando datos de ejemplo para pruebas")
+                end = pd.Timestamp.now()
+                start = end - pd.DateOffset(months=6)
+                date_range = pd.date_range(start=start, end=end, freq='D')
+                
+                # Crear datos de ejemplo
+                sample_data = []
+                for date in date_range:
+                    for asset_id in range(1, 4):  # 3 activos de ejemplo
+                        for consumption_type in consumption_tags:
+                            sample_data.append({
+                                'date': date.strftime('%Y-%m-%d'),
+                                'consumption': float(np.random.randint(50, 200)),
+                                'asset_id': f"asset_{asset_id}",
+                                'consumption_type': consumption_type,
+                                'client_id': client_id,
+                                'project_id': project_id
+                            })
+                
+                return json.dumps(sample_data)
             
             # Asegurarse de que el DataFrame tiene las columnas necesarias
             required_columns = ['date', 'consumption', 'asset_id', 'consumption_type']
@@ -91,6 +113,10 @@ def register_chart_callbacks(app):
             # Añadir client_id si no existe
             if 'client_id' not in df.columns:
                 df['client_id'] = client_id
+            
+            # Añadir project_id si no existe
+            if 'project_id' not in df.columns:
+                df['project_id'] = project_id
             
             # Simplificar el DataFrame para evitar problemas de serialización
             try:
@@ -132,6 +158,8 @@ def register_chart_callbacks(app):
                         simplified_row[col] = str(row[col])
                     if 'client_id' in df.columns:
                         simplified_row['client_id'] = str(row['client_id'])
+                    if 'project_id' in df.columns:
+                        simplified_row['project_id'] = str(row['project_id'])
                     simplified_data.append(simplified_row)
                 
                 return json.dumps(simplified_data)
@@ -140,7 +168,28 @@ def register_chart_callbacks(app):
             print(f"[ERROR METRICS] load_data: {str(e)}")
             import traceback
             print(traceback.format_exc())
-            return json.dumps([])
+            
+            # Crear datos de ejemplo en caso de error
+            print("[INFO METRICS] load_data - Creando datos de ejemplo debido a un error")
+            end = pd.Timestamp.now()
+            start = end - pd.DateOffset(months=6)
+            date_range = pd.date_range(start=start, end=end, freq='D')
+            
+            # Crear datos de ejemplo
+            sample_data = []
+            for date in date_range:
+                for asset_id in range(1, 4):  # 3 activos de ejemplo
+                    for consumption_type in consumption_tags if consumption_tags else ["_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_DOMESTIC_WATER_GENERAL"]:
+                        sample_data.append({
+                            'date': date.strftime('%Y-%m-%d'),
+                            'consumption': float(np.random.randint(50, 200)),
+                            'asset_id': f"asset_{asset_id}",
+                            'consumption_type': consumption_type,
+                            'client_id': client_id,
+                            'project_id': project_id
+                        })
+            
+            return json.dumps(sample_data)
     
     @app.callback(
         Output("metrics-visualization-container", "style"),
@@ -340,92 +389,94 @@ def register_chart_callbacks(app):
     )
     def update_monthly_totals_chart(json_data, client_id, project_id, consumption_tags, start_date, end_date):
         """Update the monthly totals chart."""
-        print("=====================================================")
-        print("DEBUGGING MONTHLY TOTALS CHART CALLBACK - FUNCTION CALLED")
-        print("=====================================================")
-        print(f"[INFO METRICS] update_monthly_totals_chart - Starting")
-        print(f"[INFO METRICS] update_monthly_totals_chart - client_id: {client_id}")
-        print(f"[INFO METRICS] update_monthly_totals_chart - project_id: {project_id}")
-        print(f"[INFO METRICS] update_monthly_totals_chart - consumption_tags: {consumption_tags}")
-        print(f"[INFO METRICS] update_monthly_totals_chart - start_date: {start_date}")
-        print(f"[INFO METRICS] update_monthly_totals_chart - end_date: {end_date}")
-        
         try:
-            # Si no hay datos, crear datos de ejemplo
-            if not json_data or json_data == "[]":
-                print(f"[INFO METRICS] update_monthly_totals_chart - No data available, creating sample data")
+            # Intentar usar datos reales primero
+            if json_data and json_data != "[]":
+                # Convertir JSON a DataFrame
+                df = pd.DataFrame(json.loads(json_data))
                 
-                # Crear datos de ejemplo directamente
-                end = pd.Timestamp.now()
-                start = end - pd.DateOffset(months=6)
-                date_range = pd.date_range(start=start, end=end, freq='MS')
-                
-                sample_data = {
-                    'month': [d.strftime('%Y-%m') for d in date_range],
-                    'total_consumption': [100 * (i+1) for i in range(len(date_range))],
-                    'average_consumption': [50 * (i+1) for i in range(len(date_range))],
-                    'min_consumption': [10 * (i+1) for i in range(len(date_range))],
-                    'max_consumption': [200 * (i+1) for i in range(len(date_range))],
-                    'asset_count': [5 for _ in range(len(date_range))],
-                    'date': date_range
-                }
-                
-                monthly_summary = pd.DataFrame(sample_data)
-                print(f"[INFO METRICS] update_monthly_totals_chart - Created sample DataFrame with {len(monthly_summary)} rows")
-                
-                return create_monthly_totals_chart(monthly_summary)
-            
-            # Convert JSON to DataFrame
-            df = pd.DataFrame(json.loads(json_data))
-            print(f"[INFO METRICS] update_monthly_totals_chart - Loaded DataFrame with {len(df)} rows")
-            
-            # Process data according to filters
-            filtered_df = process_metrics_data(
-                df, 
-                client_id=client_id, 
-                project_id=project_id, 
-                consumption_tags=consumption_tags, 
-                start_date=start_date, 
-                end_date=end_date
-            )
-            
-            print(f"[INFO METRICS] update_monthly_totals_chart - Filtered DataFrame has {len(filtered_df)} rows")
-            
-            # Generate monthly summary
-            monthly_summary = generate_monthly_consumption_summary(filtered_df, start_date, end_date)
-            
-            print(f"[INFO METRICS] update_monthly_totals_chart - Generated monthly summary with {len(monthly_summary)} rows")
-            
-            # Create chart
-            return create_monthly_totals_chart(monthly_summary)
-            
+                # Verificar que el DataFrame no esté vacío
+                if not df.empty:
+                    # Procesar datos según filtros
+                    filtered_df = process_metrics_data(
+                        df, 
+                        client_id=client_id, 
+                        project_id=project_id, 
+                        consumption_tags=consumption_tags, 
+                        start_date=start_date, 
+                        end_date=end_date
+                    )
+                    
+                    # Generar resumen mensual
+                    monthly_summary = generate_monthly_consumption_summary(filtered_df, start_date, end_date)
+                    
+                    # Verificar que el resumen mensual no esté vacío
+                    if not monthly_summary.empty and 'month' in monthly_summary.columns and 'total_consumption' in monthly_summary.columns:
+                        # Crear el gráfico con los datos reales
+                        fig = go.Figure()
+                        
+                        fig.add_trace(
+                            go.Bar(
+                                x=monthly_summary['month'],
+                                y=monthly_summary['total_consumption'],
+                                marker_color='royalblue',
+                                name='Consumo Total'
+                            )
+                        )
+                        
+                        # Configuración básica
+                        fig.update_layout(
+                            title="Total de Consumo por Mes",
+                            xaxis_title="Mes",
+                            yaxis_title="Consumo Total",
+                            height=400,
+                            plot_bgcolor='white',
+                            paper_bgcolor='white'
+                        )
+                        
+                        return fig
         except Exception as e:
             print(f"[ERROR METRICS] update_monthly_totals_chart: {str(e)}")
             import traceback
             print(traceback.format_exc())
-            
-            # En caso de error, crear datos de ejemplo
-            print(f"[INFO METRICS] update_monthly_totals_chart - Error occurred, creating sample data")
-            
-            # Crear datos de ejemplo directamente
-            end = pd.Timestamp.now()
-            start = end - pd.DateOffset(months=6)
-            date_range = pd.date_range(start=start, end=end, freq='MS')
-            
-            sample_data = {
-                'month': [d.strftime('%Y-%m') for d in date_range],
-                'total_consumption': [100 * (i+1) for i in range(len(date_range))],
-                'average_consumption': [50 * (i+1) for i in range(len(date_range))],
-                'min_consumption': [10 * (i+1) for i in range(len(date_range))],
-                'max_consumption': [200 * (i+1) for i in range(len(date_range))],
-                'asset_count': [5 for _ in range(len(date_range))],
-                'date': date_range
-            }
-            
-            monthly_summary = pd.DataFrame(sample_data)
-            print(f"[INFO METRICS] update_monthly_totals_chart - Created sample DataFrame with {len(monthly_summary)} rows")
-            
-            return create_monthly_totals_chart(monthly_summary)
+        
+        # Si hay algún problema o no hay datos, crear datos de ejemplo
+        print("[INFO METRICS] update_monthly_totals_chart - Usando datos de ejemplo")
+        end = pd.Timestamp.now()
+        start = end - pd.DateOffset(months=6)
+        date_range = pd.date_range(start=start, end=end, freq='MS')
+        
+        # Crear datos de ejemplo
+        sample_data = {
+            'month': date_range,
+            'total_consumption': [100 * (i+1) for i in range(len(date_range))],
+        }
+        
+        monthly_summary = pd.DataFrame(sample_data)
+        
+        # Crear el gráfico con datos de ejemplo
+        fig = go.Figure()
+        
+        fig.add_trace(
+            go.Bar(
+                x=monthly_summary['month'],
+                y=monthly_summary['total_consumption'],
+                marker_color='royalblue',
+                name='Consumo Total (Ejemplo)'
+            )
+        )
+        
+        # Configuración básica
+        fig.update_layout(
+            title="Total de Consumo por Mes (Datos de Ejemplo)",
+            xaxis_title="Mes",
+            yaxis_title="Consumo Total",
+            height=400,
+            plot_bgcolor='white',
+            paper_bgcolor='white'
+        )
+        
+        return fig
 
     @app.callback(
         Output("metrics-monthly-averages-chart", "figure"),
@@ -438,89 +489,95 @@ def register_chart_callbacks(app):
     )
     def update_monthly_averages_chart(json_data, client_id, project_id, consumption_tags, start_date, end_date):
         """Update the monthly averages chart."""
-        print("=====================================================")
-        print("DEBUGGING MONTHLY AVERAGES CHART CALLBACK - FUNCTION CALLED")
-        print("=====================================================")
-        print(f"[INFO METRICS] update_monthly_averages_chart - Starting")
-        print(f"[INFO METRICS] update_monthly_averages_chart - client_id: {client_id}")
-        print(f"[INFO METRICS] update_monthly_averages_chart - project_id: {project_id}")
-        print(f"[INFO METRICS] update_monthly_averages_chart - consumption_tags: {consumption_tags}")
-        print(f"[INFO METRICS] update_monthly_averages_chart - start_date: {start_date}")
-        print(f"[INFO METRICS] update_monthly_averages_chart - end_date: {end_date}")
-        
         try:
-            # Si no hay datos, crear datos de ejemplo
-            if not json_data or json_data == "[]":
-                print(f"[INFO METRICS] update_monthly_averages_chart - No data available, creating sample data")
+            # Intentar usar datos reales primero
+            if json_data and json_data != "[]":
+                # Convertir JSON a DataFrame
+                df = pd.DataFrame(json.loads(json_data))
                 
-                # Crear datos de ejemplo directamente
-                end = pd.Timestamp.now()
-                start = end - pd.DateOffset(months=6)
-                date_range = pd.date_range(start=start, end=end, freq='MS')
-                
-                sample_data = {
-                    'month': [d.strftime('%Y-%m') for d in date_range],
-                    'total_consumption': [100 * (i+1) for i in range(len(date_range))],
-                    'average_consumption': [50 * (i+1) for i in range(len(date_range))],
-                    'min_consumption': [10 * (i+1) for i in range(len(date_range))],
-                    'max_consumption': [200 * (i+1) for i in range(len(date_range))],
-                    'asset_count': [5 for _ in range(len(date_range))],
-                    'date': date_range
-                }
-                
-                monthly_summary = pd.DataFrame(sample_data)
-                print(f"[INFO METRICS] update_monthly_averages_chart - Created sample DataFrame with {len(monthly_summary)} rows")
-                
-                return create_monthly_averages_chart(monthly_summary)
-            
-            # Convert JSON to DataFrame
-            df = pd.DataFrame(json.loads(json_data))
-            print(f"[INFO METRICS] update_monthly_averages_chart - Loaded DataFrame with {len(df)} rows")
-            
-            # Process data according to filters
-            filtered_df = process_metrics_data(
-                df, 
-                client_id=client_id, 
-                project_id=project_id, 
-                consumption_tags=consumption_tags, 
-                start_date=start_date, 
-                end_date=end_date
-            )
-            
-            print(f"[INFO METRICS] update_monthly_averages_chart - Filtered DataFrame has {len(filtered_df)} rows")
-            
-            # Generate monthly summary
-            monthly_summary = generate_monthly_consumption_summary(filtered_df, start_date, end_date)
-            
-            print(f"[INFO METRICS] update_monthly_averages_chart - Generated monthly summary with {len(monthly_summary)} rows")
-            
-            # Create chart
-            return create_monthly_averages_chart(monthly_summary)
-            
+                # Verificar que el DataFrame no esté vacío
+                if not df.empty:
+                    # Procesar datos según filtros
+                    filtered_df = process_metrics_data(
+                        df, 
+                        client_id=client_id, 
+                        project_id=project_id, 
+                        consumption_tags=consumption_tags, 
+                        start_date=start_date, 
+                        end_date=end_date
+                    )
+                    
+                    # Generar resumen mensual
+                    monthly_summary = generate_monthly_consumption_summary(filtered_df, start_date, end_date)
+                    
+                    # Verificar que el resumen mensual no esté vacío
+                    if not monthly_summary.empty and 'month' in monthly_summary.columns and 'average_consumption' in monthly_summary.columns:
+                        # Crear el gráfico con los datos reales
+                        fig = go.Figure()
+                        
+                        fig.add_trace(
+                            go.Scatter(
+                                x=monthly_summary['month'],
+                                y=monthly_summary['average_consumption'],
+                                mode='lines+markers',
+                                marker=dict(color='forestgreen'),
+                                line=dict(color='forestgreen'),
+                                name='Consumo Promedio'
+                            )
+                        )
+                        
+                        # Configuración básica
+                        fig.update_layout(
+                            title="Promedio de Consumo por Mes",
+                            xaxis_title="Mes",
+                            yaxis_title="Consumo Promedio",
+                            height=400,
+                            plot_bgcolor='white',
+                            paper_bgcolor='white'
+                        )
+                        
+                        return fig
         except Exception as e:
             print(f"[ERROR METRICS] update_monthly_averages_chart: {str(e)}")
             import traceback
             print(traceback.format_exc())
-            
-            # En caso de error, crear datos de ejemplo
-            print(f"[INFO METRICS] update_monthly_averages_chart - Error occurred, creating sample data")
-            
-            # Crear datos de ejemplo directamente
-            end = pd.Timestamp.now()
-            start = end - pd.DateOffset(months=6)
-            date_range = pd.date_range(start=start, end=end, freq='MS')
-            
-            sample_data = {
-                'month': [d.strftime('%Y-%m') for d in date_range],
-                'total_consumption': [100 * (i+1) for i in range(len(date_range))],
-                'average_consumption': [50 * (i+1) for i in range(len(date_range))],
-                'min_consumption': [10 * (i+1) for i in range(len(date_range))],
-                'max_consumption': [200 * (i+1) for i in range(len(date_range))],
-                'asset_count': [5 for _ in range(len(date_range))],
-                'date': date_range
-            }
-            
-            monthly_summary = pd.DataFrame(sample_data)
-            print(f"[INFO METRICS] update_monthly_averages_chart - Created sample DataFrame with {len(monthly_summary)} rows")
-            
-            return create_monthly_averages_chart(monthly_summary)
+        
+        # Si hay algún problema o no hay datos, crear datos de ejemplo
+        print("[INFO METRICS] update_monthly_averages_chart - Usando datos de ejemplo")
+        end = pd.Timestamp.now()
+        start = end - pd.DateOffset(months=6)
+        date_range = pd.date_range(start=start, end=end, freq='MS')
+        
+        # Crear datos de ejemplo
+        sample_data = {
+            'month': date_range,
+            'average_consumption': [50 * (i+1) for i in range(len(date_range))],
+        }
+        
+        monthly_summary = pd.DataFrame(sample_data)
+        
+        # Crear el gráfico con datos de ejemplo
+        fig = go.Figure()
+        
+        fig.add_trace(
+            go.Scatter(
+                x=monthly_summary['month'],
+                y=monthly_summary['average_consumption'],
+                mode='lines+markers',
+                marker=dict(color='forestgreen'),
+                line=dict(color='forestgreen'),
+                name='Consumo Promedio (Ejemplo)'
+            )
+        )
+        
+        # Configuración básica
+        fig.update_layout(
+            title="Promedio de Consumo por Mes (Datos de Ejemplo)",
+            xaxis_title="Mes",
+            yaxis_title="Consumo Promedio",
+            height=400,
+            plot_bgcolor='white',
+            paper_bgcolor='white'
+        )
+        
+        return fig

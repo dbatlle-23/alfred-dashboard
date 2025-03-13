@@ -71,8 +71,6 @@ app.layout = html.Div([
     html.Div(id="global-auth-status", style={"display": "none"}),
     # Store para el token JWT (almacenado en sessionStorage del navegador)
     dcc.Store(id="jwt-token-store", storage_type="session", data={}),
-    # Store global para la selección de cliente/proyecto
-    dcc.Store(id="global-client-selection", data={"client_id": "all", "project_id": "all"}),
     # Contenedor para el contenido de la página
     html.Div(id="page-content")
 ])

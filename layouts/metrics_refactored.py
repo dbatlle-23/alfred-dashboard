@@ -244,21 +244,23 @@ def create_layout():
                         dbc.Row([
                             # Gráfico de totales mensuales
                             dbc.Col([
-                                html.H5("Total de Consumo por Mes"),
+                                html.H5("Total de Consumo por Mes", className="chart-title"),
                                 dcc.Graph(
                                     id="metrics-monthly-totals-chart",
-                                    config={'displayModeBar': True}
+                                    config={'displayModeBar': True},
+                                    className="dash-graph"
                                 )
-                            ], width=6),
+                            ], width=6, className="chart-container"),
                             
                             # Gráfico de promedios mensuales
                             dbc.Col([
-                                html.H5("Promedio de Consumo por Mes"),
+                                html.H5("Promedio de Consumo por Mes", className="chart-title"),
                                 dcc.Graph(
                                     id="metrics-monthly-averages-chart",
-                                    config={'displayModeBar': True}
+                                    config={'displayModeBar': True},
+                                    className="dash-graph"
                                 )
-                            ], width=6)
+                            ], width=6, className="chart-container")
                         ]),
                         
                         # Tabla de resumen mensual
