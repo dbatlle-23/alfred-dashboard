@@ -60,15 +60,18 @@ def register_table_callbacks(app):
     
     @app.callback(
         Output("metrics-monthly-readings-table", "children"),
-        [Input("metrics-data-store", "data"),
-         Input("metrics-client-filter", "value"),
-         Input("metrics-project-filter", "value"),
-         Input("metrics-asset-filter", "value"),
-         Input("metrics-consumption-tags-filter", "value"),
-         Input("metrics-date-range", "start_date"),
-         Input("metrics-date-range", "end_date")]
+        [
+            Input("metrics-data-store", "data"),
+            Input("metrics-client-filter", "value"),
+            Input("metrics-project-filter", "value"),
+            Input("metrics-asset-filter", "value"),
+            Input("metrics-consumption-tags-filter", "value"),
+            Input("metrics-date-range", "start_date"),
+            Input("metrics-date-range", "end_date"),
+            Input("jwt-token-store", "data")
+        ]
     )
-    def update_monthly_readings_table(json_data, client_id, project_id, asset_id, consumption_tags, start_date, end_date):
+    def update_monthly_readings_table(json_data, client_id, project_id, asset_id, consumption_tags, start_date, end_date, token_data):
         """Update monthly readings table."""
         if not json_data:
             print("No JSON data available")
@@ -157,6 +160,38 @@ def register_table_callbacks(app):
             
             # Process data by asset and month
             monthly_data = {}
+            asset_consumption_types = {}
+            
+            # Get asset metadata from API
+            token = token_data.get("token") if token_data else None
+            assets_metadata = {}
+            
+            try:
+                # Get assets metadata from API
+                from utils.api import get_project_assets, get_assets
+                
+                if project_id and project_id != "all":
+                    assets_list = get_project_assets(project_id, jwt_token=token)
+                else:
+                    assets_list = get_assets(client_id=client_id, jwt_token=token)
+                
+                # Create a dictionary with asset_id as key for quick lookup
+                for asset in assets_list:
+                    if isinstance(asset, dict) and "id" in asset:
+                        assets_metadata[asset["id"]] = {
+                            "block_number": asset.get("block_number", ""),
+                            "staircase": asset.get("staircase", ""),
+                            "apartment": asset.get("apartment", "")
+                        }
+                
+                print(f"Retrieved metadata for {len(assets_metadata)} assets")
+            except Exception as e:
+                print(f"Error retrieving asset metadata: {str(e)}")
+                import traceback
+                print(traceback.format_exc())
+            
+            # Import consumption tags mapping
+            from constants.metrics import CONSUMPTION_TAGS_MAPPING
             
             # Process each asset
             for asset_id, asset_group in df.groupby('asset_id'):
@@ -164,6 +199,22 @@ def register_table_callbacks(app):
                 
                 # Initialize a dictionary to store monthly readings
                 asset_monthly_readings = {}
+                
+                # Get consumption type for this asset
+                if 'consumption_type' in asset_group.columns:
+                    # Use the most common consumption type for this asset
+                    consumption_type = asset_group['consumption_type'].mode().iloc[0] if not asset_group['consumption_type'].empty else ""
+                    # Get readable name from mapping
+                    readable_consumption_type = CONSUMPTION_TAGS_MAPPING.get(consumption_type, consumption_type)
+                    asset_consumption_types[asset_id] = readable_consumption_type
+                elif 'tag' in asset_group.columns:
+                    # Use the most common tag for this asset
+                    tag = asset_group['tag'].mode().iloc[0] if not asset_group['tag'].empty else ""
+                    # Get readable name from mapping
+                    readable_tag = CONSUMPTION_TAGS_MAPPING.get(tag, tag)
+                    asset_consumption_types[asset_id] = readable_tag
+                else:
+                    asset_consumption_types[asset_id] = ""
                 
                 # Process each month for this asset
                 for month, month_group in asset_group.groupby('year_month'):
@@ -204,6 +255,18 @@ def register_table_callbacks(app):
                 # Reset index and rename
                 pivot = pivot.reset_index()
                 pivot = pivot.rename(columns={'index': 'Asset'})
+                
+                # Add asset metadata columns
+                pivot['block_number'] = pivot['Asset'].map(lambda x: assets_metadata.get(x, {}).get('block_number', ''))
+                pivot['staircase'] = pivot['Asset'].map(lambda x: assets_metadata.get(x, {}).get('staircase', ''))
+                pivot['apartment'] = pivot['Asset'].map(lambda x: assets_metadata.get(x, {}).get('apartment', ''))
+                
+                # Add consumption type column
+                pivot['consumption_type'] = pivot['Asset'].map(lambda x: asset_consumption_types.get(x, ''))
+                
+                # Reorder columns to put metadata after Asset column
+                cols = ['Asset', 'consumption_type', 'block_number', 'staircase', 'apartment'] + sorted_columns
+                pivot = pivot[cols]
                 
                 print(f"Final pivot table shape: {pivot.shape}")
                 

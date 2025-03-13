@@ -25,7 +25,7 @@ def create_monthly_readings_table(df, title="Lecturas Mensuales"):
     
     # Format numeric columns
     for col in table_df.columns:
-        if col != 'Asset' and not col.endswith('(Consumo)'):
+        if col not in ['Asset', 'block_number', 'staircase', 'apartment', 'consumption_type'] and not col.endswith('(Consumo)'):
             try:
                 table_df[col] = pd.to_numeric(table_df[col], errors='coerce')
                 table_df[col] = table_df[col].map('{:.2f}'.format)
@@ -54,6 +54,24 @@ def create_monthly_readings_table(df, title="Lecturas Mensuales"):
                 'backgroundColor': 'rgba(102, 204, 255, 0.2)',
                 'fontWeight': 'bold'
             })
+    
+    # Add styling for metadata columns
+    metadata_columns = ['block_number', 'staircase', 'apartment']
+    for col in metadata_columns:
+        if col in table_df.columns:
+            style_data_conditional.append({
+                'if': {'column_id': col},
+                'backgroundColor': 'rgba(240, 240, 240, 0.5)',
+                'fontStyle': 'italic'
+            })
+    
+    # Add styling for consumption type column
+    if 'consumption_type' in table_df.columns:
+        style_data_conditional.append({
+            'if': {'column_id': 'consumption_type'},
+            'backgroundColor': 'rgba(255, 230, 153, 0.5)',
+            'fontWeight': 'bold'
+        })
     
     # Create table
     table = dash_table.DataTable(
