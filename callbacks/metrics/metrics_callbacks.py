@@ -48,27 +48,21 @@ def register_metrics_callbacks(app):
             if filtered_df.empty:
                 return "0", "", "0", "", "0%", "", "h3"
             
-            # Asegurarse de que la fecha es datetime
-            filtered_df['date'] = pd.to_datetime(filtered_df['date'])
+            # Utilizar la misma función que genera el resumen mensual para asegurar consistencia
+            from utils.metrics.data_processing import generate_monthly_consumption_summary
+            monthly_summary = generate_monthly_consumption_summary(filtered_df, start_date, end_date)
+            
+            if monthly_summary.empty:
+                return "0", "", "0", "", "0%", "", "h3"
             
             # Obtener el mes actual (último mes en los datos)
-            current_month = filtered_df['date'].max().strftime('%Y-%m')
+            monthly_summary = monthly_summary.sort_values('date')
+            current_month_row = monthly_summary.iloc[-1]
+            current_month = current_month_row['month']
             
-            # Filtrar datos solo para el mes actual
-            current_month_df = filtered_df[filtered_df['date'].dt.strftime('%Y-%m') == current_month]
-            
-            # Si no hay datos para el mes actual, usar todos los datos
-            if current_month_df.empty:
-                current_month_df = filtered_df
-                current_month = "todos los meses"
-            
-            # Calcular consumo total del mes para todo el proyecto
-            if 'consumption' in current_month_df.columns:
-                total_consumption = current_month_df['consumption'].sum()
-            elif 'value' in current_month_df.columns:
-                total_consumption = current_month_df['value'].sum()
-            else:
-                total_consumption = 0
+            # Obtener valores del resumen mensual
+            total_consumption = current_month_row['total_consumption']
+            average_consumption = current_month_row['average_consumption']
             
             # Determinar la unidad
             unit = ""
@@ -85,51 +79,31 @@ def register_metrics_callbacks(app):
                 # Si hay múltiples tipos, usar unidades mixtas
                 unit = "unidades"
             
-            # Calcular promedio por activo (consumo total dividido por número de activos)
-            unique_assets = current_month_df['asset_id'].nunique() if 'asset_id' in current_month_df.columns else 1
-            average_per_asset = total_consumption / unique_assets if unique_assets > 0 else 0
-            
             # Calcular tendencia (comparación con el mes anterior)
-            # Obtener el mes anterior
-            if 'date' in filtered_df.columns:
-                all_months = sorted(filtered_df['date'].dt.strftime('%Y-%m').unique())
-                if len(all_months) > 1 and current_month in all_months:
-                    current_month_index = all_months.index(current_month)
-                    if current_month_index > 0:
-                        previous_month = all_months[current_month_index - 1]
-                        previous_month_df = filtered_df[filtered_df['date'].dt.strftime('%Y-%m') == previous_month]
-                        
-                        # Calcular consumo del mes anterior
-                        if 'consumption' in previous_month_df.columns:
-                            previous_consumption = previous_month_df['consumption'].sum()
-                        elif 'value' in previous_month_df.columns:
-                            previous_consumption = previous_month_df['value'].sum()
-                        else:
-                            previous_consumption = 0
-                        
-                        # Calcular tendencia
-                        if previous_consumption > 0:
-                            trend_pct = ((total_consumption - previous_consumption) / previous_consumption) * 100
-                        else:
-                            trend_pct = 0
-                        
-                        trend_period = f"vs. {previous_month}"
-                    else:
-                        trend_pct = 0
-                        trend_period = "Sin datos previos"
+            trend_pct = 0
+            trend_period = "Sin datos previos"
+            
+            # Si hay más de un mes en el resumen, calcular la tendencia
+            if len(monthly_summary) > 1:
+                previous_month_row = monthly_summary.iloc[-2]
+                previous_month = previous_month_row['month']
+                previous_consumption = previous_month_row['total_consumption']
+                
+                # Calcular tendencia
+                if previous_consumption != 0:
+                    trend_pct = ((total_consumption - previous_consumption) / abs(previous_consumption)) * 100
                 else:
                     trend_pct = 0
-                    trend_period = "Sin datos previos"
-            else:
-                trend_pct = 0
-                trend_period = "Sin datos de fecha"
+                
+                trend_period = f"vs. {previous_month}"
             
             # Determinar clase CSS para la tendencia
+            # En consumo, una tendencia negativa (reducción) es buena
             trend_class = "h3 text-success" if trend_pct < 0 else "h3 text-danger" if trend_pct > 0 else "h3"
             
             # Formatear valores
             total_formatted = f"{total_consumption:.2f}"
-            avg_per_asset_formatted = f"{average_per_asset:.2f}"
+            avg_per_asset_formatted = f"{average_consumption:.2f}"
             trend_formatted = f"{trend_pct:.1f}%"
             
             return total_formatted, unit, avg_per_asset_formatted, unit, trend_formatted, trend_period, trend_class

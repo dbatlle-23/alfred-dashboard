@@ -20,7 +20,6 @@ from components.metrics.charts import (
     create_consumption_trend_chart,
     create_consumption_distribution_chart,
     create_heatmap,
-    create_combined_readings_chart,
     create_monthly_totals_chart,
     create_monthly_averages_chart
 )
@@ -31,6 +30,7 @@ from components.metrics.tables import (
     create_daily_readings_table,
     create_monthly_summary_table
 )
+from components.metrics.detail_modal import create_calculation_detail_modal
 
 # Importar utilidades
 from utils.metrics.data_processing import (
@@ -237,35 +237,6 @@ def create_layout():
                     ])
                 ], className="mb-4"),
                 
-                # Gráficos
-                dbc.Row([
-                    # Gráfico de lecturas acumuladas y consumo mensual
-                    dbc.Col([
-                        dbc.Card([
-                            dbc.CardHeader("Lecturas acumuladas y consumo mensual"),
-                            dbc.CardBody([
-                                dcc.Graph(id="metrics-combined-readings-chart")
-                            ])
-                        ])
-                    ], width=12, className="mb-4"),
-                ], className="mb-4"),
-                
-                # Tablas de lecturas mensuales
-                dbc.Card([
-                    dbc.CardHeader("Lecturas Mensuales"),
-                    dbc.CardBody([
-                        html.Div(id="metrics-monthly-readings-table")
-                    ])
-                ], className="mb-4"),
-                
-                # Tablas de lecturas mensuales por tipo de consumo
-                dbc.Card([
-                    dbc.CardHeader("Lecturas Mensuales por Tipo de Consumo"),
-                    dbc.CardBody([
-                        html.Div(id="metrics-monthly-readings-by-consumption-type")
-                    ])
-                ], className="mb-4"),
-                
                 # Resumen Mensual de Consumos
                 dbc.Card([
                     dbc.CardHeader("Resumen Mensual de Consumos"),
@@ -297,6 +268,22 @@ def create_layout():
                                 html.Div(id="metrics-monthly-summary-table")
                             ], width=12)
                         ])
+                    ])
+                ], className="mb-4"),
+                
+                # Tablas de lecturas mensuales
+                dbc.Card([
+                    dbc.CardHeader("Lecturas Mensuales"),
+                    dbc.CardBody([
+                        html.Div(id="metrics-monthly-readings-table")
+                    ])
+                ], className="mb-4"),
+                
+                # Tablas de lecturas mensuales por tipo de consumo
+                dbc.Card([
+                    dbc.CardHeader("Lecturas Mensuales por Tipo de Consumo"),
+                    dbc.CardBody([
+                        html.Div(id="metrics-monthly-readings-by-consumption-type")
                     ])
                 ], className="mb-4"),
                 
@@ -380,7 +367,10 @@ def create_layout():
                 interval=2000,  # 2 segundos
                 n_intervals=0,
                 disabled=True
-            )
+            ),
+            
+            # Modal para detalles de cálculo
+            create_calculation_detail_modal()
         ], fluid=True)
     ])
 

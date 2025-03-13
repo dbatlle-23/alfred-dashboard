@@ -1,5 +1,5 @@
 import dash_bootstrap_components as dbc
-from dash import dash_table, html
+from dash import dash_table, html, dcc
 import pandas as pd
 from config.metrics_config import TABLE_CONFIG
 
@@ -288,10 +288,24 @@ def create_monthly_summary_table(df, title="Resumen Mensual de Consumos"):
         {
             'if': {'row_index': 'odd'},
             'backgroundColor': 'rgb(248, 248, 248)'
+        },
+        {
+            'if': {'state': 'selected'},
+            'backgroundColor': 'rgba(0, 116, 217, 0.3)',
+            'border': '1px solid blue'
         }
     ]
     
-    # Create the table
+    # Create tooltip data to indicate clickable cells
+    tooltip_data = [
+        {
+            column: {'value': 'Haz clic para ver detalles', 'type': 'markdown'}
+            for column in table_df.columns if column != 'month'
+        }
+        for _ in range(len(table_df))
+    ]
+    
+    # Create the table with cell selection enabled
     table = dash_table.DataTable(
         id='monthly-summary-table',
         columns=[
@@ -318,10 +332,18 @@ def create_monthly_summary_table(df, title="Resumen Mensual de Consumos"):
         page_size=10,
         sort_action='native',
         filter_action='native',
-        export_format='csv'
+        export_format='csv',
+        # Habilitar selección de celdas
+        cell_selectable=True,
+        # Añadir tooltips
+        tooltip_data=tooltip_data,
+        tooltip_duration=None
     )
     
     return html.Div([
         html.H5(title, className="mb-3"),
-        table
+        table,
+        # Añadir un store para los metadatos de cálculo
+        dcc.Store(id="monthly-summary-calculation-metadata")
     ])
+

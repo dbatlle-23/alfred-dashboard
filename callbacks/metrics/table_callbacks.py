@@ -382,52 +382,12 @@ def register_table_callbacks(app):
                 
                 return create_monthly_summary_table(monthly_summary)
             
-            # FORZAR USO DE DATOS REALES - Modificar la función generate_monthly_consumption_summary para que no genere datos de ejemplo
-            # Crear el resumen mensual directamente aquí
+            # Utilizar la función generate_monthly_consumption_summary para calcular el resumen mensual
             try:
-                # Ensure date is datetime
-                filtered_df['date'] = pd.to_datetime(filtered_df['date'])
+                from utils.metrics.data_processing import generate_monthly_consumption_summary
                 
-                # Add month column for grouping
-                filtered_df['month'] = filtered_df['date'].dt.strftime('%Y-%m')
-                
-                # Determine which column to use for consumption data
-                consumption_column = 'consumption'
-                if consumption_column not in filtered_df.columns and 'value' in filtered_df.columns:
-                    consumption_column = 'value'
-                    print(f"[INFO METRICS] update_monthly_summary_table - Using 'value' column instead of 'consumption' column")
-                
-                print(f"[INFO METRICS] update_monthly_summary_table - Using consumption column: {consumption_column}")
-                
-                # Group by month and asset_id to get consumption per asset per month
-                if 'asset_id' in filtered_df.columns:
-                    print(f"[INFO METRICS] update_monthly_summary_table - Grouping by month and asset_id")
-                    monthly_asset_consumption = filtered_df.groupby(['month', 'asset_id'])[consumption_column].sum().reset_index()
-                    
-                    # Calculate monthly summary statistics
-                    monthly_summary = monthly_asset_consumption.groupby('month').agg(
-                        total_consumption=(consumption_column, 'sum'),
-                        average_consumption=(consumption_column, 'mean'),
-                        min_consumption=(consumption_column, 'min'),
-                        max_consumption=(consumption_column, 'max'),
-                        asset_count=('asset_id', 'nunique')
-                    ).reset_index()
-                else:
-                    # If there's no asset_id column, just group by month
-                    print(f"[INFO METRICS] update_monthly_summary_table - No asset_id column found, grouping by month only")
-                    monthly_summary = filtered_df.groupby('month').agg(
-                        total_consumption=(consumption_column, 'sum'),
-                        average_consumption=(consumption_column, 'mean'),
-                        min_consumption=(consumption_column, 'min'),
-                        max_consumption=(consumption_column, 'max')
-                    ).reset_index()
-                    monthly_summary['asset_count'] = 1  # Default value
-                
-                # Add date column for sorting
-                monthly_summary['date'] = pd.to_datetime(monthly_summary['month'] + '-01')
-                
-                # Sort by date
-                monthly_summary = monthly_summary.sort_values('date')
+                # Generar el resumen mensual utilizando la función mejorada
+                monthly_summary = generate_monthly_consumption_summary(filtered_df, start_date, end_date)
                 
                 print(f"[INFO METRICS] update_monthly_summary_table - Generated monthly summary with {len(monthly_summary)} rows")
                 print(f"[INFO METRICS] update_monthly_summary_table - Monthly summary columns: {monthly_summary.columns.tolist() if not monthly_summary.empty else 'Empty DataFrame'}")
