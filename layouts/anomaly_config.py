@@ -228,20 +228,53 @@ def register_callbacks(app):
             'consumption_type': [consumption_type] * 10
         })
         
-        # Crear adaptador de anomalías
-        adapter = AnomalyAdapter()
+        # Configurar el umbral de detección según el valor del slider
+        # El slider va de 10 a 90, donde 10 significa que se detecta una caída del 10% o más
+        # y 90 significa que se detecta una caída del 90% o más
+        detection_threshold = threshold / 100.0
         
-        # Procesar datos
-        processed_data = adapter.process_readings(data)
+        # Crear detector con umbral personalizado
+        from utils.anomaly.detector import AnomalyDetector
+        detector = AnomalyDetector()
+        
+        # Modificar la lógica de detección para usar el umbral configurado
+        anomalies = []
+        for i in range(1, len(data)):
+            current = data.iloc[i]
+            previous = data.iloc[i-1]
+            
+            # Calcular la caída relativa
+            current_value = current['consumption']
+            previous_value = previous['consumption']
+            
+            # Detectar si el valor actual es menor que el valor anterior * umbral
+            # Ejemplo: si umbral=0.8, detecta caídas mayores al 20%
+            if current_value < previous_value * (1 - detection_threshold):
+                anomalies.append({
+                    'type': 'counter_reset',
+                    'date': current['date'],
+                    'previous_value': previous_value,
+                    'current_value': current_value,
+                    'asset_id': asset_id,
+                    'consumption_type': consumption_type,
+                    'offset': previous_value - current_value
+                })
         
         # Verificar si se detectaron anomalías
-        if 'is_corrected' in processed_data.columns and processed_data['is_corrected'].any():
-            anomaly_count = processed_data['is_corrected'].sum()
+        if anomalies:
+            anomaly_count = len(anomalies)
             
             return dbc.Alert([
                 html.H4("Anomalías Detectadas", className="alert-heading"),
                 html.P(f"Se detectaron {anomaly_count} lecturas con anomalías en el asset {asset_id}."),
                 html.Hr(),
+                html.P([
+                    f"Tipo: {anomalies[0]['type']}, ",
+                    f"Fecha: {anomalies[0]['date'].strftime('%Y-%m-%d')}, ",
+                    f"Valor anterior: {anomalies[0]['previous_value']}, ",
+                    f"Valor actual: {anomalies[0]['current_value']}, ",
+                    f"Offset aplicado: {anomalies[0]['offset']}"
+                ]),
                 html.P(
                     "Haga clic en 'Visualizar Comparación' para ver los datos originales y corregidos.",
                     className="mb-0"
@@ -250,7 +283,8 @@ def register_callbacks(app):
         else:
             return dbc.Alert([
                 html.H4("No se detectaron anomalías", className="alert-heading"),
-                html.P(f"No se encontraron anomalías en las lecturas del asset {asset_id}.")
+                html.P(f"No se encontraron anomalías en las lecturas del asset {asset_id} con el umbral actual ({threshold}%)."),
+                html.P("Pruebe a reducir el umbral de detección para identificar anomalías más sutiles.")
             ], color="success", className="mt-3")
     
     # Callback para visualizar la comparación
@@ -258,10 +292,11 @@ def register_callbacks(app):
         Output("anomaly-comparison-chart", "children"),
         Input("btn-visualize-comparison", "n_clicks"),
         [State("input-asset-id", "value"),
-         State("select-consumption-type", "value")],
+         State("select-consumption-type", "value"),
+         State("slider-reset-threshold", "value")],
         prevent_initial_call=True
     )
-    def visualize_comparison(n_clicks, asset_id, consumption_type):
+    def visualize_comparison(n_clicks, asset_id, consumption_type, threshold):
         if not n_clicks or not asset_id or not consumption_type:
             return html.Div()
         
@@ -277,21 +312,58 @@ def register_callbacks(app):
             'consumption_type': [consumption_type] * 10
         })
         
+        # Configurar el umbral de detección según el valor del slider
+        detection_threshold = threshold / 100.0
+        
+        # Crear detector con umbral personalizado
+        from utils.anomaly.detector import AnomalyDetector
+        detector = AnomalyDetector()
+        
+        # Detectar anomalías usando el mismo método que en detect_anomalies
+        anomalies = []
+        for i in range(1, len(original_data)):
+            current = original_data.iloc[i]
+            previous = original_data.iloc[i-1]
+            
+            current_value = current['consumption']
+            previous_value = previous['consumption']
+            
+            if current_value < previous_value * (1 - detection_threshold):
+                anomalies.append({
+                    'type': 'counter_reset',
+                    'date': current['date'],
+                    'previous_value': previous_value,
+                    'current_value': current_value,
+                    'asset_id': asset_id,
+                    'consumption_type': consumption_type,
+                    'offset': previous_value - current_value
+                })
+        
         # Crear datos corregidos
         corrected_data = original_data.copy()
-        corrected_data['corrected_value'] = [100, 110, 120, 130, 140, 140, 150, 160, 170, 180]
-        corrected_data['is_corrected'] = [False, False, False, False, False, True, True, True, True, True]
+        corrected_data['corrected_value'] = original_data['consumption'].copy()
+        corrected_data['is_corrected'] = False
         
-        # Crear anomalías
-        anomalies = [{
-            'type': 'counter_reset',
-            'date': dates[5],
-            'previous_value': 140,
-            'current_value': 50,
-            'asset_id': asset_id,
-            'consumption_type': consumption_type,
-            'offset': 90
-        }]
+        # Aplicar correcciones si se detectaron anomalías
+        if anomalies:
+            # Ordenar anomalías por fecha
+            anomalies = sorted(anomalies, key=lambda x: x['date'])
+            
+            # Aplicar correcciones para cada anomalía
+            for anomaly in anomalies:
+                # Encontrar el índice de la fecha de la anomalía
+                idx = corrected_data[corrected_data['date'] == anomaly['date']].index
+                
+                if len(idx) > 0:
+                    # Obtener el offset
+                    offset = anomaly['offset']
+                    
+                    # Aplicar el offset a todas las lecturas posteriores
+                    corrected_data.loc[idx[0]:, 'corrected_value'] = \
+                        corrected_data.loc[idx[0]:, 'consumption'] + offset
+                    
+                    # Marcar como corregidas
+                    corrected_data.loc[idx[0]:, 'is_corrected'] = True
         
         # Crear resultado
         result = {
