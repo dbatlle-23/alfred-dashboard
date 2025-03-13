@@ -125,6 +125,12 @@ def create_sidebar():
                             active="exact",
                             className="sidebar-link"
                         ),
+                        dbc.NavLink(
+                            [html.I(className="fas fa-exclamation-triangle me-2"), "Config. Anomalías"],
+                            href="/anomaly-config",
+                            active="exact",
+                            className="sidebar-link"
+                        ),
                     ],
                     vertical=True,
                     pills=True,

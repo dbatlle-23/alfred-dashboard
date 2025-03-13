@@ -98,6 +98,8 @@ from layouts.metrics_refactored import register_callbacks as register_metrics_ca
 from layouts.lock import register_callbacks as register_lock_callbacks
 from layouts.spaces import register_callbacks as register_spaces_callbacks
 from layouts.api_test import register_callbacks as register_api_test_callbacks
+# Importar callbacks para configuración de anomalías
+from layouts.anomaly_config import register_callbacks as register_anomaly_config_callbacks
 
 try:
     logger.info("Registrando callbacks de autenticación")
@@ -115,6 +117,9 @@ try:
     register_spaces_callbacks(app)
     
     register_api_test_callbacks(app)
+    
+    # Registrar callbacks para configuración de anomalías
+    register_anomaly_config_callbacks(app)
     
     # Proteger callbacks
     protect_callbacks(app)
@@ -140,6 +145,8 @@ def display_page(pathname, token_data):
     from layouts.lock import layout as lock_layout
     from layouts.spaces import layout as spaces_layout
     from layouts.api_test import layout as api_test_layout
+    # Importar layout para configuración de anomalías
+    from layouts.anomaly_config import layout as anomaly_config_layout
     
     logger.info(f"Navegando a la ruta: {pathname}")
     
@@ -179,6 +186,9 @@ def display_page(pathname, token_data):
         elif pathname == "/api-test":
             logger.info("Cargando layout de API test")
             content = api_test_layout
+        elif pathname == "/anomaly-config":
+            logger.info("Cargando layout de configuración de anomalías")
+            content = anomaly_config_layout
         else:
             content = home_layout
         
