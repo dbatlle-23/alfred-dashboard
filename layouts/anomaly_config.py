@@ -98,6 +98,23 @@ layout = html.Div([
         dbc.Card([
             dbc.CardHeader("Prueba de Detección"),
             dbc.CardBody([
+                # Switch para seleccionar entre datos de ejemplo y datos reales
+                dbc.Row([
+                    dbc.Col([
+                        html.H5("Origen de Datos"),
+                        html.P("Seleccione si desea usar datos de ejemplo o datos reales para las pruebas."),
+                    ], width=8),
+                    dbc.Col([
+                        dbc.Switch(
+                            id="switch-use-real-data",
+                            value=False,
+                            label=["Datos Reales", "Datos de Ejemplo"],
+                            className="mt-2"
+                        ),
+                    ], width=4, className="text-end"),
+                ], className="mb-3"),
+                
+                # Campos para configurar la prueba
                 dbc.Row([
                     dbc.Col([
                         html.Label("Asset ID"),
@@ -124,6 +141,32 @@ layout = html.Div([
                         ),
                     ], width=6),
                 ], className="mb-3"),
+                
+                # Selector de fechas (visible solo cuando se usan datos reales)
+                html.Div([
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Fecha de Inicio"),
+                            dcc.DatePickerSingle(
+                                id="date-picker-start",
+                                date=None,
+                                display_format="YYYY-MM-DD",
+                                placeholder="Seleccione fecha de inicio",
+                                className="mb-2"
+                            ),
+                        ], width=6),
+                        dbc.Col([
+                            html.Label("Fecha de Fin"),
+                            dcc.DatePickerSingle(
+                                id="date-picker-end",
+                                date=None,
+                                display_format="YYYY-MM-DD",
+                                placeholder="Seleccione fecha de fin",
+                                className="mb-2"
+                            ),
+                        ], width=6),
+                    ]),
+                ], id="date-picker-container", style={"display": "none"}),
                 
                 dbc.Row([
                     dbc.Col([
@@ -165,6 +208,7 @@ def register_callbacks(app):
     from components.metrics.anomaly.comparison_chart import create_anomaly_comparison_chart
     import pandas as pd
     from datetime import datetime, timedelta
+    import json
     
     # Callback para actualizar el feature flag de detección de anomalías
     @app.callback(
@@ -202,36 +246,298 @@ def register_callbacks(app):
             disable_feature("enable_anomaly_correction")
         return value
     
+    # Callback para mostrar/ocultar el selector de fechas según el origen de datos
+    @app.callback(
+        Output("date-picker-container", "style"),
+        Input("switch-use-real-data", "value")
+    )
+    def toggle_date_picker(use_real_data):
+        if use_real_data:
+            return {"display": "block"}
+        else:
+            return {"display": "none"}
+    
+    # Función para obtener datos reales
+    def get_real_data(asset_id, consumption_type, start_date=None, end_date=None, jwt_token=None):
+        try:
+            # Importar las funciones necesarias
+            from utils.api import get_sensors_with_tags, get_sensor_value_for_date
+            import logging
+            import os
+            import glob
+            
+            # Configurar logger
+            logger = logging.getLogger(__name__)
+            
+            # Mapear el tipo de consumo a su tag correspondiente
+            consumption_tag_map = {
+                "Energía térmica calor": "_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_THERMAL_ENERGY_HEAT",
+                "Energía térmica frío": "_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_THERMAL_ENERGY_COOLING",
+                "Agua fría": "_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_DOMESTIC_COLD_WATER",
+                "Agua caliente": "_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_DOMESTIC_HOT_WATER",
+                "Agua caliente sanitaria": "_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_DOMESTIC_HOT_WATER",
+                "Agua general": "_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_DOMESTIC_WATER_GENERAL",
+                "Energía general": "_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_DOMESTIC_ENERGY_GENERAL",
+                "Flujo de personas entrada": "_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_PEOPLE_FLOW_IN",
+                "Flujo de personas salida": "_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_PEOPLE_FLOW_OUT"
+            }
+            
+            # Obtener el tag correspondiente al tipo de consumo
+            consumption_tag = consumption_tag_map.get(consumption_type)
+            
+            # Si no se encuentra una coincidencia exacta, intentar una búsqueda parcial
+            if not consumption_tag:
+                for key, value in consumption_tag_map.items():
+                    if key in consumption_type or consumption_type in key:
+                        consumption_tag = value
+                        break
+            
+            if not consumption_tag:
+                logger.warning(f"No se pudo mapear el tipo de consumo: '{consumption_type}' a un tag de consumo.")
+                return None
+            
+            # Primero intentar cargar datos desde archivos CSV locales
+            logger.info(f"Buscando archivos CSV locales para el asset {asset_id} con tag {consumption_tag}")
+            
+            # Buscar en la carpeta de datos analizados
+            analyzed_data_folder = os.path.join("data", "analyzed_data")
+            matching_files = []
+            
+            if os.path.exists(analyzed_data_folder):
+                # Buscar en todas las carpetas de proyectos
+                for project_folder in os.listdir(analyzed_data_folder):
+                    project_path = os.path.join(analyzed_data_folder, project_folder)
+                    if os.path.isdir(project_path):
+                        # Buscar archivos que coincidan con el patrón
+                        for filename in os.listdir(project_path):
+                            if filename.startswith(f"daily_readings_{asset_id}_") and consumption_tag in filename and filename.endswith(".csv"):
+                                file_path = os.path.join(project_path, filename)
+                                matching_files.append({
+                                    "project_id": project_folder,
+                                    "filename": filename,
+                                    "full_path": file_path
+                                })
+            
+            # Si encontramos archivos CSV, cargar los datos
+            if matching_files:
+                logger.info(f"Se encontraron {len(matching_files)} archivos CSV para el asset {asset_id}")
+                
+                # Usar el primer archivo encontrado
+                file_path = matching_files[0]["full_path"]
+                logger.info(f"Cargando datos desde {file_path}")
+                
+                try:
+                    # Cargar el archivo CSV
+                    csv_data = pd.read_csv(file_path)
+                    
+                    # Convertir la columna de fecha a datetime
+                    if 'date' in csv_data.columns:
+                        csv_data['date'] = pd.to_datetime(csv_data['date'])
+                    
+                    # Filtrar por fechas si se proporcionan
+                    if start_date and end_date:
+                        # Convertir fechas a objetos datetime si son strings
+                        if isinstance(start_date, str):
+                            start_date = datetime.strptime(start_date.split("T")[0], "%Y-%m-%d")
+                        if isinstance(end_date, str):
+                            end_date = datetime.strptime(end_date.split("T")[0], "%Y-%m-%d")
+                        
+                        # Filtrar por rango de fechas
+                        csv_data = csv_data[(csv_data['date'] >= start_date) & (csv_data['date'] <= end_date)]
+                    
+                    # Verificar si hay datos después del filtrado
+                    if csv_data.empty:
+                        logger.warning(f"No hay datos en el rango de fechas seleccionado en el archivo CSV")
+                    else:
+                        # Convertir los valores a numéricos
+                        if 'value' in csv_data.columns:
+                            # Filtrar solo valores numéricos
+                            csv_data = csv_data[csv_data['value'] != 'Error']
+                            csv_data = csv_data[csv_data['value'] != 'Sin datos disponibles']
+                            
+                            try:
+                                # Convertir a numérico
+                                csv_data['consumption'] = pd.to_numeric(csv_data['value'], errors='coerce')
+                                
+                                # Eliminar filas con valores NaN
+                                csv_data = csv_data.dropna(subset=['consumption'])
+                                
+                                # Añadir columnas necesarias
+                                csv_data['asset_id'] = asset_id
+                                csv_data['consumption_type'] = consumption_type
+                                
+                                # Seleccionar solo las columnas necesarias
+                                result_df = csv_data[['date', 'consumption', 'asset_id', 'consumption_type']]
+                                
+                                logger.info(f"Se cargaron {len(result_df)} lecturas válidas desde el archivo CSV")
+                                return result_df
+                            except Exception as e:
+                                logger.error(f"Error al convertir valores a numéricos: {str(e)}")
+                
+                except Exception as e:
+                    logger.error(f"Error al cargar datos desde el archivo CSV: {str(e)}")
+            
+            # Si no se encontraron archivos CSV o hubo un error al cargarlos, intentar con la API
+            logger.info(f"No se encontraron datos locales válidos, intentando obtener datos desde la API")
+            
+            # Verificar si tenemos un token JWT válido
+            if not jwt_token:
+                logger.error("No se proporcionó un token JWT para obtener datos reales")
+                return None
+                
+            # Obtener los sensores asociados al asset
+            logger.info(f"Obteniendo sensores para el asset {asset_id} con tag {consumption_tag}")
+            sensors = get_sensors_with_tags(asset_id, jwt_token)
+            
+            if not sensors:
+                logger.warning(f"No se encontraron sensores para el asset {asset_id}")
+                return None
+            
+            # Filtrar los sensores por el tag de consumo
+            matching_sensors = []
+            for sensor in sensors:
+                tag_name = sensor.get("tag_name", "")
+                if consumption_tag in tag_name:
+                    matching_sensors.append(sensor)
+            
+            if not matching_sensors:
+                logger.warning(f"No se encontraron sensores para el tag {consumption_tag}")
+                return None
+            
+            # Generar fechas para obtener datos
+            if start_date and end_date:
+                # Convertir fechas a objetos datetime si son strings
+                if isinstance(start_date, str):
+                    start_date = datetime.strptime(start_date.split("T")[0], "%Y-%m-%d")
+                if isinstance(end_date, str):
+                    end_date = datetime.strptime(end_date.split("T")[0], "%Y-%m-%d")
+                
+                # Generar lista de fechas entre start_date y end_date
+                delta = end_date - start_date
+                dates = [start_date + timedelta(days=i) for i in range(delta.days + 1)]
+            else:
+                # Si no se proporcionan fechas, usar los últimos 30 días
+                dates = [datetime.now() - timedelta(days=i) for i in range(30)]
+                dates.reverse()  # Ordenar cronológicamente
+            
+            # Obtener lecturas para cada sensor y fecha
+            readings = []
+            
+            # Usar el primer sensor que coincida con el tag
+            sensor = matching_sensors[0]
+            device_id = sensor.get("device_id")
+            sensor_id = sensor.get("sensor_id")
+            gateway_id = sensor.get("gateway_id")
+            tag_name = sensor.get("tag_name")
+            
+            logger.info(f"Obteniendo lecturas para el sensor: device_id={device_id}, sensor_id={sensor_id}, gateway_id={gateway_id}")
+            
+            for date in dates:
+                try:
+                    # Formatear fecha para la API (MM-DD-YYYY)
+                    formatted_date_api = date.strftime("%m-%d-%Y")
+                    
+                    # Obtener lectura para esta fecha
+                    value, timestamp = get_sensor_value_for_date(
+                        asset_id=asset_id,
+                        device_id=device_id,
+                        sensor_id=sensor_id,
+                        gateway_id=gateway_id,
+                        date=formatted_date_api,
+                        token=jwt_token
+                    )
+                    
+                    # Si se obtuvo un valor válido, añadirlo a las lecturas
+                    if value != "Sin datos disponibles" and value != "Error":
+                        try:
+                            # Convertir valor a número
+                            numeric_value = float(value)
+                            
+                            # Añadir lectura
+                            readings.append({
+                                'date': date,
+                                'consumption': numeric_value,
+                                'asset_id': asset_id,
+                                'consumption_type': consumption_type
+                            })
+                        except (ValueError, TypeError):
+                            logger.warning(f"No se pudo convertir el valor '{value}' a número para la fecha {date}")
+                    
+                except Exception as e:
+                    logger.error(f"Error al obtener lectura para la fecha {date}: {str(e)}")
+            
+            # Crear DataFrame con las lecturas
+            if readings:
+                df = pd.DataFrame(readings)
+                logger.info(f"Se obtuvieron {len(readings)} lecturas válidas desde la API para el asset {asset_id}")
+                return df
+            else:
+                logger.warning("No se obtuvieron lecturas válidas desde la API")
+                return None
+            
+        except Exception as e:
+            import traceback
+            logger.error(f"Error al obtener datos reales: {str(e)}")
+            logger.error(traceback.format_exc())
+            return None
+    
     # Callback para detectar anomalías
     @app.callback(
         Output("anomaly-detection-results", "children"),
         Input("btn-detect-anomalies", "n_clicks"),
         [State("input-asset-id", "value"),
          State("select-consumption-type", "value"),
-         State("slider-reset-threshold", "value")],
+         State("slider-reset-threshold", "value"),
+         State("switch-use-real-data", "value"),
+         State("date-picker-start", "date"),
+         State("date-picker-end", "date"),
+         State("jwt-token-store", "data")],
         prevent_initial_call=True
     )
-    def detect_anomalies(n_clicks, asset_id, consumption_type, threshold):
+    def detect_anomalies(n_clicks, asset_id, consumption_type, threshold, use_real_data, start_date, end_date, token_data):
         if not n_clicks or not asset_id or not consumption_type:
             return html.Div()
         
-        # Crear datos de ejemplo para demostración
-        # En un entorno real, estos datos vendrían de la base de datos o archivos
-        dates = [datetime.now() - timedelta(days=i) for i in range(10)]
-        dates.reverse()  # Ordenar cronológicamente
-        
-        # Simular un reinicio de contador
-        data = pd.DataFrame({
-            'date': dates,
-            'consumption': [100, 110, 120, 130, 140, 50, 60, 70, 80, 90],  # Reinicio después del día 5
-            'asset_id': [asset_id] * 10,
-            'consumption_type': [consumption_type] * 10
-        })
-        
         # Configurar el umbral de detección según el valor del slider
-        # El slider va de 10 a 90, donde 10 significa que se detecta una caída del 10% o más
-        # y 90 significa que se detecta una caída del 90% o más
         detection_threshold = threshold / 100.0
+        
+        # Obtener el token JWT si está disponible
+        jwt_token = None
+        if token_data and "token" in token_data:
+            jwt_token = token_data["token"]
+        
+        # Obtener datos según la fuente seleccionada
+        if use_real_data:
+            # Verificar si tenemos un token JWT válido
+            if not jwt_token:
+                return dbc.Alert([
+                    html.H4("Error de autenticación", className="alert-heading"),
+                    html.P("No se pudo obtener un token JWT válido para consultar datos reales."),
+                    html.P("Por favor, inicie sesión nuevamente o pruebe con datos de ejemplo desactivando la opción 'Datos Reales'.")
+                ], color="danger", className="mt-3")
+                
+            # Obtener datos reales
+            data = get_real_data(asset_id, consumption_type, start_date, end_date, jwt_token)
+            
+            if data is None or data.empty:
+                return dbc.Alert([
+                    html.H4("Error al obtener datos reales", className="alert-heading"),
+                    html.P(f"No se pudieron obtener datos reales para el asset {asset_id} y tipo de consumo {consumption_type}."),
+                    html.P("Verifique que el asset y el tipo de consumo sean correctos y que existan datos para el período seleccionado."),
+                    html.P("También puede probar con datos de ejemplo desactivando la opción 'Datos Reales'.")
+                ], color="danger", className="mt-3")
+        else:
+            # Crear datos de ejemplo para demostración
+            dates = [datetime.now() - timedelta(days=i) for i in range(10)]
+            dates.reverse()  # Ordenar cronológicamente
+            
+            # Simular un reinicio de contador
+            data = pd.DataFrame({
+                'date': dates,
+                'consumption': [100, 110, 120, 130, 140, 50, 60, 70, 80, 90],  # Reinicio después del día 5
+                'asset_id': [asset_id] * 10,
+                'consumption_type': [consumption_type] * 10
+            })
         
         # Crear detector con umbral personalizado
         from utils.anomaly.detector import AnomalyDetector
@@ -293,27 +599,57 @@ def register_callbacks(app):
         Input("btn-visualize-comparison", "n_clicks"),
         [State("input-asset-id", "value"),
          State("select-consumption-type", "value"),
-         State("slider-reset-threshold", "value")],
+         State("slider-reset-threshold", "value"),
+         State("switch-use-real-data", "value"),
+         State("date-picker-start", "date"),
+         State("date-picker-end", "date"),
+         State("jwt-token-store", "data")],
         prevent_initial_call=True
     )
-    def visualize_comparison(n_clicks, asset_id, consumption_type, threshold):
+    def visualize_comparison(n_clicks, asset_id, consumption_type, threshold, use_real_data, start_date, end_date, token_data):
         if not n_clicks or not asset_id or not consumption_type:
             return html.Div()
         
-        # Crear datos de ejemplo para demostración
-        dates = [datetime.now() - timedelta(days=i) for i in range(10)]
-        dates.reverse()  # Ordenar cronológicamente
-        
-        # Simular un reinicio de contador
-        original_data = pd.DataFrame({
-            'date': dates,
-            'consumption': [100, 110, 120, 130, 140, 50, 60, 70, 80, 90],  # Reinicio después del día 5
-            'asset_id': [asset_id] * 10,
-            'consumption_type': [consumption_type] * 10
-        })
-        
         # Configurar el umbral de detección según el valor del slider
         detection_threshold = threshold / 100.0
+        
+        # Obtener el token JWT si está disponible
+        jwt_token = None
+        if token_data and "token" in token_data:
+            jwt_token = token_data["token"]
+        
+        # Obtener datos según la fuente seleccionada
+        if use_real_data:
+            # Verificar si tenemos un token JWT válido
+            if not jwt_token:
+                return dbc.Alert([
+                    html.H4("Error de autenticación", className="alert-heading"),
+                    html.P("No se pudo obtener un token JWT válido para consultar datos reales."),
+                    html.P("Por favor, inicie sesión nuevamente o pruebe con datos de ejemplo desactivando la opción 'Datos Reales'.")
+                ], color="danger", className="mt-3")
+                
+            # Obtener datos reales
+            original_data = get_real_data(asset_id, consumption_type, start_date, end_date, jwt_token)
+            
+            if original_data is None or original_data.empty:
+                return dbc.Alert([
+                    html.H4("Error al obtener datos reales", className="alert-heading"),
+                    html.P(f"No se pudieron obtener datos reales para el asset {asset_id} y tipo de consumo {consumption_type}."),
+                    html.P("Verifique que el asset y el tipo de consumo sean correctos y que existan datos para el período seleccionado."),
+                    html.P("También puede probar con datos de ejemplo desactivando la opción 'Datos Reales'.")
+                ], color="danger", className="mt-3")
+        else:
+            # Crear datos de ejemplo para demostración
+            dates = [datetime.now() - timedelta(days=i) for i in range(10)]
+            dates.reverse()  # Ordenar cronológicamente
+            
+            # Simular un reinicio de contador
+            original_data = pd.DataFrame({
+                'date': dates,
+                'consumption': [100, 110, 120, 130, 140, 50, 60, 70, 80, 90],  # Reinicio después del día 5
+                'asset_id': [asset_id] * 10,
+                'consumption_type': [consumption_type] * 10
+            })
         
         # Crear detector con umbral personalizado
         from utils.anomaly.detector import AnomalyDetector
