@@ -2,6 +2,10 @@ import pandas as pd
 from datetime import datetime
 from config.metrics_config import DATA_PROCESSING
 from constants.metrics import CONSUMPTION_TAGS_MAPPING
+from utils.adapters.anomaly_adapter import AnomalyAdapter
+from utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 def process_metrics_data(df, client_id=None, project_id=None, asset_id=None, 
                        consumption_tags=None, start_date=None, end_date=None):
@@ -111,6 +115,33 @@ def process_metrics_data(df, client_id=None, project_id=None, asset_id=None,
     if len(processed_df) > DATA_PROCESSING['max_rows']:
         processed_df = processed_df.sample(DATA_PROCESSING['max_rows'], random_state=42)
         print(f"[DEBUG] process_metrics_data - After max_rows limit: {len(processed_df)} rows")
+
+    # Aplicar detección y corrección de anomalías
+    try:
+        # Crear instancia del adaptador de anomalías
+        anomaly_adapter = AnomalyAdapter()
+        
+        # Procesar los datos para detectar y corregir anomalías
+        # El adaptador verificará internamente si los feature flags están habilitados
+        processed_df = anomaly_adapter.process_readings(processed_df)
+        
+        # Si hay una columna 'corrected_value', usarla como 'consumption'
+        if 'corrected_value' in processed_df.columns:
+            # Guardar los valores originales en una columna separada si no existe
+            if 'original_consumption' not in processed_df.columns:
+                processed_df['original_consumption'] = processed_df['consumption']
+            
+            # Usar los valores corregidos como valores principales
+            processed_df['consumption'] = processed_df['corrected_value']
+            
+            # Contar cuántos valores fueron corregidos
+            corrected_count = processed_df['is_corrected'].sum() if 'is_corrected' in processed_df.columns else 0
+            
+            logger.info(f"Aplicada corrección de anomalías: {corrected_count} valores corregidos")
+            print(f"[DEBUG] process_metrics_data - Aplicada corrección de anomalías: {corrected_count} valores corregidos")
+    except Exception as e:
+        logger.error(f"Error al aplicar corrección de anomalías: {str(e)}")
+        print(f"[DEBUG] process_metrics_data - Error al aplicar corrección de anomalías: {str(e)}")
 
     print(f"[DEBUG] process_metrics_data - Final DataFrame shape: {processed_df.shape}")
     return processed_df
