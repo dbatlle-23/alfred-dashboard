@@ -1,1 +1,5 @@
-{"enable_anomaly_detection": true, "enable_anomaly_visualization": true, "enable_anomaly_correction": true}
+{
+  "enable_anomaly_detection": false,
+  "enable_anomaly_visualization": true,
+  "enable_anomaly_correction": true
+}
