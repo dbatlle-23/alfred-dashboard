@@ -2,6 +2,11 @@
 import dash_bootstrap_components as dbc
 from dash import html, dcc
 from config.feature_flags import is_feature_enabled, enable_feature, disable_feature
+import logging
+from utils.logging import get_logger
+
+# Configurar logger
+logger = get_logger(__name__)
 
 # Layout principal de la página de configuración de anomalías
 layout = html.Div([
@@ -209,6 +214,7 @@ def register_callbacks(app):
     import pandas as pd
     from datetime import datetime, timedelta
     import json
+    import traceback
     
     # Callback para actualizar el feature flag de detección de anomalías
     @app.callback(
@@ -495,103 +501,128 @@ def register_callbacks(app):
         prevent_initial_call=True
     )
     def detect_anomalies(n_clicks, asset_id, consumption_type, threshold, use_real_data, start_date, end_date, token_data):
+        logger.info(f"Callback detect_anomalies ejecutado: n_clicks={n_clicks}, asset_id={asset_id}, consumption_type={consumption_type}")
+        
         if not n_clicks or not asset_id or not consumption_type:
+            logger.warning("Callback detect_anomalies: Faltan parámetros requeridos")
             return html.Div()
         
-        # Configurar el umbral de detección según el valor del slider
-        detection_threshold = threshold / 100.0
-        
-        # Obtener el token JWT si está disponible
-        jwt_token = None
-        if token_data and "token" in token_data:
-            jwt_token = token_data["token"]
-        
-        # Obtener datos según la fuente seleccionada
-        if use_real_data:
-            # Verificar si tenemos un token JWT válido
-            if not jwt_token:
-                return dbc.Alert([
-                    html.H4("Error de autenticación", className="alert-heading"),
-                    html.P("No se pudo obtener un token JWT válido para consultar datos reales."),
-                    html.P("Por favor, inicie sesión nuevamente o pruebe con datos de ejemplo desactivando la opción 'Datos Reales'.")
-                ], color="danger", className="mt-3")
+        try:
+            # Configurar el umbral de detección según el valor del slider
+            detection_threshold = threshold / 100.0
+            logger.info(f"Umbral de detección configurado: {detection_threshold} (slider: {threshold}%)")
+            
+            # Obtener el token JWT si está disponible
+            jwt_token = None
+            if token_data and "token" in token_data:
+                jwt_token = token_data["token"]
+                logger.debug(f"Token JWT obtenido: {jwt_token[:10]}...")
+            else:
+                logger.warning("No se encontró token JWT en token_data")
+            
+            # Obtener datos según la fuente seleccionada
+            if use_real_data:
+                logger.info("Usando datos reales para la detección de anomalías")
+                # Verificar si tenemos un token JWT válido
+                if not jwt_token:
+                    logger.error("No hay token JWT válido para obtener datos reales")
+                    return dbc.Alert([
+                        html.H4("Error de autenticación", className="alert-heading"),
+                        html.P("No se pudo obtener un token JWT válido para consultar datos reales."),
+                        html.P("Por favor, inicie sesión nuevamente o pruebe con datos de ejemplo desactivando la opción 'Datos Reales'.")
+                    ], color="danger", className="mt-3")
+                    
+                # Obtener datos reales
+                data = get_real_data(asset_id, consumption_type, start_date, end_date, jwt_token)
                 
-            # Obtener datos reales
-            data = get_real_data(asset_id, consumption_type, start_date, end_date, jwt_token)
-            
-            if data is None or data.empty:
-                return dbc.Alert([
-                    html.H4("Error al obtener datos reales", className="alert-heading"),
-                    html.P(f"No se pudieron obtener datos reales para el asset {asset_id} y tipo de consumo {consumption_type}."),
-                    html.P("Verifique que el asset y el tipo de consumo sean correctos y que existan datos para el período seleccionado."),
-                    html.P("También puede probar con datos de ejemplo desactivando la opción 'Datos Reales'.")
-                ], color="danger", className="mt-3")
-        else:
-            # Crear datos de ejemplo para demostración
-            dates = [datetime.now() - timedelta(days=i) for i in range(10)]
-            dates.reverse()  # Ordenar cronológicamente
-            
-            # Simular un reinicio de contador
-            data = pd.DataFrame({
-                'date': dates,
-                'consumption': [100, 110, 120, 130, 140, 50, 60, 70, 80, 90],  # Reinicio después del día 5
-                'asset_id': [asset_id] * 10,
-                'consumption_type': [consumption_type] * 10
-            })
-        
-        # Crear detector con umbral personalizado
-        from utils.anomaly.detector import AnomalyDetector
-        detector = AnomalyDetector()
-        
-        # Modificar la lógica de detección para usar el umbral configurado
-        anomalies = []
-        for i in range(1, len(data)):
-            current = data.iloc[i]
-            previous = data.iloc[i-1]
-            
-            # Calcular la caída relativa
-            current_value = current['consumption']
-            previous_value = previous['consumption']
-            
-            # Detectar si el valor actual es menor que el valor anterior * umbral
-            # Ejemplo: si umbral=0.8, detecta caídas mayores al 20%
-            if current_value < previous_value * (1 - detection_threshold):
-                anomalies.append({
-                    'type': 'counter_reset',
-                    'date': current['date'],
-                    'previous_value': previous_value,
-                    'current_value': current_value,
-                    'asset_id': asset_id,
-                    'consumption_type': consumption_type,
-                    'offset': previous_value - current_value
+                if data is None or data.empty:
+                    logger.error(f"No se pudieron obtener datos reales para asset_id={asset_id}, consumption_type={consumption_type}")
+                    return dbc.Alert([
+                        html.H4("Error al obtener datos reales", className="alert-heading"),
+                        html.P(f"No se pudieron obtener datos reales para el asset {asset_id} y tipo de consumo {consumption_type}."),
+                        html.P("Verifique que el asset y el tipo de consumo sean correctos y que existan datos para el período seleccionado."),
+                        html.P("También puede probar con datos de ejemplo desactivando la opción 'Datos Reales'.")
+                    ], color="danger", className="mt-3")
+            else:
+                logger.info("Usando datos de ejemplo para la detección de anomalías")
+                # Crear datos de ejemplo para demostración
+                dates = [datetime.now() - timedelta(days=i) for i in range(10)]
+                dates.reverse()  # Ordenar cronológicamente
+                
+                # Simular un reinicio de contador
+                data = pd.DataFrame({
+                    'date': dates,
+                    'consumption': [100, 110, 120, 130, 140, 50, 60, 70, 80, 90],  # Reinicio después del día 5
+                    'asset_id': [asset_id] * 10,
+                    'consumption_type': [consumption_type] * 10
                 })
-        
-        # Verificar si se detectaron anomalías
-        if anomalies:
-            anomaly_count = len(anomalies)
+                logger.debug(f"Datos de ejemplo creados: {len(data)} registros")
             
+            # Crear detector con umbral personalizado
+            from utils.anomaly.detector import AnomalyDetector
+            detector = AnomalyDetector()
+            logger.debug("Detector de anomalías creado")
+            
+            # Modificar la lógica de detección para usar el umbral configurado
+            anomalies = []
+            for i in range(1, len(data)):
+                current = data.iloc[i]
+                previous = data.iloc[i-1]
+                
+                # Calcular la caída relativa
+                current_value = current['consumption']
+                previous_value = previous['consumption']
+                
+                # Detectar si el valor actual es menor que el valor anterior * umbral
+                # Ejemplo: si umbral=0.8, detecta caídas mayores al 20%
+                if current_value < previous_value * (1 - detection_threshold):
+                    anomalies.append({
+                        'type': 'counter_reset',
+                        'date': current['date'],
+                        'previous_value': previous_value,
+                        'current_value': current_value,
+                        'asset_id': asset_id,
+                        'consumption_type': consumption_type,
+                        'offset': previous_value - current_value
+                    })
+                    logger.debug(f"Anomalía detectada: fecha={current['date']}, valor_anterior={previous_value}, valor_actual={current_value}")
+            
+            # Verificar si se detectaron anomalías
+            if anomalies:
+                anomaly_count = len(anomalies)
+                logger.info(f"Se detectaron {anomaly_count} anomalías")
+                
+                return dbc.Alert([
+                    html.H4("Anomalías Detectadas", className="alert-heading"),
+                    html.P(f"Se detectaron {anomaly_count} lecturas con anomalías en el asset {asset_id}."),
+                    html.Hr(),
+                    html.P([
+                        f"Tipo: {anomalies[0]['type']}, ",
+                        f"Fecha: {anomalies[0]['date'].strftime('%Y-%m-%d')}, ",
+                        f"Valor anterior: {anomalies[0]['previous_value']}, ",
+                        f"Valor actual: {anomalies[0]['current_value']}, ",
+                        f"Offset aplicado: {anomalies[0]['offset']}"
+                    ]),
+                    html.P(
+                        "Haga clic en 'Visualizar Comparación' para ver los datos originales y corregidos.",
+                        className="mb-0"
+                    )
+                ], color="warning", className="mt-3")
+            else:
+                logger.info("No se detectaron anomalías")
+                return dbc.Alert([
+                    html.H4("No se detectaron anomalías", className="alert-heading"),
+                    html.P(f"No se encontraron anomalías en las lecturas del asset {asset_id} con el umbral actual ({threshold}%)."),
+                    html.P("Pruebe a reducir el umbral de detección para identificar anomalías más sutiles.")
+                ], color="success", className="mt-3")
+        except Exception as e:
+            logger.error(f"Error en detect_anomalies: {str(e)}")
+            logger.error(traceback.format_exc())
             return dbc.Alert([
-                html.H4("Anomalías Detectadas", className="alert-heading"),
-                html.P(f"Se detectaron {anomaly_count} lecturas con anomalías en el asset {asset_id}."),
-                html.Hr(),
-                html.P([
-                    f"Tipo: {anomalies[0]['type']}, ",
-                    f"Fecha: {anomalies[0]['date'].strftime('%Y-%m-%d')}, ",
-                    f"Valor anterior: {anomalies[0]['previous_value']}, ",
-                    f"Valor actual: {anomalies[0]['current_value']}, ",
-                    f"Offset aplicado: {anomalies[0]['offset']}"
-                ]),
-                html.P(
-                    "Haga clic en 'Visualizar Comparación' para ver los datos originales y corregidos.",
-                    className="mb-0"
-                )
-            ], color="warning", className="mt-3")
-        else:
-            return dbc.Alert([
-                html.H4("No se detectaron anomalías", className="alert-heading"),
-                html.P(f"No se encontraron anomalías en las lecturas del asset {asset_id} con el umbral actual ({threshold}%)."),
-                html.P("Pruebe a reducir el umbral de detección para identificar anomalías más sutiles.")
-            ], color="success", className="mt-3")
+                html.H4("Error en la detección de anomalías", className="alert-heading"),
+                html.P(f"Se produjo un error al procesar los datos: {str(e)}"),
+                html.Pre(traceback.format_exc(), className="small text-muted")
+            ], color="danger", className="mt-3")
     
     # Callback para visualizar la comparación
     @app.callback(
@@ -607,109 +638,131 @@ def register_callbacks(app):
         prevent_initial_call=True
     )
     def visualize_comparison(n_clicks, asset_id, consumption_type, threshold, use_real_data, start_date, end_date, token_data):
+        logger.info(f"Callback visualize_comparison ejecutado: n_clicks={n_clicks}, asset_id={asset_id}, consumption_type={consumption_type}")
+        
         if not n_clicks or not asset_id or not consumption_type:
+            logger.warning("Callback visualize_comparison: Faltan parámetros requeridos")
             return html.Div()
         
-        # Configurar el umbral de detección según el valor del slider
-        detection_threshold = threshold / 100.0
-        
-        # Obtener el token JWT si está disponible
-        jwt_token = None
-        if token_data and "token" in token_data:
-            jwt_token = token_data["token"]
-        
-        # Obtener datos según la fuente seleccionada
-        if use_real_data:
-            # Verificar si tenemos un token JWT válido
-            if not jwt_token:
-                return dbc.Alert([
-                    html.H4("Error de autenticación", className="alert-heading"),
-                    html.P("No se pudo obtener un token JWT válido para consultar datos reales."),
-                    html.P("Por favor, inicie sesión nuevamente o pruebe con datos de ejemplo desactivando la opción 'Datos Reales'.")
-                ], color="danger", className="mt-3")
+        try:
+            # Configurar el umbral de detección según el valor del slider
+            detection_threshold = threshold / 100.0
+            logger.info(f"Umbral de detección configurado: {detection_threshold} (slider: {threshold}%)")
+            
+            # Obtener el token JWT si está disponible
+            jwt_token = None
+            if token_data and "token" in token_data:
+                jwt_token = token_data["token"]
+                logger.debug(f"Token JWT obtenido: {jwt_token[:10]}...")
+            else:
+                logger.warning("No se encontró token JWT en token_data")
+            
+            # Obtener datos según la fuente seleccionada
+            if use_real_data:
+                logger.info("Usando datos reales para la visualización de comparación")
+                # Verificar si tenemos un token JWT válido
+                if not jwt_token:
+                    logger.error("No hay token JWT válido para obtener datos reales")
+                    return dbc.Alert([
+                        html.H4("Error de autenticación", className="alert-heading"),
+                        html.P("No se pudo obtener un token JWT válido para consultar datos reales."),
+                        html.P("Por favor, inicie sesión nuevamente o pruebe con datos de ejemplo desactivando la opción 'Datos Reales'.")
+                    ], color="danger", className="mt-3")
+                    
+                # Obtener datos reales
+                original_data = get_real_data(asset_id, consumption_type, start_date, end_date, jwt_token)
                 
-            # Obtener datos reales
-            original_data = get_real_data(asset_id, consumption_type, start_date, end_date, jwt_token)
-            
-            if original_data is None or original_data.empty:
-                return dbc.Alert([
-                    html.H4("Error al obtener datos reales", className="alert-heading"),
-                    html.P(f"No se pudieron obtener datos reales para el asset {asset_id} y tipo de consumo {consumption_type}."),
-                    html.P("Verifique que el asset y el tipo de consumo sean correctos y que existan datos para el período seleccionado."),
-                    html.P("También puede probar con datos de ejemplo desactivando la opción 'Datos Reales'.")
-                ], color="danger", className="mt-3")
-        else:
-            # Crear datos de ejemplo para demostración
-            dates = [datetime.now() - timedelta(days=i) for i in range(10)]
-            dates.reverse()  # Ordenar cronológicamente
-            
-            # Simular un reinicio de contador
-            original_data = pd.DataFrame({
-                'date': dates,
-                'consumption': [100, 110, 120, 130, 140, 50, 60, 70, 80, 90],  # Reinicio después del día 5
-                'asset_id': [asset_id] * 10,
-                'consumption_type': [consumption_type] * 10
-            })
-        
-        # Crear detector con umbral personalizado
-        from utils.anomaly.detector import AnomalyDetector
-        detector = AnomalyDetector()
-        
-        # Detectar anomalías usando el mismo método que en detect_anomalies
-        anomalies = []
-        for i in range(1, len(original_data)):
-            current = original_data.iloc[i]
-            previous = original_data.iloc[i-1]
-            
-            current_value = current['consumption']
-            previous_value = previous['consumption']
-            
-            if current_value < previous_value * (1 - detection_threshold):
-                anomalies.append({
-                    'type': 'counter_reset',
-                    'date': current['date'],
-                    'previous_value': previous_value,
-                    'current_value': current_value,
-                    'asset_id': asset_id,
-                    'consumption_type': consumption_type,
-                    'offset': previous_value - current_value
+                if original_data is None or original_data.empty:
+                    logger.error(f"No se pudieron obtener datos reales para asset_id={asset_id}, consumption_type={consumption_type}")
+                    return dbc.Alert([
+                        html.H4("Error al obtener datos reales", className="alert-heading"),
+                        html.P(f"No se pudieron obtener datos reales para el asset {asset_id} y tipo de consumo {consumption_type}."),
+                        html.P("Verifique que el asset y el tipo de consumo sean correctos y que existan datos para el período seleccionado."),
+                        html.P("También puede probar con datos de ejemplo desactivando la opción 'Datos Reales'.")
+                    ], color="danger", className="mt-3")
+            else:
+                logger.info("Usando datos de ejemplo para la visualización de comparación")
+                # Crear datos de ejemplo para demostración
+                dates = [datetime.now() - timedelta(days=i) for i in range(10)]
+                dates.reverse()  # Ordenar cronológicamente
+                
+                # Simular un reinicio de contador
+                original_data = pd.DataFrame({
+                    'date': dates,
+                    'consumption': [100, 110, 120, 130, 140, 50, 60, 70, 80, 90],  # Reinicio después del día 5
+                    'asset_id': [asset_id] * 10,
+                    'consumption_type': [consumption_type] * 10
                 })
-        
-        # Crear datos corregidos
-        corrected_data = original_data.copy()
-        corrected_data['corrected_value'] = original_data['consumption'].copy()
-        corrected_data['is_corrected'] = False
-        
-        # Aplicar correcciones si se detectaron anomalías
-        if anomalies:
-            # Ordenar anomalías por fecha
-            anomalies = sorted(anomalies, key=lambda x: x['date'])
+                logger.debug(f"Datos de ejemplo creados: {len(original_data)} registros")
             
-            # Aplicar correcciones para cada anomalía
-            for anomaly in anomalies:
-                # Encontrar el índice de la fecha de la anomalía
-                idx = corrected_data[corrected_data['date'] == anomaly['date']].index
+            # Crear detector con umbral personalizado
+            from utils.anomaly.detector import AnomalyDetector
+            detector = AnomalyDetector()
+            logger.debug("Detector de anomalías creado")
+            
+            # Detectar anomalías usando el mismo método que en detect_anomalies
+            anomalies = []
+            for i in range(1, len(original_data)):
+                current = original_data.iloc[i]
+                previous = original_data.iloc[i-1]
                 
-                if len(idx) > 0:
-                    # Obtener el offset
-                    offset = anomaly['offset']
+                current_value = current['consumption']
+                previous_value = previous['consumption']
+                
+                if current_value < previous_value * (1 - detection_threshold):
+                    anomalies.append({
+                        'type': 'counter_reset',
+                        'date': current['date'],
+                        'previous_value': previous_value,
+                        'current_value': current_value,
+                        'asset_id': asset_id,
+                        'consumption_type': consumption_type,
+                        'offset': previous_value - current_value
+                    })
+            
+            # Crear datos corregidos
+            corrected_data = original_data.copy()
+            corrected_data['corrected_value'] = original_data['consumption'].copy()
+            corrected_data['is_corrected'] = False
+            
+            # Aplicar correcciones si se detectaron anomalías
+            if anomalies:
+                # Ordenar anomalías por fecha
+                anomalies = sorted(anomalies, key=lambda x: x['date'])
+                
+                # Aplicar correcciones para cada anomalía
+                for anomaly in anomalies:
+                    # Encontrar el índice de la fecha de la anomalía
+                    idx = corrected_data[corrected_data['date'] == anomaly['date']].index
                     
-                    # Aplicar el offset a todas las lecturas posteriores
-                    corrected_data.loc[idx[0]:, 'corrected_value'] = \
-                        corrected_data.loc[idx[0]:, 'consumption'] + offset
-                    
-                    # Marcar como corregidas
-                    corrected_data.loc[idx[0]:, 'is_corrected'] = True
-        
-        # Crear resultado
-        result = {
-            'original': original_data,
-            'corrected': corrected_data,
-            'anomalies': anomalies
-        }
-        
-        # Crear gráfico de comparación
-        return html.Div([
-            html.H4("Comparación de Datos Originales vs. Corregidos", className="mt-4 mb-3"),
-            create_anomaly_comparison_chart(result)
-        ], className="mt-3") 
+                    if len(idx) > 0:
+                        # Obtener el offset
+                        offset = anomaly['offset']
+                        
+                        # Aplicar el offset a todas las lecturas posteriores
+                        corrected_data.loc[idx[0]:, 'corrected_value'] = \
+                            corrected_data.loc[idx[0]:, 'consumption'] + offset
+                        
+                        # Marcar como corregidas
+                        corrected_data.loc[idx[0]:, 'is_corrected'] = True
+            
+            # Crear resultado
+            result = {
+                'original': original_data,
+                'corrected': corrected_data,
+                'anomalies': anomalies
+            }
+            
+            # Crear gráfico de comparación
+            return html.Div([
+                html.H4("Comparación de Datos Originales vs. Corregidos", className="mt-4 mb-3"),
+                create_anomaly_comparison_chart(result)
+            ], className="mt-3")
+        except Exception as e:
+            logger.error(f"Error en visualize_comparison: {str(e)}")
+            logger.error(traceback.format_exc())
+            return dbc.Alert([
+                html.H4("Error en la visualización de comparación", className="alert-heading"),
+                html.P(f"Se produjo un error al procesar los datos: {str(e)}"),
+                html.Pre(traceback.format_exc(), className="small text-muted")
+            ], color="danger", className="mt-3") 
