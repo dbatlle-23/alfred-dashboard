@@ -153,7 +153,22 @@ class ReadingRepository:
         """Guarda una anomalía detectada"""
         # Generar nombre de archivo basado en asset_id y fecha
         asset_id = anomaly.get('asset_id')
-        date_str = anomaly.get('date').strftime('%Y%m%d')
+        
+        # Convertir fecha a datetime si es string
+        anomaly_date = anomaly.get('date')
+        if isinstance(anomaly_date, str):
+            try:
+                anomaly_date = datetime.fromisoformat(anomaly_date.replace('Z', '+00:00'))
+            except ValueError:
+                try:
+                    # Intentar otro formato común
+                    anomaly_date = datetime.strptime(anomaly_date.split('T')[0], '%Y-%m-%d')
+                except ValueError:
+                    logger.error(f"No se pudo convertir la fecha de anomalía: {anomaly_date}")
+                    # Usar la fecha actual como fallback
+                    anomaly_date = datetime.now()
+        
+        date_str = anomaly_date.strftime('%Y%m%d')
         filename = f"{self.anomalies_path}anomaly_{asset_id}_{date_str}.json"
         
         # Guardar anomalía como JSON
@@ -162,32 +177,122 @@ class ReadingRepository:
         
         return filename
     
+    def update_anomaly(self, anomaly):
+        """Actualiza una anomalía existente"""
+        # Generar nombre de archivo basado en asset_id y fecha
+        asset_id = anomaly.get('asset_id')
+        
+        # Convertir fecha a datetime si es string
+        anomaly_date = anomaly.get('date')
+        if isinstance(anomaly_date, str):
+            try:
+                anomaly_date = datetime.fromisoformat(anomaly_date.replace('Z', '+00:00'))
+            except ValueError:
+                try:
+                    # Intentar otro formato común
+                    anomaly_date = datetime.strptime(anomaly_date.split('T')[0], '%Y-%m-%d')
+                except ValueError:
+                    logger.error(f"No se pudo convertir la fecha de anomalía: {anomaly_date}")
+                    # Usar la fecha actual como fallback
+                    anomaly_date = datetime.now()
+        
+        date_str = anomaly_date.strftime('%Y%m%d')
+        filename = f"{self.anomalies_path}anomaly_{asset_id}_{date_str}.json"
+        
+        logger.info(f"Actualizando anomalía en {filename}")
+        logger.info(f"Tipo anterior: {anomaly.get('original_type', 'desconocido')}, Nuevo tipo: {anomaly.get('type')}")
+        
+        # Verificar si el archivo existe
+        if not os.path.exists(filename):
+            logger.warning(f"No se encontró el archivo de anomalía {filename}, creando uno nuevo")
+            return self.save_anomaly(anomaly)
+        
+        # Leer la anomalía existente para comparar
+        try:
+            with open(filename, 'r') as f:
+                existing_anomaly = json.load(f)
+            logger.info(f"Anomalía existente: {existing_anomaly.get('type')}")
+            
+            # Guardar el tipo original antes de actualizarlo
+            if 'original_type' not in anomaly and 'type' in existing_anomaly:
+                anomaly['original_type'] = existing_anomaly['type']
+        except Exception as e:
+            logger.error(f"Error al leer la anomalía existente: {str(e)}")
+        
+        # Guardar anomalía actualizada como JSON
+        try:
+            with open(filename, 'w') as f:
+                json.dump(anomaly, f, default=str)
+            logger.info(f"Anomalía actualizada correctamente en {filename}")
+        except Exception as e:
+            logger.error(f"Error al guardar la anomalía actualizada: {str(e)}")
+            return None
+        
+        return filename
+    
     def get_anomalies(self, asset_id=None, consumption_type=None, start_date=None, end_date=None):
         """Obtiene las anomalías registradas con filtros opcionales"""
         # Listar todos los archivos de anomalías
         anomaly_files = glob.glob(f"{self.anomalies_path}anomaly_*.json")
         
+        # Convertir start_date y end_date a objetos datetime si son strings
+        if start_date and isinstance(start_date, str):
+            try:
+                start_date = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            except ValueError:
+                # Intentar otro formato común
+                start_date = datetime.strptime(start_date.split('T')[0], '%Y-%m-%d')
+        
+        if end_date and isinstance(end_date, str):
+            try:
+                end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            except ValueError:
+                # Intentar otro formato común
+                end_date = datetime.strptime(end_date.split('T')[0], '%Y-%m-%d')
+        
         anomalies = []
         for file in anomaly_files:
-            with open(file, 'r') as f:
-                anomaly = json.load(f)
-                
-                # Aplicar filtros
-                if asset_id and anomaly.get('asset_id') != asset_id:
-                    continue
+            try:
+                with open(file, 'r') as f:
+                    anomaly = json.load(f)
                     
-                if consumption_type and anomaly.get('consumption_type') != consumption_type:
-                    continue
-                
-                # Convertir fecha a datetime para comparación
-                anomaly_date = datetime.fromisoformat(anomaly.get('date'))
-                
-                if start_date and anomaly_date < start_date:
-                    continue
+                    # Aplicar filtros
+                    if asset_id and anomaly.get('asset_id') != asset_id:
+                        continue
+                        
+                    if consumption_type and anomaly.get('consumption_type') != consumption_type:
+                        continue
                     
-                if end_date and anomaly_date > end_date:
-                    continue
-                
-                anomalies.append(anomaly)
+                    # Convertir fecha a datetime para comparación
+                    anomaly_date = anomaly.get('date')
+                    if isinstance(anomaly_date, str):
+                        try:
+                            anomaly_date = datetime.fromisoformat(anomaly_date.replace('Z', '+00:00'))
+                        except ValueError:
+                            # Intentar otro formato común
+                            try:
+                                anomaly_date = datetime.strptime(anomaly_date.split('T')[0], '%Y-%m-%d')
+                            except ValueError:
+                                # Si no se puede convertir, omitir esta anomalía
+                                logger.warning(f"No se pudo convertir la fecha de anomalía: {anomaly_date}")
+                                continue
+                    
+                    if start_date and anomaly_date < start_date:
+                        continue
+                        
+                    if end_date and anomaly_date > end_date:
+                        continue
+                    
+                    # Asegurar que los valores numéricos sean de tipo float
+                    for key in ['previous_value', 'current_value', 'offset']:
+                        if key in anomaly and isinstance(anomaly[key], str):
+                            try:
+                                anomaly[key] = float(anomaly[key])
+                            except (ValueError, TypeError):
+                                logger.warning(f"No se pudo convertir {key} a número: {anomaly[key]}")
+                    
+                    anomalies.append(anomaly)
+            except Exception as e:
+                logger.error(f"Error al procesar archivo de anomalía {file}: {str(e)}")
         
         return anomalies
