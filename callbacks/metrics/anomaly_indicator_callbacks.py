@@ -10,7 +10,8 @@ def register_anomaly_indicator_callbacks(app):
     
     @app.callback(
         Output("metrics-filter-indicator", "children", allow_duplicate=True),
-        [Input("metrics-data-store", "data")]
+        [Input("metrics-data-store", "data")],
+        prevent_initial_call=True
     )
     def update_filter_indicator(data):
         """
