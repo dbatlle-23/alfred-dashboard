@@ -179,15 +179,20 @@ layout = html.Div([
                             "Detectar Anomalías",
                             id="btn-detect-anomalies",
                             color="primary",
-                            className="me-2"
+                            className="me-2",
+                            n_clicks=0  # Inicializar n_clicks
                         ),
                         dbc.Button(
                             "Visualizar Comparación",
                             id="btn-visualize-comparison",
-                            color="secondary"
+                            color="secondary",
+                            n_clicks=0  # Inicializar n_clicks
                         ),
                     ], width=12, className="text-end"),
                 ]),
+                
+                # Añadir un div para mostrar el estado de los clics (para depuración)
+                html.Div(id="debug-clicks", className="mt-3 small text-muted"),
             ]),
         ], className="mb-4"),
         
@@ -262,6 +267,28 @@ def register_callbacks(app):
             return {"display": "block"}
         else:
             return {"display": "none"}
+    
+    # Callback para depurar los clics en los botones
+    @app.callback(
+        Output("debug-clicks", "children"),
+        [Input("btn-detect-anomalies", "n_clicks"),
+         Input("btn-visualize-comparison", "n_clicks")],
+        prevent_initial_call=True
+    )
+    def debug_button_clicks(detect_clicks, visualize_clicks):
+        """Callback para depurar los clics en los botones"""
+        from dash import callback_context
+        
+        # Determinar qué botón se hizo clic
+        ctx = callback_context
+        if not ctx.triggered:
+            button_id = "No se ha hecho clic en ningún botón"
+        else:
+            button_id = ctx.triggered[0]['prop_id'].split('.')[0]
+        
+        logger.info(f"Botón clicado: {button_id}, detect_clicks={detect_clicks}, visualize_clicks={visualize_clicks}")
+        
+        return f"Botón clicado: {button_id}, Detectar: {detect_clicks}, Visualizar: {visualize_clicks}"
     
     # Función para obtener datos reales
     def get_real_data(asset_id, consumption_type, start_date=None, end_date=None, jwt_token=None):
