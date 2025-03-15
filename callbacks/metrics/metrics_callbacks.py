@@ -3,6 +3,7 @@ import dash
 import json
 import pandas as pd
 from datetime import datetime, timedelta
+import locale
 
 from utils.metrics.data_processing import process_metrics_data
 
@@ -10,13 +11,22 @@ def register_metrics_callbacks(app):
     """Register callbacks for metrics."""
     
     @app.callback(
-        [Output("metrics-total-consumption", "children"),
-         Output("metrics-total-consumption-unit", "children"),
-         Output("metrics-daily-average", "children"),
-         Output("metrics-daily-average-unit", "children"),
+        [Output("metrics-total-period-consumption", "children"),
+         Output("metrics-total-period-consumption-unit", "children"),
+         Output("metrics-monthly-average", "children"),
+         Output("metrics-monthly-average-unit", "children"),
          Output("metrics-trend", "children"),
          Output("metrics-trend-period", "children"),
-         Output("metrics-trend", "className")],
+         Output("metrics-trend", "className"),
+         Output("metrics-last-month-consumption", "children"),
+         Output("metrics-last-month-name", "children"),
+         Output("metrics-last-month-consumption-unit", "children"),
+         Output("metrics-max-month-consumption", "children"),
+         Output("metrics-max-month-name", "children"),
+         Output("metrics-max-month-consumption-unit", "children"),
+         Output("metrics-min-month-consumption", "children"),
+         Output("metrics-min-month-name", "children"),
+         Output("metrics-min-month-consumption-unit", "children")],
         [Input("metrics-data-store", "data"),
          Input("metrics-client-filter", "value"),
          Input("metrics-project-filter", "value"),
@@ -28,7 +38,7 @@ def register_metrics_callbacks(app):
     def update_metrics(json_data, client_id, project_id, asset_id, consumption_tags, start_date, end_date):
         """Update metrics based on selected filters."""
         if not json_data or json_data == "[]":
-            return "0", "", "0", "", "0%", "", "h3"
+            return "0", "", "0", "", "0%", "", "h3", "0", "Sin datos", "", "0", "Sin datos", "", "0", "Sin datos", ""
         
         try:
             # Convertir JSON a DataFrame
@@ -46,23 +56,17 @@ def register_metrics_callbacks(app):
             )
             
             if filtered_df.empty:
-                return "0", "", "0", "", "0%", "", "h3"
+                return "0", "", "0", "", "0%", "", "h3", "0", "Sin datos", "", "0", "Sin datos", "", "0", "Sin datos", ""
             
             # Utilizar la misma función que genera el resumen mensual para asegurar consistencia
             from utils.metrics.data_processing import generate_monthly_consumption_summary
             monthly_summary = generate_monthly_consumption_summary(filtered_df, start_date, end_date)
             
             if monthly_summary.empty:
-                return "0", "", "0", "", "0%", "", "h3"
+                return "0", "", "0", "", "0%", "", "h3", "0", "Sin datos", "", "0", "Sin datos", "", "0", "Sin datos", ""
             
-            # Obtener el mes actual (último mes en los datos)
+            # Ordenar el resumen mensual por fecha
             monthly_summary = monthly_summary.sort_values('date')
-            current_month_row = monthly_summary.iloc[-1]
-            current_month = current_month_row['month']
-            
-            # Obtener valores del resumen mensual
-            total_consumption = current_month_row['total_consumption']
-            average_consumption = current_month_row['average_consumption']
             
             # Determinar la unidad
             unit = ""
@@ -79,7 +83,37 @@ def register_metrics_callbacks(app):
                 # Si hay múltiples tipos, usar unidades mixtas
                 unit = "unidades"
             
-            # Calcular tendencia (comparación con el mes anterior)
+            # 1. Consumo total del periodo
+            total_period_consumption = monthly_summary['total_consumption'].sum()
+            
+            # 2. Promedio mensual
+            monthly_average = monthly_summary['total_consumption'].mean()
+            
+            # 3. Último mes (mes más reciente en los datos)
+            last_month_row = monthly_summary.iloc[-1]
+            last_month = last_month_row['month']
+            last_month_consumption = last_month_row['total_consumption']
+            
+            # 4. Máximo mensual
+            max_month_idx = monthly_summary['total_consumption'].idxmax()
+            max_month_row = monthly_summary.loc[max_month_idx]
+            max_month = max_month_row['month']
+            max_month_consumption = max_month_row['total_consumption']
+            
+            # 5. Mínimo mensual (excluyendo valores cero o negativos)
+            # Filtrar para excluir valores cero o negativos
+            positive_consumption = monthly_summary[monthly_summary['total_consumption'] > 0]
+            if not positive_consumption.empty:
+                min_month_idx = positive_consumption['total_consumption'].idxmin()
+                min_month_row = monthly_summary.loc[min_month_idx]
+            else:
+                min_month_idx = monthly_summary['total_consumption'].idxmin()
+                min_month_row = monthly_summary.loc[min_month_idx]
+            
+            min_month = min_month_row['month']
+            min_month_consumption = min_month_row['total_consumption']
+            
+            # 6. Calcular tendencia (comparación con el mes anterior)
             trend_pct = 0
             trend_period = "Sin datos previos"
             
@@ -89,10 +123,20 @@ def register_metrics_callbacks(app):
                 previous_month = previous_month_row['month']
                 previous_consumption = previous_month_row['total_consumption']
                 
-                # Calcular tendencia
-                if previous_consumption != 0:
-                    trend_pct = ((total_consumption - previous_consumption) / abs(previous_consumption)) * 100
-                else:
+                # Asegurar que los valores sean numéricos
+                try:
+                    if isinstance(last_month_consumption, str):
+                        last_month_consumption = float(last_month_consumption)
+                    if isinstance(previous_consumption, str):
+                        previous_consumption = float(previous_consumption)
+                        
+                    # Calcular tendencia
+                    if previous_consumption != 0:
+                        trend_pct = ((last_month_consumption - previous_consumption) / abs(previous_consumption)) * 100
+                    else:
+                        trend_pct = 0
+                except (ValueError, TypeError) as e:
+                    print(f"Error al calcular tendencia: {str(e)}")
                     trend_pct = 0
                 
                 trend_period = f"vs. {previous_month}"
@@ -101,18 +145,54 @@ def register_metrics_callbacks(app):
             # En consumo, una tendencia negativa (reducción) es buena
             trend_class = "h3 text-success" if trend_pct < 0 else "h3 text-danger" if trend_pct > 0 else "h3"
             
-            # Formatear valores
-            total_formatted = f"{total_consumption:.2f}"
-            avg_per_asset_formatted = f"{average_consumption:.2f}"
+            # Formatear valores para mostrar
+            total_period_formatted = f"{total_period_consumption:.2f}"
+            monthly_average_formatted = f"{monthly_average:.2f}"
             trend_formatted = f"{trend_pct:.1f}%"
+            last_month_formatted = f"{last_month_consumption:.2f}"
+            max_month_formatted = f"{max_month_consumption:.2f}"
+            min_month_formatted = f"{min_month_consumption:.2f}"
             
-            return total_formatted, unit, avg_per_asset_formatted, unit, trend_formatted, trend_period, trend_class
+            # Formatear nombres de meses para mostrar
+            # Intentar establecer el locale a español
+            try:
+                locale.setlocale(locale.LC_TIME, 'es_ES.UTF-8')
+            except:
+                try:
+                    locale.setlocale(locale.LC_TIME, 'es_ES')
+                except:
+                    try:
+                        locale.setlocale(locale.LC_TIME, 'es')
+                    except:
+                        pass  # Si no se puede establecer el locale, se usará el predeterminado
+            
+            def format_month_name(month_str):
+                try:
+                    date = datetime.strptime(month_str, '%Y-%m')
+                    month_name = date.strftime('%B %Y')
+                    # Capitalizar primera letra
+                    return month_name.capitalize()
+                except:
+                    return month_str
+            
+            last_month_name = format_month_name(last_month)
+            max_month_name = format_month_name(max_month)
+            min_month_name = format_month_name(min_month)
+            
+            return (
+                total_period_formatted, unit,
+                monthly_average_formatted, unit,
+                trend_formatted, trend_period, trend_class,
+                last_month_formatted, last_month_name, unit,
+                max_month_formatted, max_month_name, unit,
+                min_month_formatted, min_month_name, unit
+            )
             
         except Exception as e:
             print(f"[ERROR METRICS] update_metrics: {str(e)}")
             import traceback
             print(traceback.format_exc())
-            return "0", "", "0", "", "0%", "", "h3"
+            return "0", "", "0", "", "0%", "", "h3", "0", "Sin datos", "", "0", "Sin datos", "", "0", "Sin datos", ""
     
     @app.callback(
         Output("metrics-filter-indicator", "children"),

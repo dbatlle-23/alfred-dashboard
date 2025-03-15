@@ -142,7 +142,7 @@ def create_layout():
                             html.Label("Activo"),
                             dcc.Dropdown(
                                 id="metrics-asset-filter",
-                                placeholder="Todos los activos",
+                                placeholder="Seleccione un activo",
                                 clearable=False,
                                 options=[{"label": "Todos", "value": "all"}],
                                 value="all"
@@ -207,21 +207,21 @@ def create_layout():
                 dbc.Card([
                     dbc.CardBody([
                         dbc.Row([
-                            # Consumo total
+                            # Consumo total del periodo
                             dbc.Col([
-                                html.H5("Consumo Total del Mes"),
+                                html.H5("Consumo Total del Periodo"),
                                 html.Div([
-                                    html.Span(id="metrics-total-consumption", className="h3 me-2"),
-                                    html.Span(id="metrics-total-consumption-unit", className="text-muted")
+                                    html.Span(id="metrics-total-period-consumption", className="h3 me-2"),
+                                    html.Span(id="metrics-total-period-consumption-unit", className="text-muted")
                                 ])
                             ], width=4),
                             
-                            # Promedio por activo
+                            # Promedio mensual
                             dbc.Col([
-                                html.H5("Promedio por Activo"),
+                                html.H5("Promedio Mensual"),
                                 html.Div([
-                                    html.Span(id="metrics-daily-average", className="h3 me-2"),
-                                    html.Span(id="metrics-daily-average-unit", className="text-muted")
+                                    html.Span(id="metrics-monthly-average", className="h3 me-2"),
+                                    html.Span(id="metrics-monthly-average-unit", className="text-muted")
                                 ])
                             ], width=4),
                             
@@ -231,6 +231,38 @@ def create_layout():
                                 html.Div([
                                     html.Span(id="metrics-trend", className="h3 me-2"),
                                     html.Span(id="metrics-trend-period", className="text-muted")
+                                ])
+                            ], width=4)
+                        ]),
+                        html.Hr(),
+                        dbc.Row([
+                            # Último mes
+                            dbc.Col([
+                                html.H5("Último Mes"),
+                                html.Div([
+                                    html.Span(id="metrics-last-month-consumption", className="h3 me-2"),
+                                    html.Span(id="metrics-last-month-name", className="text-muted d-block"),
+                                    html.Span(id="metrics-last-month-consumption-unit", className="text-muted")
+                                ])
+                            ], width=4),
+                            
+                            # Máximo mensual
+                            dbc.Col([
+                                html.H5("Máximo Mensual"),
+                                html.Div([
+                                    html.Span(id="metrics-max-month-consumption", className="h3 me-2"),
+                                    html.Span(id="metrics-max-month-name", className="text-muted d-block"),
+                                    html.Span(id="metrics-max-month-consumption-unit", className="text-muted")
+                                ])
+                            ], width=4),
+                            
+                            # Mínimo mensual
+                            dbc.Col([
+                                html.H5("Mínimo Mensual"),
+                                html.Div([
+                                    html.Span(id="metrics-min-month-consumption", className="h3 me-2"),
+                                    html.Span(id="metrics-min-month-name", className="text-muted d-block"),
+                                    html.Span(id="metrics-min-month-consumption-unit", className="text-muted")
                                 ])
                             ], width=4)
                         ])
