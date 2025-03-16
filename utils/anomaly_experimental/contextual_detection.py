@@ -10,6 +10,7 @@ import logging
 
 # Import the threshold calculator
 from utils.anomaly_experimental.threshold_calculator import ThresholdCalculator
+from utils.anomaly_experimental.config_loader import get_config_for_consumption_type
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -33,6 +34,10 @@ class ContextualAnomalyDetector:
         
         if asset_id and consumption_type:
             self.threshold_calculator = ThresholdCalculator(asset_id, consumption_type)
+            
+            # Load configuration for this consumption type
+            self.config = get_config_for_consumption_type(consumption_type)
+            logger.info(f"Loaded configuration for {consumption_type}: {self.config}")
     
     def detect_anomalies(self, df, threshold_method="std_dev", percentile=95):
         """
@@ -152,6 +157,10 @@ class ContextualAnomalyDetector:
             group_df['contextual_anomaly_type'] = None
             group_df['contextual_anomaly_threshold'] = None
             
+            # Get configuration values if available
+            daily_max = thresholds.get('daily_max', 10.0)
+            sudden_increase = thresholds.get('sudden_increase', 5.0)
+            
             # Check for anomalies
             for idx, row in group_df.iterrows():
                 if pd.isna(row['daily_change']) or pd.isna(row['daily_change_pct']):
@@ -184,42 +193,60 @@ class ContextualAnomalyDetector:
                 
                 # Check percentage change
                 abs_change_pct = abs(row['daily_change_pct'])
-                if abs_change_pct > thresholds['high_threshold_pct']:
+                
+                # Use sudden_increase from config if available
+                high_pct_threshold = thresholds.get('high_threshold_pct', sudden_increase * 2)
+                medium_pct_threshold = thresholds.get('medium_threshold_pct', sudden_increase)
+                
+                if abs_change_pct > high_pct_threshold:
                     # If already flagged as anomaly, keep the higher confidence
                     if group_df.at[idx, 'is_contextual_anomaly']:
-                        excess_ratio = abs_change_pct / thresholds['high_threshold_pct']
+                        excess_ratio = abs_change_pct / high_pct_threshold
                         new_confidence = min(0.95, 0.6 + (excess_ratio - 1) * 0.1)
                         if new_confidence > group_df.at[idx, 'contextual_anomaly_confidence']:
                             group_df.at[idx, 'contextual_anomaly_confidence'] = new_confidence
                             group_df.at[idx, 'contextual_anomaly_type'] = 'percentage_change'
-                            group_df.at[idx, 'contextual_anomaly_threshold'] = thresholds['high_threshold_pct']
+                            group_df.at[idx, 'contextual_anomaly_threshold'] = high_pct_threshold
                     else:
                         group_df.at[idx, 'is_contextual_anomaly'] = True
-                        excess_ratio = abs_change_pct / thresholds['high_threshold_pct']
+                        excess_ratio = abs_change_pct / high_pct_threshold
                         confidence = min(0.95, 0.6 + (excess_ratio - 1) * 0.1)
                         group_df.at[idx, 'contextual_anomaly_confidence'] = confidence
                         group_df.at[idx, 'contextual_anomaly_type'] = 'percentage_change'
-                        group_df.at[idx, 'contextual_anomaly_threshold'] = thresholds['high_threshold_pct']
+                        group_df.at[idx, 'contextual_anomaly_threshold'] = high_pct_threshold
                         
-                        logger.info(f"Detected percentage change anomaly: {row['date']} - {abs_change_pct}% > {thresholds['high_threshold_pct']}%")
-                elif abs_change_pct > thresholds['medium_threshold_pct']:
+                        logger.info(f"Detected percentage change anomaly: {row['date']} - {abs_change_pct}% > {high_pct_threshold}%")
+                elif abs_change_pct > medium_pct_threshold:
                     # If already flagged as anomaly, only update if current confidence is low
                     if group_df.at[idx, 'is_contextual_anomaly'] and group_df.at[idx, 'contextual_anomaly_confidence'] < 0.5:
-                        excess_ratio = abs_change_pct / thresholds['medium_threshold_pct']
+                        excess_ratio = abs_change_pct / medium_pct_threshold
                         new_confidence = min(0.7, 0.4 + (excess_ratio - 1) * 0.1)
                         if new_confidence > group_df.at[idx, 'contextual_anomaly_confidence']:
                             group_df.at[idx, 'contextual_anomaly_confidence'] = new_confidence
                             group_df.at[idx, 'contextual_anomaly_type'] = 'percentage_change'
-                            group_df.at[idx, 'contextual_anomaly_threshold'] = thresholds['medium_threshold_pct']
+                            group_df.at[idx, 'contextual_anomaly_threshold'] = medium_pct_threshold
                     elif not group_df.at[idx, 'is_contextual_anomaly']:
                         group_df.at[idx, 'is_contextual_anomaly'] = True
-                        excess_ratio = abs_change_pct / thresholds['medium_threshold_pct']
+                        excess_ratio = abs_change_pct / medium_pct_threshold
                         confidence = min(0.7, 0.4 + (excess_ratio - 1) * 0.1)
                         group_df.at[idx, 'contextual_anomaly_confidence'] = confidence
                         group_df.at[idx, 'contextual_anomaly_type'] = 'percentage_change'
-                        group_df.at[idx, 'contextual_anomaly_threshold'] = thresholds['medium_threshold_pct']
+                        group_df.at[idx, 'contextual_anomaly_threshold'] = medium_pct_threshold
                         
-                        logger.info(f"Detected medium percentage change anomaly: {row['date']} - {abs_change_pct}% > {thresholds['medium_threshold_pct']}%")
+                        logger.info(f"Detected medium percentage change anomaly: {row['date']} - {abs_change_pct}% > {medium_pct_threshold}%")
+                
+                # Check for daily max from config
+                if consumption_col in row and row[consumption_col] > daily_max:
+                    # If not already flagged as high confidence anomaly
+                    if not group_df.at[idx, 'is_contextual_anomaly'] or group_df.at[idx, 'contextual_anomaly_confidence'] < 0.8:
+                        group_df.at[idx, 'is_contextual_anomaly'] = True
+                        excess_ratio = row[consumption_col] / daily_max
+                        confidence = min(0.9, 0.5 + (excess_ratio - 1) * 0.1)
+                        group_df.at[idx, 'contextual_anomaly_confidence'] = confidence
+                        group_df.at[idx, 'contextual_anomaly_type'] = 'daily_max_exceeded'
+                        group_df.at[idx, 'contextual_anomaly_threshold'] = daily_max
+                        
+                        logger.info(f"Detected daily max exceeded: {row['date']} - {row[consumption_col]} > {daily_max}")
             
             return group_df
             

@@ -9,11 +9,12 @@ import logging
 # Import the experimental modules
 from utils.anomaly_experimental.contextual_detection import ContextualAnomalyDetector
 from utils.anomaly_experimental.threshold_calculator import ThresholdCalculator
+from utils.anomaly_experimental.config_loader import load_anomaly_config, get_config_for_consumption_type
 
 # Set up logging
 logger = logging.getLogger(__name__)
 
-def detect_contextual_anomalies(df, threshold_method="std_dev", percentile=95):
+def detect_contextual_anomalies(df, threshold_method="std_dev", percentile=95, use_config=True):
     """
     Detect contextual anomalies in consumption data.
     This function can be called from the main application to use the experimental system.
@@ -22,6 +23,7 @@ def detect_contextual_anomalies(df, threshold_method="std_dev", percentile=95):
         df (pd.DataFrame): DataFrame with consumption data
         threshold_method (str): Method to use for threshold calculation
         percentile (float): Percentile to use if method is "percentile"
+        use_config (bool): Whether to use the anomaly_config.json configuration
         
     Returns:
         pd.DataFrame: DataFrame with anomaly flags and confidence levels
@@ -29,6 +31,10 @@ def detect_contextual_anomalies(df, threshold_method="std_dev", percentile=95):
     try:
         # Create detector
         detector = ContextualAnomalyDetector()
+        
+        # If using configuration, override threshold_method
+        if use_config:
+            threshold_method = "config"
         
         # Run detection
         result_df = detector.detect_anomalies(df, threshold_method=threshold_method, percentile=percentile)
@@ -41,7 +47,7 @@ def detect_contextual_anomalies(df, threshold_method="std_dev", percentile=95):
         logger.error(traceback.format_exc())
         return df
 
-def analyze_asset_anomalies(asset_id, consumption_type, df=None, threshold_method="std_dev", percentile=95):
+def analyze_asset_anomalies(asset_id, consumption_type, df=None, threshold_method="std_dev", percentile=95, use_config=True):
     """
     Analyze anomalies for a specific asset.
     
@@ -51,6 +57,7 @@ def analyze_asset_anomalies(asset_id, consumption_type, df=None, threshold_metho
         df (pd.DataFrame, optional): DataFrame with consumption data
         threshold_method (str): Method to use for threshold calculation
         percentile (float): Percentile to use if method is "percentile"
+        use_config (bool): Whether to use the anomaly_config.json configuration
         
     Returns:
         dict: Analysis results
@@ -58,6 +65,14 @@ def analyze_asset_anomalies(asset_id, consumption_type, df=None, threshold_metho
     try:
         # Create detector for this specific asset
         detector = ContextualAnomalyDetector(asset_id, consumption_type)
+        
+        # If using configuration, override threshold_method
+        if use_config:
+            threshold_method = "config"
+            
+            # Load configuration for this consumption type
+            config = get_config_for_consumption_type(consumption_type)
+            logger.info(f"Using configuration for {consumption_type}: {config}")
         
         # If no DataFrame is provided, try to load data
         if df is None:
@@ -140,6 +155,10 @@ def analyze_asset_anomalies(asset_id, consumption_type, df=None, threshold_metho
                 
                 top_anomalies.append(anomaly)
         
+        # Get thresholds used
+        calculator = ThresholdCalculator(asset_id, consumption_type)
+        thresholds = calculator.get_thresholds(df=df, method=threshold_method, percentile=percentile)
+        
         # Prepare results
         results = {
             "success": True,
@@ -154,8 +173,10 @@ def analyze_asset_anomalies(asset_id, consumption_type, df=None, threshold_metho
             "absolute_change": absolute_change,
             "percentage_change": percentage_change,
             "top_anomalies": top_anomalies,
-            "threshold_method": threshold_method,
-            "percentile": percentile
+            "threshold_method": threshold_method if not use_config else "config",
+            "percentile": percentile,
+            "thresholds": thresholds,
+            "config_used": use_config
         }
         
         return results
@@ -166,7 +187,7 @@ def analyze_asset_anomalies(asset_id, consumption_type, df=None, threshold_metho
         logger.error(traceback.format_exc())
         return {"success": False, "message": str(e)}
 
-def get_asset_thresholds(asset_id, consumption_type, df=None, threshold_method="std_dev", percentile=95):
+def get_asset_thresholds(asset_id, consumption_type, df=None, threshold_method="std_dev", percentile=95, use_config=True):
     """
     Get thresholds for a specific asset.
     
@@ -176,6 +197,7 @@ def get_asset_thresholds(asset_id, consumption_type, df=None, threshold_method="
         df (pd.DataFrame, optional): DataFrame with consumption data
         threshold_method (str): Method to use for threshold calculation
         percentile (float): Percentile to use if method is "percentile"
+        use_config (bool): Whether to use the anomaly_config.json configuration
         
     Returns:
         dict: Thresholds
@@ -183,6 +205,10 @@ def get_asset_thresholds(asset_id, consumption_type, df=None, threshold_method="
     try:
         # Create threshold calculator
         calculator = ThresholdCalculator(asset_id, consumption_type)
+        
+        # If using configuration, override threshold_method
+        if use_config:
+            threshold_method = "config"
         
         # If no DataFrame is provided, try to load data
         if df is None:
@@ -223,4 +249,13 @@ def get_asset_thresholds(asset_id, consumption_type, df=None, threshold_method="
         logger.error(f"Error getting asset thresholds: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
-        return None 
+        return None
+
+def get_anomaly_config():
+    """
+    Get the anomaly configuration from anomaly_config.json.
+    
+    Returns:
+        dict: Anomaly configuration
+    """
+    return load_anomaly_config() 

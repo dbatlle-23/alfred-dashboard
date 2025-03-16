@@ -8,6 +8,9 @@ import numpy as np
 from datetime import datetime, timedelta
 import logging
 
+# Import the config loader
+from utils.anomaly_experimental.config_loader import get_config_for_consumption_type, convert_config_to_thresholds
+
 # Set up logging
 logger = logging.getLogger(__name__)
 
@@ -28,6 +31,10 @@ class ThresholdCalculator:
         self.consumption_type = consumption_type
         self.historical_data = None
         self.thresholds = None
+        
+        # Load configuration for this consumption type
+        self.config = get_config_for_consumption_type(consumption_type)
+        logger.info(f"Loaded configuration for {consumption_type}: {self.config}")
     
     def load_historical_data(self, df=None, days=90):
         """
@@ -74,7 +81,7 @@ class ThresholdCalculator:
         Calculate thresholds for normal day-to-day variations.
         
         Args:
-            method (str): Method to use for threshold calculation ("std_dev" or "percentile")
+            method (str): Method to use for threshold calculation ("std_dev", "percentile", or "config")
             percentile (float): Percentile to use if method is "percentile"
             min_data_points (int): Minimum number of data points required
             
@@ -83,7 +90,12 @@ class ThresholdCalculator:
         """
         if self.historical_data is None or len(self.historical_data) < min_data_points:
             logger.warning(f"Insufficient data for asset {self.asset_id}: {len(self.historical_data) if self.historical_data is not None else 0} points")
-            return None
+            
+            # If we don't have enough data, use configuration directly
+            if method == "config" or method == "config_only":
+                return convert_config_to_thresholds(self.config)
+            elif len(self.historical_data) < 2:  # Need at least 2 points for diff
+                return None
         
         try:
             # Sort by date to ensure correct calculation of daily changes
@@ -101,17 +113,37 @@ class ThresholdCalculator:
             daily_changes = self.historical_data['daily_change'].dropna()
             daily_changes_pct = self.historical_data['daily_change_pct'].dropna()
             
-            if len(daily_changes) < min_data_points:
+            if len(daily_changes) < min_data_points and method != "config" and method != "config_only":
                 logger.warning(f"Insufficient daily change data for asset {self.asset_id}: {len(daily_changes)} points")
-                return None
+                
+                # If we don't have enough data, use configuration directly
+                if method == "config" or method == "config_only":
+                    return convert_config_to_thresholds(self.config)
+                elif len(daily_changes) < 2:  # Need at least 2 points for statistics
+                    return None
+            
+            # Calculate statistics for historical data
+            mean_change = daily_changes.mean()
+            std_change = daily_changes.std()
+            mean_change_pct = daily_changes_pct.mean()
+            std_change_pct = daily_changes_pct.std()
+            
+            historical_stats = {
+                'mean_change': mean_change,
+                'std_change': std_change,
+                'mean_change_pct': mean_change_pct,
+                'std_change_pct': std_change_pct,
+                'data_points': len(daily_changes)
+            }
             
             # Calculate thresholds based on the selected method
-            if method == "std_dev":
-                # Calculate statistics
-                mean_change = daily_changes.mean()
-                std_change = daily_changes.std()
-                mean_change_pct = daily_changes_pct.mean()
-                std_change_pct = daily_changes_pct.std()
+            if method == "config" or method == "config_only":
+                # Use configuration values with historical statistics
+                thresholds = convert_config_to_thresholds(self.config, historical_stats)
+                
+            elif method == "std_dev":
+                # Use standard deviation multiplier from config if available
+                std_multiplier = self.config.get('std_multiplier', 3.0)
                 
                 # Calculate thresholds based on standard deviations
                 thresholds = {
@@ -124,8 +156,10 @@ class ThresholdCalculator:
                     'method': 'std_dev',
                     'data_points': len(daily_changes),
                     'mean_change': mean_change,
-                    'std_change': std_change
+                    'std_change': std_change,
+                    'std_multiplier': std_multiplier
                 }
+                
             elif method == "percentile":
                 # Calculate percentiles of absolute changes
                 abs_changes = daily_changes.abs()
@@ -149,6 +183,11 @@ class ThresholdCalculator:
             else:
                 logger.error(f"Unknown threshold calculation method: {method}")
                 return None
+            
+            # Add configuration values to thresholds
+            thresholds['daily_max'] = self.config.get('daily_max', 10.0)
+            thresholds['monthly_max'] = self.config.get('monthly_max', 200.0)
+            thresholds['sudden_increase'] = self.config.get('sudden_increase', 5.0)
             
             # Store the calculated thresholds
             self.thresholds = thresholds
@@ -187,14 +226,5 @@ class ThresholdCalculator:
         if self.thresholds is not None:
             return self.thresholds
         else:
-            # Default thresholds if calculation failed
-            return {
-                'low_threshold': 1000,
-                'medium_threshold': 10000,
-                'high_threshold': 100000,
-                'low_threshold_pct': 10,
-                'medium_threshold_pct': 20,
-                'high_threshold_pct': 50,
-                'method': 'default',
-                'data_points': 0
-            } 
+            # Use configuration values for default thresholds
+            return convert_config_to_thresholds(self.config) 
