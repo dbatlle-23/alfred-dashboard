@@ -129,15 +129,36 @@ def main():
                 print(f"Asset ID: {result['asset_id']}")
                 print(f"Date: {result['date']}")
                 print(f"Consumption: {result['consumption']:.2f}")
-                print(f"Previous day consumption: {result['previous_consumption']:.2f}")
-                print(f"Daily change: {result['daily_change']:.2f}")
-                print(f"Daily change percentage: {result['daily_change_pct']:.2f}%")
+                
+                if result['previous_consumption'] is not None:
+                    print(f"Previous day consumption: {result['previous_consumption']:.2f}")
+                else:
+                    print("Previous day consumption: Not available")
+                    
+                if result['daily_change'] is not None:
+                    print(f"Daily change: {result['daily_change']:.2f}")
+                else:
+                    print("Daily change: Not available")
+                    
+                if result['daily_change_pct'] is not None:
+                    print(f"Daily change percentage: {result['daily_change_pct']:.2f}%")
+                else:
+                    print("Daily change percentage: Not available")
+                    
                 print(f"Is anomaly: {result['is_anomaly']}")
                 
                 if result['is_anomaly']:
-                    print(f"Confidence: {result['confidence']:.2f}")
+                    if result['confidence'] is not None:
+                        print(f"Confidence: {result['confidence']:.2f}")
+                    else:
+                        print("Confidence: Not available")
+                        
                     print(f"Anomaly type: {result['anomaly_type']}")
-                    print(f"Threshold: {result['threshold']:.2f}")
+                    
+                    if result['threshold'] is not None:
+                        print(f"Threshold: {result['threshold']:.2f}")
+                    else:
+                        print("Threshold: Not available")
                 
                 print("\nThresholds used for detection:")
                 for key, value in result['thresholds'].items():

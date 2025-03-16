@@ -82,13 +82,87 @@ class AnomalyTestHarness:
                     
                     # Load data
                     consumption_tags = [consumption_type] if consumption_type else None
-                    df = load_all_csv_data(
-                        consumption_tags=consumption_tags,
-                        project_id=project_id,
-                        jwt_token=token
-                    )
+                    
+                    # Si el consumption_type comienza con un solo guión bajo pero los archivos usan dos,
+                    # añadir una versión alternativa con dos guiones bajos
+                    if consumption_type and consumption_type.startswith('_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_'):
+                        alt_consumption_type = '_' + consumption_type
+                        logger.info(f"Adding alternative consumption type format: {alt_consumption_type}")
+                        if consumption_tags:
+                            consumption_tags.append(alt_consumption_type)
+                    
+                    # Si el asset_id es específico, cargar directamente el archivo correspondiente
+                    if asset_id and consumption_type:
+                        # Buscar el archivo específico para este asset y consumption_type
+                        import glob
+                        
+                        # Normalizar el consumption_type para la búsqueda
+                        search_tag = consumption_type
+                        if consumption_type.startswith('_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_'):
+                            search_tag = '__TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_' + consumption_type.split('_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_')[1]
+                        
+                        # Buscar en todos los directorios de proyecto
+                        base_path = "data/analyzed_data"
+                        project_dirs = [d for d in glob.glob(os.path.join(base_path, "*")) if os.path.isdir(d)]
+                        
+                        # Añadir también el directorio base
+                        project_dirs.append(base_path)
+                        
+                        found_files = []
+                        for project_dir in project_dirs:
+                            # Buscar archivos que coincidan con el patrón
+                            pattern = os.path.join(project_dir, f"daily_readings_{asset_id}*{search_tag.replace('_', '*')}*.csv")
+                            files = glob.glob(pattern)
+                            if files:
+                                found_files.extend(files)
+                        
+                        if found_files:
+                            logger.info(f"Found specific files for asset {asset_id} and consumption type {consumption_type}: {found_files}")
+                            
+                            # Cargar los archivos encontrados
+                            dfs = []
+                            for file_path in found_files:
+                                try:
+                                    file_df = pd.read_csv(file_path)
+                                    
+                                    # Asegurarse de que tenga las columnas necesarias
+                                    if 'asset_id' not in file_df.columns:
+                                        file_df['asset_id'] = asset_id
+                                    
+                                    if 'consumption_type' not in file_df.columns:
+                                        file_df['consumption_type'] = consumption_type
+                                    
+                                    # Si hay columna 'value' pero no 'consumption', usar 'value' como 'consumption'
+                                    if 'value' in file_df.columns and 'consumption' not in file_df.columns:
+                                        file_df['consumption'] = file_df['value']
+                                    
+                                    dfs.append(file_df)
+                                except Exception as e:
+                                    logger.error(f"Error loading file {file_path}: {str(e)}")
+                            
+                            if dfs:
+                                df = pd.concat(dfs, ignore_index=True)
+                            else:
+                                logger.error(f"No valid data found in files for asset {asset_id} and consumption type {consumption_type}")
+                                return None
+                        else:
+                            logger.info(f"No specific files found for asset {asset_id} and consumption type {consumption_type}, using general data loader")
+                            df = load_all_csv_data(
+                                consumption_tags=consumption_tags,
+                                project_id=project_id,
+                                jwt_token=token
+                            )
+                    else:
+                        # Usar el cargador general de datos
+                        df = load_all_csv_data(
+                            consumption_tags=consumption_tags,
+                            project_id=project_id,
+                            jwt_token=token
+                        )
                 except Exception as e:
                     logger.error(f"Error loading data from data loader: {str(e)}")
+                    import traceback
+                    logger.error(traceback.format_exc())
                     return None
             
             # Ensure date is datetime
@@ -106,7 +180,22 @@ class AnomalyTestHarness:
                 df = df[df['asset_id'] == asset_id]
             
             if consumption_type:
-                df = df[df['consumption_type'] == consumption_type]
+                # Filtrar por consumption_type, considerando posibles variaciones en el formato
+                mask = df['consumption_type'] == consumption_type
+                
+                # Si el consumption_type comienza con _TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_,
+                # también considerar la versión con __
+                if consumption_type.startswith('_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_'):
+                    alt_consumption_type = '_' + consumption_type
+                    mask = mask | (df['consumption_type'] == alt_consumption_type)
+                
+                # Si el consumption_type comienza con __TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_,
+                # también considerar la versión con _
+                if consumption_type.startswith('__TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_'):
+                    alt_consumption_type = consumption_type.replace('__TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_', '_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_')
+                    mask = mask | (df['consumption_type'] == alt_consumption_type)
+                
+                df = df[mask]
             
             logger.info(f"Loaded {len(df)} records for testing")
             return df
@@ -295,34 +384,39 @@ class AnomalyTestHarness:
                 # 4. Daily changes and thresholds
                 plt.figure(figsize=(12, 6))
                 
-                # Plot daily changes
-                plt.plot(group['date'], group['daily_change'], label='Daily Change', color='blue')
-                
-                # Highlight anomalies
-                anomalies = group[group['is_contextual_anomaly']]
-                plt.scatter(anomalies['date'], anomalies['daily_change'], color='red', s=50, label='Anomalies')
-                
-                # Plot thresholds if available
-                if 'contextual_anomaly_threshold' in anomalies.columns and not anomalies.empty:
-                    # Get unique thresholds
-                    thresholds = anomalies['contextual_anomaly_threshold'].unique()
+                # Check if daily_change column exists before plotting
+                if 'daily_change' in group.columns:
+                    # Plot daily changes
+                    plt.plot(group['date'], group['daily_change'], label='Daily Change', color='blue')
                     
-                    for threshold in thresholds:
-                        if pd.notna(threshold):
-                            plt.axhline(y=threshold, color='green', linestyle='--', label=f'Threshold: {threshold:.2f}')
-                            plt.axhline(y=-threshold, color='green', linestyle='--')
+                    # Highlight anomalies
+                    anomalies = group[group['is_contextual_anomaly']]
+                    plt.scatter(anomalies['date'], anomalies['daily_change'], color='red', s=50, label='Anomalies')
+                    
+                    # Plot thresholds if available
+                    if 'contextual_anomaly_threshold' in anomalies.columns and not anomalies.empty:
+                        # Get unique thresholds
+                        thresholds = anomalies['contextual_anomaly_threshold'].unique()
+                        
+                        for threshold in thresholds:
+                            if pd.notna(threshold):
+                                plt.axhline(y=threshold, color='green', linestyle='--', label=f'Threshold: {threshold:.2f}')
+                                plt.axhline(y=-threshold, color='green', linestyle='--')
+                    
+                    plt.title(f'Daily Changes and Anomalies for Asset {asset_id} ({consumption_type})')
+                    plt.xlabel('Date')
+                    plt.ylabel('Daily Change')
+                    plt.legend()
+                    plt.grid(True)
+                    
+                    # Format x-axis dates
+                    plt.gcf().autofmt_xdate()
+                    
+                    # Save figure
+                    plt.savefig(os.path.join(viz_dir, f"daily_changes_{asset_id}_{timestamp}.png"))
+                else:
+                    logger.warning(f"No 'daily_change' column found for asset {asset_id}, skipping daily changes plot")
                 
-                plt.title(f'Daily Changes and Anomalies for Asset {asset_id} ({consumption_type})')
-                plt.xlabel('Date')
-                plt.ylabel('Daily Change')
-                plt.legend()
-                plt.grid(True)
-                
-                # Format x-axis dates
-                plt.gcf().autofmt_xdate()
-                
-                # Save figure
-                plt.savefig(os.path.join(viz_dir, f"daily_changes_{asset_id}_{timestamp}.png"))
                 plt.close()
             
             logger.info(f"Generated visualizations in {viz_dir}")
@@ -518,11 +612,11 @@ def analyze_specific_anomaly(asset_id, date, consumption_type=None, data_source=
             plt.savefig(os.path.join(viz_dir, f"specific_anomaly_{asset_id}_{date.replace('-', '')}.png"))
             plt.close()
             
-            # Plot daily changes
-            plt.figure(figsize=(12, 6))
-            
             # Plot daily changes if the column exists
             if 'daily_change' in test_data.columns:
+                plt.figure(figsize=(12, 6))
+                
+                # Plot daily changes
                 plt.plot(test_data['date'], test_data['daily_change'], label='Daily Change', color='blue')
                 
                 # Highlight the specific date
@@ -546,10 +640,9 @@ def analyze_specific_anomaly(asset_id, date, consumption_type=None, data_source=
                 
                 # Save figure
                 plt.savefig(os.path.join(viz_dir, f"specific_anomaly_changes_{asset_id}_{date.replace('-', '')}.png"))
+                plt.close()
             else:
                 logger.warning("No 'daily_change' column found in the data, skipping daily changes plot")
-            
-            plt.close()
             
             analysis["visualizations_path"] = viz_dir
             

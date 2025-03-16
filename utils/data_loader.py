@@ -763,24 +763,47 @@ def tag_matches_selection(tag, selected_tags):
         debug_log(f"[DEBUG DETALLADO] tag_matches_selection - Coincidencia directa encontrada para '{tag}'")
         return True
     
+    # Normalizar el tag del archivo para comparación
+    normalized_file_tag = tag
+    if tag.startswith('__TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_'):
+        normalized_file_tag = '_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_' + tag.split('__TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_')[1]
+    elif tag.startswith('_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_'):
+        normalized_file_tag = tag
+    
+    debug_log(f"[DEBUG DETALLADO] tag_matches_selection - Tag normalizado del archivo: '{normalized_file_tag}'")
+    
     # Verificar coincidencia con formato __TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_
     for selected_tag in selected_tags:
-        # Si el tag del archivo tiene el formato completo (con __)
-        if tag.startswith('__TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_') and selected_tag == tag:
-            debug_log(f"[DEBUG DETALLADO] tag_matches_selection - Coincidencia exacta con tag completo: '{tag}'")
+        # Normalizar el tag seleccionado para comparación
+        normalized_selected_tag = selected_tag
+        if selected_tag.startswith('__TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_'):
+            normalized_selected_tag = '_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_' + selected_tag.split('__TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_')[1]
+        elif selected_tag.startswith('_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_'):
+            normalized_selected_tag = selected_tag
+        
+        debug_log(f"[DEBUG DETALLADO] tag_matches_selection - Tag normalizado seleccionado: '{normalized_selected_tag}'")
+        
+        # Comparar los tags normalizados
+        if normalized_file_tag == normalized_selected_tag:
+            debug_log(f"[DEBUG DETALLADO] tag_matches_selection - Coincidencia encontrada después de normalizar: '{normalized_file_tag}' == '{normalized_selected_tag}'")
             return True
             
         # Si el tag seleccionado tiene el formato completo pero el tag del archivo no
-        if selected_tag.startswith('_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_') or selected_tag.startswith('__TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_'):
-            # Normalizar ambos tags para comparación (eliminar _ o __ iniciales)
-            clean_selected_tag = selected_tag.replace('_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_', '').replace('__TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_', '')
-            clean_file_tag = tag.replace('_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_', '').replace('__TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_', '')
+        if normalized_selected_tag.startswith('_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_'):
+            # Extraer la parte final del tag (después de _TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_)
+            clean_selected_tag = normalized_selected_tag.replace('_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_', '')
             
-            debug_log(f"[DEBUG DETALLADO] tag_matches_selection - Comparando tags limpios: '{clean_file_tag}' con '{clean_selected_tag}'")
-            
-            if clean_file_tag.lower() == clean_selected_tag.lower():
-                debug_log(f"[DEBUG DETALLADO] tag_matches_selection - Coincidencia encontrada después de limpiar: '{clean_file_tag}' == '{clean_selected_tag}'")
-                return True
+            # Si el tag del archivo no tiene el prefijo, comparar directamente
+            if not normalized_file_tag.startswith('_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_'):
+                if normalized_file_tag.lower() == clean_selected_tag.lower():
+                    debug_log(f"[DEBUG DETALLADO] tag_matches_selection - Coincidencia encontrada comparando tag sin prefijo: '{normalized_file_tag}' == '{clean_selected_tag}'")
+                    return True
+            else:
+                # Si ambos tienen el prefijo, extraer la parte final del tag del archivo
+                clean_file_tag = normalized_file_tag.replace('_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_', '')
+                if clean_file_tag.lower() == clean_selected_tag.lower():
+                    debug_log(f"[DEBUG DETALLADO] tag_matches_selection - Coincidencia encontrada después de limpiar: '{clean_file_tag}' == '{clean_selected_tag}'")
+                    return True
     
     debug_log(f"[DEBUG DETALLADO] tag_matches_selection - No se encontró coincidencia para el tag '{tag}'")
     return False
