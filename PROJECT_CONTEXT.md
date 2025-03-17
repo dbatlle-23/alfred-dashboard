@@ -449,3 +449,99 @@ The system includes an experimental contextual anomaly detection module in `util
 - Can be enabled/disabled via feature flags
 
 Understanding this data structure is essential for developing new features, troubleshooting issues, and maintaining the application effectively. 
+
+## Version Control and Repository Management
+
+This project uses Git for version control. Following these guidelines will help maintain a clean and organized repository.
+
+### Branch Strategy
+
+We follow a simplified Git flow approach:
+
+- `main`: Production-ready code. All code in this branch should be stable and deployable.
+- `develop`: Integration branch for features. This is where features are combined and tested together.
+- `feature/*`: Feature branches for new development. Create a new branch for each feature or enhancement.
+- `bugfix/*`: Branches for bug fixes.
+- `hotfix/*`: Emergency fixes for production issues, branched directly from `main`.
+
+Example of creating a feature branch:
+```bash
+git checkout develop
+git pull
+git checkout -b feature/anomaly-detection-enhancement
+```
+
+### Commit Guidelines
+
+Write clear, concise commit messages that explain the "what" and "why" of your changes:
+
+- Use the imperative mood ("Add feature" not "Added feature")
+- Keep the first line under 50 characters
+- For complex changes, add a detailed description after the first line
+- Reference issue numbers when applicable
+
+Example of a good commit message:
+```
+Add contextual anomaly detection for thermal energy
+
+- Implement statistical threshold calculation based on historical data
+- Add visualization for detected anomalies
+- Update configuration to support new detection parameters
+
+Fixes #123
+```
+
+### Pull Request Process
+
+1. Create a pull request from your feature branch to `develop`
+2. Ensure your code passes all tests
+3. Request reviews from at least one team member
+4. Address review comments
+5. Merge only after approval
+
+### Version Tagging
+
+We use semantic versioning (MAJOR.MINOR.PATCH):
+
+- MAJOR: Incompatible API changes
+- MINOR: Backwards-compatible functionality
+- PATCH: Backwards-compatible bug fixes
+
+Example of creating a version tag:
+```bash
+git tag -a v1.2.3 -m "Version 1.2.3 - Add anomaly detection improvements"
+git push origin v1.2.3
+```
+
+### Repository Structure Maintenance
+
+- Keep third-party libraries out of the repository; use requirements.txt instead
+- Don't commit sensitive information (API keys, passwords, etc.)
+- Use .gitignore to exclude unnecessary files (cache files, logs, etc.)
+- Regularly clean up old branches that have been merged
+
+### Continuous Integration
+
+The repository is integrated with CI/CD pipelines that:
+
+- Run automated tests on pull requests
+- Check code quality and style
+- Build Docker images for deployment
+- Deploy to staging environments for testing
+
+### Handling Large Files
+
+- Avoid committing large data files to the repository
+- For data files needed for testing, use a sample subset
+- Consider using Git LFS for large binary files if necessary
+
+### Documentation Updates
+
+Always update documentation when making significant changes:
+
+- Update README.md for user-facing changes
+- Update PROJECT_CONTEXT.md for architectural changes
+- Update docstrings and comments in the code
+- Add examples for new features
+
+By following these version control practices, we ensure that the project remains maintainable, the history stays clean and informative, and collaboration between team members is smooth and efficient. 
