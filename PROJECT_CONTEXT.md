@@ -323,6 +323,67 @@ The application can be configured using environment variables:
 - `FILE_LOG_LEVEL`: File log level (default: DEBUG)
 - `JWT_SECRET_KEY`: Secret key for JWT tokens
 
+## API Integration
+
+The application integrates with the Alfred Smart API to retrieve and process data. Understanding the API structure is essential for working with the application.
+
+### API Endpoints
+
+The application interacts with several key API endpoints:
+
+- `/api/auth/login`: Authentication endpoint to obtain JWT tokens
+- `/api/clients`: Retrieve list of clients
+- `/api/projects`: Retrieve projects (can be filtered by client)
+- `/api/assets`: Retrieve assets (can be filtered by project)
+- `/api/readings`: Retrieve consumption readings
+- `/api/tags`: Retrieve consumption tags/types
+- `/api/corrections`: Submit and retrieve manual corrections
+
+### Authentication Flow
+
+1. The application authenticates with the API using credentials
+2. The API returns a JWT token
+3. This token is included in the Authorization header for subsequent requests
+4. The token is refreshed periodically to maintain the session
+
+### Request/Response Format
+
+Most API endpoints accept and return JSON data. Example of a typical response:
+
+```json
+{
+  "success": true,
+  "data": [...],
+  "message": "Operation successful",
+  "timestamp": "2025-01-01T12:00:00Z"
+}
+```
+
+### Error Handling
+
+API errors are handled consistently:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Invalid credentials"
+  },
+  "timestamp": "2025-01-01T12:00:00Z"
+}
+```
+
+### API Client Implementation
+
+The application uses a custom API client implementation in `utils/api_client.py` that:
+
+- Manages authentication
+- Handles request formatting
+- Processes responses
+- Implements error handling and retries
+- Provides caching for frequently accessed data
+
 ## Conclusion
 
 This project follows a modular, component-based architecture with clear separation of concerns. By understanding the structure and patterns described in this document, you should be able to navigate the codebase, add new features, and fix bugs effectively.
@@ -332,6 +393,48 @@ When in doubt, refer to existing implementations as examples of the patterns and
 ## Data Structure
 
 The application processes and analyzes consumption data from various sources. Understanding the data structure is crucial for developing new features or maintaining existing ones.
+
+### Data Model Hierarchy
+
+The application follows a hierarchical data model that reflects the real-world organization of buildings and spaces:
+
+1. **Client**: Top-level entity representing an organization or company
+   - Has a unique `client_id`
+   - Contains multiple projects
+   - Example attributes: name, contact information, subscription level
+
+2. **Project**: Represents a physical building or facility
+   - Has a unique `project_id`
+   - Belongs to a specific client
+   - Contains multiple assets
+   - Example attributes: name, address, construction date, total area
+
+3. **Asset**: Represents a specific space or area within a project
+   - Has a unique `asset_id`
+   - Belongs to a specific project
+   - Has multiple consumption readings of different types
+   - Example attributes: name, type (apartment, common area, etc.), floor, area
+
+4. **Consumption Reading**: Represents a measurement of resource usage
+   - Associated with a specific asset
+   - Has a specific consumption type (tag)
+   - Contains date and value information
+   - May have corrections applied
+
+This hierarchy is reflected in the UI navigation, data storage, and API structure.
+
+### Entity Relationships
+
+```
+Client (1) ---> (N) Project (1) ---> (N) Asset (1) ---> (N) Consumption Reading
+```
+
+- A client can have multiple projects
+- A project belongs to exactly one client
+- A project can have multiple assets
+- An asset belongs to exactly one project
+- An asset can have multiple consumption readings
+- A consumption reading belongs to exactly one asset
 
 ### Directory Structure
 
@@ -414,13 +517,43 @@ Records manual corrections applied to consumption data:
 ]
 ```
 
-#### Analysis Files (daily_readings_*_analysis.json)
+### Data Storage and Access Patterns
 
-Contains analysis results for specific assets, including:
-- Missing dates
-- Consumption decreases
-- Outliers
-- Monthly averages
+#### In-Memory Data Structure
+
+When loaded into the application, data is typically structured as:
+
+```python
+{
+  'client_id': {
+    'name': 'Client Name',
+    'projects': {
+      'project_id': {
+        'name': 'Project Name',
+        'assets': {
+          'asset_id': {
+            'name': 'Asset Name',
+            'consumption_data': {
+              'consumption_type': pd.DataFrame(...)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+#### Database Schema
+
+For persistent storage, the application uses a relational database with the following key tables:
+
+- `clients`: Stores client information
+- `projects`: Stores project information with foreign key to clients
+- `assets`: Stores asset information with foreign key to projects
+- `consumption_readings`: Stores reading data with foreign key to assets
+- `consumption_types`: Stores available consumption types/tags
+- `corrections`: Stores manual corrections applied to readings
 
 ### Consumption Types
 
