@@ -42,7 +42,6 @@ def create_asset_detail_modal():
             ]),
             dcc.Store(id="selected-asset-info", storage_type="memory"),
             dcc.Store(id="update-readings-state", storage_type="memory"),
-            dcc.Interval(id="update-readings-interval", interval=500, max_intervals=1, disabled=True),
         ],
         id="asset-detail-modal",
         size="xl",
@@ -290,44 +289,82 @@ def register_asset_detail_modal_callbacks(app):
         
         return is_open, {}, None
     
-    # Callback para iniciar la actualización de lecturas (Etapa 1)
+    # Callback para iniciar la actualización de lecturas (Solución directa unificada)
     @app.callback(
         [Output("update-readings-status", "children", allow_duplicate=True),
-         Output("update-readings-interval", "disabled"),
-         Output("update-readings-state", "data")],
+         Output("update-readings-state", "data"),
+         Output("asset-detail-modal-body", "children", allow_duplicate=True)],
         [Input("update-asset-readings-btn", "n_clicks")],
         [State("selected-asset-info", "data"),
-         State("jwt-token-store", "data")]
+         State("jwt-token-store", "data"),
+         State("asset-detail-modal-body", "children")],
+        prevent_initial_call=True
     )
-    def start_update_readings(n_clicks, asset_info, token_data):
+    @handle_exceptions(default_return=(
+        dbc.Alert(
+            [html.I(className="fas fa-exclamation-triangle me-2"), "Ha ocurrido un error al actualizar las lecturas."],
+            color="danger",
+            dismissable=True
+        ),
+        None,  # No cambios en el estado
+        None   # Mantener el contenido actual del modal
+    ))
+    def update_asset_readings(n_clicks, asset_info, token_data, current_content):
         """
-        Inicia el proceso de actualización de lecturas mostrando un mensaje de carga
-        y activando el intervalo para la segunda etapa.
+        Actualiza las lecturas del asset en un solo paso.
+        Esta función realiza todo el proceso que antes estaba dividido en dos etapas.
         """
         import dash_bootstrap_components as dbc
         from dash import html
+        from utils.api import get_daily_readings_for_tag_monthly, get_daily_readings_for_tag, ensure_project_folder_exists
+        import os
+        import pandas as pd
+        import re
+        
+        # Logs de inicialización
+        print(f"[CONSOLE-DEBUG] update_asset_readings - Callback activado con n_clicks={n_clicks}")
+        logger.critical(f"[CRITICAL] update_asset_readings - Callback activado con n_clicks={n_clicks}")
         
         # Verificar contexto del callback
         ctx = callback_context
-        if not ctx.triggered or ctx.triggered[0]["prop_id"] != "update-asset-readings-btn.n_clicks":
+        if not ctx.triggered:
+            logger.warning("[WARNING] update_asset_readings - No se detectó un trigger para el callback")
             raise PreventUpdate
-        
-        # Si el botón no ha sido clickeado, no hacer nada
-        if n_clicks is None or n_clicks == 0:
-            raise PreventUpdate
+            
+        logger.debug(f"[DEBUG] update_asset_readings - Trigger detectado: {ctx.triggered[0]['prop_id']}")
         
         # Verificar que tenemos la información necesaria
         if not asset_info or 'asset_id' not in asset_info:
+            logger.warning("[ERROR] update_asset_readings - No se encontró asset_id en la información del asset")
             return dbc.Alert(
-                "No se pudo obtener información del asset para actualizar lecturas.",
-                color="danger"
-            ), True, {}
+                [
+                    html.I(className="fas fa-exclamation-triangle me-2"),
+                    "No se pudo obtener información del asset para actualizar lecturas.",
+                    html.Br(),
+                    html.Small(f"Asset info: {asset_info}")
+                ],
+                color="danger",
+                dismissable=True
+            ), {"status": "error"}, current_content
+        
+        # Obtener información del asset
+        asset_id = asset_info.get('asset_id')
+        project_id = asset_info.get('project_id')
+        month = asset_info.get('month')
+        asset_metadata = asset_info.get('metadata', {})
+        tags = asset_info.get('tags', [])
+        token = token_data.get('token') if token_data else None
+        
+        # Depuración: Registrar la información clave del asset
+        logger.info(f"[INFO] update_asset_readings - Iniciando actualización para asset_id={asset_id}, project_id={project_id}")
+        logger.debug(f"[DEBUG] update_asset_readings - Tags detectados: {tags}")
+        logger.debug(f"[DEBUG] update_asset_readings - Contenido completo de asset_info: {asset_info}")
         
         # Mostrar mensaje de carga con botón de cancelación
         loading_message = html.Div([
             dbc.Alert(
                 [
-                    dbc.Spinner(size="sm", color="primary", className="me-2"),
+                    dbc.Spinner(size="sm", color="primary", spinner_class_name="me-2"),
                     "Actualizando lecturas del asset...",
                 ],
                 color="info",
@@ -335,8 +372,8 @@ def register_asset_detail_modal_callbacks(app):
             ),
             html.Div(
                 dbc.Button(
-                    "Cancelar actualización", 
-                    id="cancel-update-readings-btn", 
+                    "Cerrar", 
+                    id="close-asset-detail-modal", 
                     color="secondary", 
                     size="sm",
                     className="mt-1"
@@ -345,110 +382,188 @@ def register_asset_detail_modal_callbacks(app):
             )
         ])
         
-        # Preparar datos para la segunda etapa
-        update_state = {
-            "asset_id": asset_info.get("asset_id"),
-            "project_id": asset_info.get("project_id"),
-            "month": asset_info.get("month"),
-            "metadata": asset_info.get("metadata", {}),
-            "tags": asset_info.get("tags", []),
-            "token": token_data.get("token") if token_data else None
-        }
-        
-        # Activar el intervalo para la segunda etapa
-        return loading_message, False, update_state
-    
-    # Callback para procesar la actualización de lecturas (Etapa 2)
-    @app.callback(
-        [Output("update-readings-status", "children", allow_duplicate=True),
-         Output("asset-detail-modal-body", "children"),
-         Output("update-readings-interval", "disabled", allow_duplicate=True)],
-        [Input("update-readings-interval", "n_intervals")],
-        [State("update-readings-state", "data"),
-         State("asset-detail-modal-body", "children")]
-    )
-    @handle_exceptions(default_return=(
-        dbc.Alert(
-            [html.I(className="fas fa-exclamation-triangle me-2"), "Ha ocurrido un error al actualizar las lecturas."],
-            color="danger",
-            dismissable=True
-        ),
-        None,  # Mantener el contenido actual del modal
-        True    # Desactivar el intervalo
-    ))
-    def process_update_readings(n_intervals, update_state, current_content):
-        """
-        Procesa la actualización de lecturas cuando se activa el intervalo.
-        Esta es la segunda etapa del patrón de dos etapas.
-        """
-        from utils.api import get_daily_readings_for_tag, ensure_project_folder_exists
-        import dash_bootstrap_components as dbc
-        import os
-        import pandas as pd
-        
-        # Verificar si el intervalo se ha activado
-        if n_intervals is None or n_intervals < 1:
-            raise PreventUpdate
-        
-        # Verificar que tenemos los datos necesarios
-        if not update_state or 'asset_id' not in update_state:
-            return dbc.Alert(
-                "No se pudo obtener información del asset para actualizar lecturas.",
-                color="danger"
-            ), current_content, True
-        
-        # Obtener información del asset
-        asset_id = update_state.get('asset_id')
-        project_id = update_state.get('project_id')
-        month = update_state.get('month')
-        token = update_state.get('token')
-        
         # Intentar actualizar las lecturas
         try:
             # Asegurar que existe la carpeta del proyecto
             if not project_id:
-                return dbc.Alert(
-                    "No se pudo determinar el proyecto al que pertenece este asset.",
-                    color="danger"
-                ), current_content, True
-            
+                logger.warning("[WARNING] update_asset_readings - No se encontró project_id en la información del asset, intentando determinar proyecto a partir del sistema de archivos")
+                
+                # Primero intentar encontrar el project_id buscando archivos existentes para este asset
+                from utils.data_loader import get_project_for_asset
+                
+                found_project_id = get_project_for_asset(asset_id)
+                if found_project_id:
+                    project_id = found_project_id
+                    logger.info(f"[INFO] update_asset_readings - Se encontró project_id={project_id} para el asset {asset_id} en archivos existentes")
+                else:
+                    logger.warning("[WARNING] update_asset_readings - No se encontró project_id en archivos existentes, intentando obtenerlo de la API")
+                    
+                    # Como segunda opción, intentar obtener el project_id desde la API
+                    try:
+                        from utils.api import get_assets
+                        assets = get_assets(token=token)
+                        matching_asset = next((a for a in assets if a.get('id') == asset_id), None)
+                        
+                        if matching_asset and 'project_id' in matching_asset:
+                            project_id = matching_asset['project_id']
+                            logger.info(f"[INFO] update_asset_readings - Se obtuvo project_id={project_id} desde la API para el asset {asset_id}")
+                        else:
+                            # Si no se puede obtener el project_id, usar el project_id del primer asset como fallback
+                            if assets and len(assets) > 0 and 'project_id' in assets[0]:
+                                project_id = assets[0]['project_id']
+                                logger.warning(f"[WARNING] update_asset_readings - No se encontró el asset en la API, usando project_id={project_id} del primer asset como alternativa")
+                            else:
+                                # Si no hay assets o no tienen project_id, usar "general" como último recurso
+                                project_id = "general"
+                                logger.warning("[WARNING] update_asset_readings - No se pudo obtener un project_id válido, usando carpeta 'general' como último recurso")
+                    except Exception as e:
+                        logger.error(f"[ERROR] update_asset_readings - Error al intentar obtener project_id: {str(e)}")
+                        project_id = "general"  # Fallback a una carpeta general solo como último recurso
+                
+            # Validar que el project_id no sea "general" si hay otra manera de obtener un ID de proyecto válido
+            if project_id == "general":
+                logger.warning("[WARNING] update_asset_readings - Se está usando 'general' como project_id, lo que no coincide con la estructura esperada de directorios")
+                
+            logger.debug(f"[DEBUG] update_asset_readings - Asegurando carpeta para el proyecto {project_id}")
             project_folder = ensure_project_folder_exists(project_id)
+            logger.debug(f"[DEBUG] update_asset_readings - Carpeta del proyecto: {project_folder}")
             
-            # Determinar los tags disponibles para este asset
-            tags = update_state.get('tags', [])
+            # Validar el formato del mes
+            if not month or not re.match(r'^\d{4}-\d{2}$', month):
+                logger.error(f"[ERROR] update_asset_readings - Formato de mes inválido: {month}")
+                return dbc.Alert(
+                    [
+                        html.I(className="fas fa-exclamation-triangle me-2"),
+                        f"Formato de mes inválido: {month}. Debe tener el formato YYYY-MM."
+                    ],
+                    color="danger",
+                    dismissable=True
+                ), {"status": "error", "reason": "invalid_month_format"}, current_content
             
             # Si no tenemos tags específicos, usar una lista predefinida de tags comunes
-            if not tags:
-                tags = [
-                    "_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_DOMESTIC_HOT_WATER",
-                    "_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_THERMAL_ENERGY_HEAT",
-                    "_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_DOMESTIC_WATER_GENERAL",
-                    "_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_DOMESTIC_ENERGY_GENERAL"
-                ]
+            if not tags or not isinstance(tags, list) or len(tags) == 0:
+                logger.info("[INFO] update_asset_readings - No se encontraron tags específicos, obteniendo sensores automáticamente")
+                # Intentar obtener los sensores disponibles para el asset
+                from utils.api import get_sensors_with_tags
+                available_sensors = get_sensors_with_tags(asset_id, token)
+                
+                if available_sensors and len(available_sensors) > 0:
+                    logger.info(f"[INFO] update_asset_readings - Se encontraron {len(available_sensors)} sensores disponibles")
+                    tags = available_sensors
+                else:
+                    logger.warning("[WARNING] update_asset_readings - No se encontraron sensores disponibles, usando tags predefinidos")
+                    # Usar tags predefinidos como fallback (estos serán procesados como strings y se buscará un sensor que coincida)
+                    tags = [
+                        "_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_DOMESTIC_HOT_WATER",
+                        "_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_THERMAL_ENERGY_HEAT",
+                        "_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_DOMESTIC_WATER_GENERAL",
+                        "_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_DOMESTIC_ENERGY_GENERAL"
+                    ]
             
             # Actualizar lecturas para cada tag
             results = []
-            for tag in tags:
+            logger.info(f"[INFO] update_asset_readings - Iniciando actualización para {len(tags)} tags")
+            
+            for i, tag in enumerate(tags):
+                logger.debug(f"[DEBUG] update_asset_readings - Procesando tag {i+1}/{len(tags)}: {tag}")
                 # Llamar a la función para actualizar lecturas
-                result = get_daily_readings_for_tag(asset_id, tag, project_folder, token)
-                
-                # Guardar resultado
-                if result is not None and not result.empty:
+                try:
+                    # Formatear el tag correctamente según su tipo
+                    if isinstance(tag, dict) and 'device_id' in tag and 'sensor_id' in tag and 'gateway_id' in tag:
+                        # Si el tag ya es un diccionario con los parámetros del sensor, usarlo directamente
+                        logger.debug(f"[DEBUG] update_asset_readings - Tag {i+1} ya es un diccionario, usando directamente: {tag}")
+                        sensor_params = tag.copy()  # Crear una copia para no modificar el original
+                        # Asegurar que el tag tenga un tag_name
+                        if 'tag_name' not in sensor_params:
+                            sensor_params['tag_name'] = f"{sensor_params.get('device_id')}_{sensor_params.get('sensor_id')}_{sensor_params.get('gateway_id')}"
+                    elif isinstance(tag, str):
+                        # Si el tag es un string, buscar el sensor correspondiente
+                        logger.debug(f"[DEBUG] update_asset_readings - Tag {i+1} es un string, buscando sensor para: {tag}")
+                        from utils.api import get_sensors_with_tags
+                        sensors = get_sensors_with_tags(asset_id, token)
+                        sensor = next((s for s in sensors if s.get("tag_name") == tag), None)
+                        
+                        if sensor:
+                            logger.debug(f"[DEBUG] update_asset_readings - Sensor encontrado para tag {tag}: {sensor}")
+                            sensor_params = {
+                                'device_id': sensor.get('device_id'),
+                                'sensor_id': sensor.get('sensor_id'),
+                                'gateway_id': sensor.get('gateway_id'),
+                                'tag_name': tag  # Usar el nombre del tag original
+                            }
+                        else:
+                            logger.warning(f"[WARNING] update_asset_readings - No se encontró sensor para tag {tag}")
+                            results.append({
+                                "tag": tag,
+                                "status": "error",
+                                "reason": "sensor_not_found"
+                            })
+                            continue
+                    else:
+                        # Si el tag tiene otro formato, registrar error y continuar
+                        logger.warning(f"[WARNING] update_asset_readings - Formato de tag no reconocido: {tag}")
+                        results.append({
+                            "tag": str(tag),
+                            "status": "error",
+                            "reason": "invalid_tag_format"
+                        })
+                        continue
+                    
+                    # Usar la función actualizada para obtener los datos del mes específico
+                    logger.debug(f"[DEBUG] update_asset_readings - Llamando a get_daily_readings_for_tag_monthly con sensor_params: {sensor_params}")
+                    
+                    # Si el mes solicitado es el mes actual, mencionar que se limitará hasta el día de hoy
+                    from datetime import datetime
+                    current_date = datetime.now()
+                    try:
+                        year, month_num = month.split('-')
+                        year = int(year)
+                        month_num = int(month_num)
+                        
+                        if year == current_date.year and month_num == current_date.month:
+                            logger.info(f"[INFO] update_asset_readings - Mes actual detectado ({month}), los datos se limitarán hasta el día de hoy ({current_date.strftime('%Y-%m-%d')})")
+                    except Exception as e:
+                        logger.warning(f"[WARNING] update_asset_readings - Error al validar el formato del mes: {e}")
+                    
+                    result = get_daily_readings_for_tag_monthly(asset_id, sensor_params, month, project_folder, token)
+                    
+                    logger.debug(f"[DEBUG] update_asset_readings - Resultado para tag {tag}: {type(result)}, Filas: {len(result) if result is not None and not isinstance(result, bool) and not result.empty else 'N/A'}")
+                    
+                    # Guardar resultado
+                    if result is not None and not isinstance(result, bool) and not result.empty:
+                        tag_name = tag.get('tag_name', str(tag)) if isinstance(tag, dict) else str(tag)
+                        results.append({
+                            "tag": tag_name,
+                            "status": "success",
+                            "rows": len(result)
+                        })
+                        logger.info(f"[INFO] update_asset_readings - Tag {tag_name} actualizado con éxito: {len(result)} filas")
+                    else:
+                        tag_name = tag.get('tag_name', str(tag)) if isinstance(tag, dict) else str(tag)
+                        results.append({
+                            "tag": tag_name,
+                            "status": "error",
+                            "rows": 0,
+                            "reason": "no_data_returned"
+                        })
+                        logger.warning(f"[WARNING] update_asset_readings - Error al actualizar tag {tag_name}, result: {result}")
+                except Exception as e:
+                    import traceback
+                    tag_name = tag.get('tag_name', str(tag)) if isinstance(tag, dict) else str(tag)
+                    logger.error(f"[ERROR] update_asset_readings - Excepción al procesar tag {tag_name}: {str(e)}")
+                    logger.error(f"[ERROR] update_asset_readings - Traceback: {traceback.format_exc()}")
                     results.append({
-                        "tag": tag,
-                        "status": "success",
-                        "rows": len(result)
-                    })
-                else:
-                    results.append({
-                        "tag": tag,
+                        "tag": tag_name,
                         "status": "error",
-                        "rows": 0
+                        "rows": 0,
+                        "error": str(e)
                     })
             
-            # Crear mensaje de éxito
+            # Crear mensaje de resultado
             success_count = sum(1 for r in results if r["status"] == "success")
             total_tags = len(tags)
+            
+            logger.info(f"[INFO] update_asset_readings - Resultados finales: {success_count} exitosos de {total_tags} tags")
             
             if success_count > 0:
                 # Crear mensaje de éxito
@@ -464,27 +579,66 @@ def register_asset_detail_modal_callbacks(app):
                 # Recargar los datos del asset para mostrar los datos actualizados
                 try:
                     # Obtener los datos actualizados del asset
-                    # Esta función dependerá de cómo se obtienen los datos en tu aplicación
-                    # Aquí asumimos que hay una función load_asset_detail_data que obtiene los datos
                     from utils.data_loader import load_asset_detail_data
                     
-                    # Cargar los datos actualizados
-                    updated_data = load_asset_detail_data(asset_id, month)
+                    logger.debug(f"[DEBUG] update_asset_readings - Recargando datos para asset_id={asset_id}, project_id={project_id}, month={month}")
+                    # Cargar los datos actualizados con todos los parámetros necesarios
+                    updated_data = load_asset_detail_data(
+                        project_id=project_id,
+                        asset_id=asset_id,
+                        consumption_tags=tags,
+                        month=month,
+                        jwt_token=token
+                    )
                     
-                    # Obtener los metadatos del asset
-                    asset_metadata = update_state.get('metadata', {})
+                    # Validar que se obtuvieron datos
+                    if updated_data is None or updated_data.empty:
+                        logger.warning(f"[WARNING] update_asset_readings - No se pudieron cargar datos actualizados para asset_id={asset_id}, project_id={project_id}, month={month}")
+                        # Intentar con una ruta de archivo específica para depuración
+                        file_name = f"daily_readings_{asset_id}__*.csv"
+                        file_path = os.path.join(project_folder, file_name)
+                        logger.debug(f"[DEBUG] update_asset_readings - Buscando archivos que coincidan con: {file_path}")
+                        
+                        import glob
+                        matching_files = glob.glob(file_path)
+                        logger.debug(f"[DEBUG] update_asset_readings - Archivos encontrados: {matching_files}")
+                        
+                        # Si aún no hay datos, mostrar la información pero mantener el contenido actual
+                        success_message_with_warning = dbc.Alert(
+                            [
+                                html.I(className="fas fa-check-circle me-2"),
+                                f"Lecturas actualizadas con éxito para {success_count} de {total_tags} tags, pero no se pudieron cargar los datos actualizados.",
+                                html.Br(),
+                                html.Small(f"Intente cerrar y volver a abrir el detalle del asset para ver los cambios.")
+                            ],
+                            color="warning",
+                            dismissable=True
+                        )
+                        return success_message_with_warning, {"status": "success", "updated": False}, current_content
+                    
+                    logger.debug(f"[DEBUG] update_asset_readings - Datos recargados: {type(updated_data)}, Filas: {len(updated_data) if updated_data is not None and not updated_data.empty else 'N/A'}")
+                    
+                    # Verificar contenido de los datos para depuración
+                    if not updated_data.empty:
+                        logger.debug(f"[DEBUG] update_asset_readings - Columnas en datos actualizados: {updated_data.columns.tolist()}")
+                        logger.debug(f"[DEBUG] update_asset_readings - Primeras filas de datos actualizados: {updated_data.head(3).to_dict()}")
                     
                     # Recrear el contenido del modal con los datos actualizados
+                    logger.debug("[DEBUG] update_asset_readings - Recreando contenido del modal")
                     updated_content = create_asset_detail_content(asset_id, month, updated_data, asset_metadata)
                     
-                    return success_message, updated_content, True
+                    logger.info("[INFO] update_asset_readings - Actualización completada con éxito")
+                    return success_message, {"status": "success", "updated": True}, updated_content
                 except Exception as e:
-                    logger.error(f"process_update_readings - Error al recargar datos: {str(e)}")
+                    logger.error(f"[ERROR] update_asset_readings - Error al recargar datos: {str(e)}")
+                    import traceback
+                    logger.error(f"[ERROR] update_asset_readings - Traceback: {traceback.format_exc()}")
                     # Si hay un error al recargar los datos, mostrar el mensaje de éxito
                     # pero mantener el contenido actual
-                    return success_message, current_content, True
+                    return success_message, {"status": "success", "updated": False}, current_content
             else:
                 # Crear mensaje de error
+                logger.warning("[WARNING] update_asset_readings - No se pudo actualizar ningún tag")
                 error_message = dbc.Alert(
                     [
                         html.I(className="fas fa-exclamation-triangle me-2"),
@@ -493,12 +647,12 @@ def register_asset_detail_modal_callbacks(app):
                     color="danger",
                     dismissable=True
                 )
-                return error_message, current_content, True
+                return error_message, {"status": "error", "reason": "no_tags_updated"}, current_content
                 
         except Exception as e:
             import traceback
-            logger.error(f"process_update_readings - Error al actualizar lecturas: {str(e)}")
-            logger.debug(traceback.format_exc())
+            logger.error(f"[ERROR] update_asset_readings - Error al actualizar lecturas: {str(e)}")
+            logger.error(f"[ERROR] update_asset_readings - Traceback: {traceback.format_exc()}")
             
             # Crear mensaje de error
             error_message = dbc.Alert(
@@ -509,40 +663,23 @@ def register_asset_detail_modal_callbacks(app):
                 color="danger",
                 dismissable=True
             )
-            return error_message, current_content, True
+            return error_message, {"status": "error", "reason": str(e)}, current_content
     
-    # Callback para cancelar la actualización de lecturas
+    # Callback de prueba para verificar que la estructura de callbacks funciona
     @app.callback(
-        [Output("update-readings-status", "children", allow_duplicate=True),
-         Output("update-readings-interval", "disabled", allow_duplicate=True)],
-        [Input("cancel-update-readings-btn", "n_clicks")],
+        Output("asset-detail-modal-title", "children", allow_duplicate=True),
+        [Input("close-asset-detail-modal", "n_clicks")],
+        [State("asset-detail-modal-title", "children")],
         prevent_initial_call=True
     )
-    def cancel_update_readings(n_clicks):
+    def test_callback_structure(n_clicks, current_title):
         """
-        Cancela la actualización de lecturas cuando se hace clic en el botón de cancelación.
+        Callback de prueba para verificar que la estructura de callbacks funciona.
+        Este callback no hace nada importante, solo imprime mensajes de depuración
+        para confirmar que los callbacks están funcionando correctamente.
         """
-        import dash_bootstrap_components as dbc
-        from dash import html
+        print("[CONSOLE-TEST] Callback de prueba activado. Esto confirma que los callbacks del modal funcionan.")
+        logger.critical("[CRITICAL-TEST] Callback de prueba activado. Esto confirma que los callbacks del modal funcionan.")
         
-        # Verificar contexto del callback
-        ctx = callback_context
-        if not ctx.triggered or ctx.triggered[0]["prop_id"] != "cancel-update-readings-btn.n_clicks":
-            raise PreventUpdate
-        
-        # Si el botón no ha sido clickeado, no hacer nada
-        if n_clicks is None or n_clicks == 0:
-            raise PreventUpdate
-        
-        # Mostrar mensaje de cancelación
-        cancel_message = dbc.Alert(
-            [
-                html.I(className="fas fa-info-circle me-2"),
-                "Actualización de lecturas cancelada."
-            ],
-            color="warning",
-            dismissable=True
-        )
-        
-        # Desactivar el intervalo para evitar que se ejecute la segunda etapa
-        return cancel_message, True 
+        # No cambiamos realmente el título, solo verificamos que el callback se activa
+        return current_title 

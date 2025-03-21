@@ -5,7 +5,7 @@ import re
 from typing import Dict, List, Optional, Tuple, Union
 import logging
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Configurar logging
 logger = logging.getLogger(__name__)
@@ -68,9 +68,9 @@ def extract_asset_and_tag(filename: str) -> Tuple[str, str]:
     Extrae el ID del asset y el tag del nombre del archivo.
     
     Formatos soportados:
-    - daily_readings_ASSETID_tag_name.csv
+    - daily_readings_ASSETID__tag_name.csv
     - daily_readings_ASSETID__TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_tag_name.csv
-    - daily_readings_ASSETID_tag_name_YYYY.csv
+    - daily_readings_ASSETID__tag_name_YYYY.csv
     
     Args:
         filename: Nombre del archivo
@@ -121,12 +121,12 @@ def extract_asset_and_tag(filename: str) -> Tuple[str, str]:
         
         # Determinar el tag basado en el formato del archivo
         if len(parts) >= 3 and parts[-1].endswith('.csv'):
-            # Formato: daily_readings_ASSETID_tag_name.csv
+            # Formato: daily_readings_ASSETID__tag_name.csv
             # Unir todas las partes excepto el asset_id y la extensión
             tag = '_'.join(parts[1:]).replace('.csv', '')
             debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - Tag extraído del formato estándar: {tag}")
         elif len(parts) >= 3 and parts[-1].isdigit():
-            # Formato: daily_readings_ASSETID_tag_name_YYYY.csv
+            # Formato: daily_readings_ASSETID__tag_name_YYYY.csv
             # Unir todas las partes excepto el asset_id y el año
             tag = '_'.join(parts[1:-1])
             debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - Tag extraído del formato con año: {tag}")
@@ -465,6 +465,46 @@ def get_projects_with_data(df: Optional[pd.DataFrame]) -> List[Dict]:
     
     projects = df['project_id'].unique()
     return [{'id': project, 'nombre': f"Proyecto {project}"} for project in projects]
+
+def get_project_for_asset(asset_id: str) -> Optional[str]:
+    """
+    Busca a qué proyecto pertenece un asset específico examinando los archivos CSV existentes.
+    
+    Args:
+        asset_id (str): ID del asset a buscar
+        
+    Returns:
+        str: ID del proyecto al que pertenece el asset, o None si no se encuentra
+    """
+    debug_log(f"[DEBUG] get_project_for_asset - Buscando proyecto para el asset {asset_id}")
+    base_path = "data/analyzed_data"
+    
+    # Verificar que el directorio base existe
+    if not os.path.exists(base_path):
+        debug_log(f"[DEBUG] get_project_for_asset - Directorio base {base_path} no existe")
+        return None
+    
+    # Buscar en cada directorio de proyecto
+    project_dirs = [d for d in glob.glob(os.path.join(base_path, "*")) if os.path.isdir(d)]
+    debug_log(f"[DEBUG] get_project_for_asset - Encontrados {len(project_dirs)} directorios de proyecto")
+    
+    for project_dir in project_dirs:
+        project_id = os.path.basename(project_dir)
+        
+        # Saltar el directorio "general" si existe
+        if project_id == "general":
+            continue
+            
+        # Buscar archivos que contengan el asset_id
+        asset_files = glob.glob(os.path.join(project_dir, f"daily_readings_{asset_id}__*.csv"))
+        
+        if asset_files:
+            debug_log(f"[DEBUG] get_project_for_asset - Encontrados {len(asset_files)} archivos para el asset {asset_id} en el proyecto {project_id}")
+            return project_id
+    
+    # Si llegamos aquí, no encontramos el asset en ningún proyecto
+    debug_log(f"[DEBUG] get_project_for_asset - No se encontró ningún proyecto para el asset {asset_id}")
+    return None
 
 def get_assets_with_data(df: pd.DataFrame, project_id: Optional[str] = None) -> List[Dict]:
     """
@@ -963,3 +1003,73 @@ def generate_monthly_readings_by_consumption_type(df: pd.DataFrame, consumption_
         debug_log(f"[DEBUG] generate_monthly_readings_by_consumption_type - Tabla para {consumption_type} creada con {len(table_df)} filas y {len(table_df.columns)} columnas")
     
     return tables_by_consumption_type 
+
+def load_asset_detail_data(project_id, asset_id, consumption_tags, month, jwt_token=None):
+    """
+    Carga los datos detallados de un asset específico para un mes determinado.
+    
+    Args:
+        project_id (str): ID del proyecto
+        asset_id (str): ID del asset
+        consumption_tags (list): Lista de tags de consumo
+        month (str): Mes en formato 'YYYY-MM'
+        jwt_token (str, optional): Token JWT para autenticación
+        
+    Returns:
+        pd.DataFrame: DataFrame con los datos detallados o None si no hay datos
+    """
+    try:
+        # Convertir el mes a fecha de inicio y fin
+        year, month_num = map(int, month.split('-'))
+        start_date = datetime(year, month_num, 1)
+        
+        # Calcular el último día del mes
+        if month_num == 12:
+            end_date = datetime(year + 1, 1, 1) - timedelta(days=1)
+        else:
+            end_date = datetime(year, month_num + 1, 1) - timedelta(days=1)
+        
+        debug_log(f"[DEBUG] load_asset_detail_data - Cargando datos para asset {asset_id} en el mes {month}")
+        debug_log(f"[DEBUG] load_asset_detail_data - Rango de fechas: {start_date} a {end_date}")
+        
+        # Cargar todos los datos del CSV
+        all_data = load_all_csv_data(
+            project_id=project_id,
+            consumption_tags=consumption_tags,
+            jwt_token=jwt_token
+        )
+        
+        # Filtrar por asset_id y rango de fechas
+        if all_data is not None and not all_data.empty:
+            debug_log(f"[DEBUG] load_asset_detail_data - Datos cargados: {len(all_data)} filas")
+            
+            # Asegurar que la columna date es datetime
+            all_data['date'] = pd.to_datetime(all_data['date'])
+            
+            # Filtrar por asset_id y rango de fechas
+            filtered_data = all_data[
+                (all_data['asset_id'] == asset_id) &
+                (all_data['date'] >= start_date) &
+                (all_data['date'] <= end_date)
+            ]
+            
+            debug_log(f"[DEBUG] load_asset_detail_data - Datos filtrados: {len(filtered_data)} filas")
+            
+            # Ordenar por fecha
+            if not filtered_data.empty:
+                filtered_data = filtered_data.sort_values('date')
+                
+                # Convertir columnas de tipo Period a string para evitar problemas de serialización
+                for col in filtered_data.columns:
+                    if pd.api.types.is_period_dtype(filtered_data[col]):
+                        filtered_data[col] = filtered_data[col].astype(str)
+            
+            return filtered_data
+        
+        debug_log(f"[DEBUG] load_asset_detail_data - No se encontraron datos para el asset {asset_id}")
+        return None
+    except Exception as e:
+        debug_log(f"[ERROR] load_asset_detail_data - Error cargando datos: {str(e)}")
+        import traceback
+        debug_log(f"[ERROR] load_asset_detail_data - Traceback: {traceback.format_exc()}")
+        return None 

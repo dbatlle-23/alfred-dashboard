@@ -873,8 +873,15 @@ def register_table_callbacks(app):
             )
             
             # Activar el modal - Asegurarse de que todos los valores son serializables a JSON
-            # Convertir a string para evitar problemas de serialización
-            return {"show": True, "asset_id": str(asset_id), "month": str(selected_month)}, modal_title, modal_content
+            # Incluir project_id en los datos enviados al modal para que esté disponible al actualizar lecturas
+            return {
+                "show": True, 
+                "asset_id": str(asset_id), 
+                "month": str(selected_month),
+                "project_id": project_id,  # Añadir project_id para que esté disponible en las actualizaciones
+                "metadata": asset_metadata,
+                "tags": consumption_tags
+            }, modal_title, modal_content
         
         except Exception as e:
             print(f"[ERROR] show_asset_detail - Error al cargar detalles: {str(e)}")
