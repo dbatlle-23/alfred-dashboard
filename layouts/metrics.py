@@ -2988,10 +2988,10 @@ def register_callbacks(app):
             matching_files = []
             for project_id in project_folders:
                 project_folder = os.path.join(analyzed_data_folder, project_id)
-                file_pattern = f"daily_readings_{asset_id}_{consumption_tag}.csv"
+                file_pattern = f"daily_readings_{asset_id}__{consumption_tag}.csv"
                 
                 for filename in os.listdir(project_folder):
-                    if filename.startswith(f"daily_readings_{asset_id}_") and consumption_tag in filename and filename.endswith(".csv"):
+                    if filename.startswith(f"daily_readings_{asset_id}__") and consumption_tag in filename and filename.endswith(".csv"):
                         matching_files.append({
                             "project_id": project_id,
                             "filename": filename,
@@ -3008,7 +3008,7 @@ def register_callbacks(app):
                         html.Li(f"Asset ID: {asset_id}"),
                         html.Li(f"Tipo de consumo: {consumption_type}"),
                         html.Li(f"Tag de consumo: {consumption_tag}"),
-                        html.Li(f"Patrón de búsqueda: daily_readings_{asset_id}_{consumption_tag}.csv"),
+                        html.Li(f"Patrón de búsqueda: daily_readings_{asset_id}__{consumption_tag}.csv"),
                         html.Li(f"Carpetas de proyectos revisadas: {', '.join(project_folders)}")
                     ]),
                     html.Hr(),
@@ -3491,7 +3491,7 @@ def register_callbacks(app):
                     project_path = os.path.join(analyzed_data_folder, project_folder)
                     if os.path.isdir(project_path):
                         for filename in os.listdir(project_path):
-                            if filename.startswith(f"daily_readings_{asset_id}_") and consumption_tag in filename and filename.endswith(".csv"):
+                            if filename.startswith(f"daily_readings_{asset_id}__") and consumption_tag in filename and filename.endswith(".csv"):
                                 file_path = os.path.join(project_path, filename)
                                 matching_files.append({
                                     "project_id": project_folder,
@@ -3849,7 +3849,7 @@ def register_callbacks(app):
                     project_path = os.path.join(analyzed_data_folder, project_folder)
                     if os.path.isdir(project_path):
                         for filename in os.listdir(project_path):
-                            if filename.startswith(f"daily_readings_{asset_id}_") and consumption_tag in filename and filename.endswith(".csv"):
+                            if filename.startswith(f"daily_readings_{asset_id}__") and consumption_tag in filename and filename.endswith(".csv"):
                                 file_path = os.path.join(project_path, filename)
                                 matching_files.append({
                                     "project_id": project_folder,
@@ -4452,7 +4452,7 @@ def register_callbacks(app):
                 if os.path.isdir(folder_path):
                     # Buscar archivos que contengan el asset_id
                     for filename in os.listdir(folder_path):
-                        if f"daily_readings_{asset_id}_" in filename:
+                        if f"daily_readings_{asset_id}__" in filename:
                             project_id = folder_name
                             break
                     if project_id:
@@ -4614,7 +4614,7 @@ def register_callbacks(app):
             # Cargar los datos actualizados desde el archivo CSV
             try:
                 # Ruta al archivo CSV
-                file_name = f"daily_readings_{asset_id}_{tag}.csv"
+                file_name = f"daily_readings_{asset_id}__{tag}.csv"
                 file_path = os.path.join("data", "projects", project_id, file_name)
                 
                 if os.path.exists(file_path):

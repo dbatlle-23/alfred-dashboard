@@ -31,6 +31,7 @@ from components.metrics.tables import (
     create_monthly_summary_table
 )
 from components.metrics.detail_modal import create_calculation_detail_modal
+from components.metrics.asset_detail_modal import create_asset_detail_modal
 
 # Importar utilidades
 from utils.metrics.data_processing import (
@@ -42,9 +43,10 @@ from utils.metrics.data_processing import (
     generate_monthly_readings_by_consumption_type,
     generate_monthly_consumption_summary
 )
-from utils.metrics.error_analysis import analyze_readings_errors
-from utils.metrics.regeneration import regenerate_readings, regenerate_readings_in_bulk
-from utils.metrics.validation import validate_consumption_data
+# Comentar o eliminar importaciones que no existen
+# from utils.metrics.error_analysis import analyze_readings_errors
+# from utils.metrics.regeneration import regenerate_readings, regenerate_readings_in_bulk
+# from utils.metrics.validation import validate_consumption_data
 from utils.api import get_clientes, get_projects, get_assets, get_project_assets
 
 # Importar callbacks
@@ -69,6 +71,9 @@ def create_layout():
         dcc.Store(id="complete-consumption-data"),
         dcc.Store(id="realtime-reading-data"),
         dcc.Store(id="store-monthly-readings-data"),
+        dcc.Store(id="show-asset-detail-trigger"),
+        dcc.Store(id="monthly-readings-complete-data"),
+        dcc.Store(id="monthly-readings-table-debug"),
         
         # Contenedor principal
         dbc.Container([
@@ -490,7 +495,10 @@ def create_layout():
             ),
             
             # Modal para detalles de cálculo
-            create_calculation_detail_modal()
+            create_calculation_detail_modal(),
+            
+            # Modal de detalle de asset
+            create_asset_detail_modal()
         ], fluid=True)
     ])
 

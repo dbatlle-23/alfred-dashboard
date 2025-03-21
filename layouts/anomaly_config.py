@@ -1,9 +1,11 @@
 # layouts/anomaly_config.py
+import dash
 import dash_bootstrap_components as dbc
 from dash import html, dcc
 from config.feature_flags import is_feature_enabled, enable_feature, disable_feature
 import logging
 from utils.logging import get_logger
+from datetime import datetime, timedelta
 
 # Configurar logger
 logger = get_logger(__name__)
@@ -199,6 +201,48 @@ layout = html.Div([
         # Contenedor para resultados
         html.Div(id="anomaly-detection-results"),
         
+        # Componente para reclasificar anomalías
+        html.Div([
+            dbc.Card([
+                dbc.CardHeader("Reclasificación de Anomalías"),
+                dbc.CardBody([
+                    html.P("Si se ha detectado un reinicio de contador pero en realidad es un reemplazo de sensor, puede reclasificar la anomalía aquí."),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Fecha de la anomalía"),
+                            dcc.DatePickerSingle(
+                                id="date-picker-anomaly",
+                                date=None,
+                                display_format="YYYY-MM-DD",
+                                placeholder="Seleccione fecha de la anomalía",
+                                className="mb-2"
+                            ),
+                        ], width=6),
+                        dbc.Col([
+                            html.Label("Nuevo tipo"),
+                            dcc.Dropdown(
+                                id="select-anomaly-type",
+                                options=[
+                                    {"label": "Reinicio de contador", "value": "counter_reset"},
+                                    {"label": "Reemplazo de sensor", "value": "sensor_replacement"}
+                                ],
+                                value="sensor_replacement",
+                                clearable=False,
+                                className="mb-2"
+                            ),
+                        ], width=6),
+                    ]),
+                    dbc.Button(
+                        "Reclasificar Anomalía",
+                        id="btn-reclassify-anomaly",
+                        color="warning",
+                        className="mt-2",
+                        n_clicks=0
+                    ),
+                ]),
+            ], className="mb-4"),
+        ], id="anomaly-reclassification-container", style={"display": "none"}),
+        
         # Gráfico de comparación
         html.Div(id="anomaly-comparison-chart"),
         
@@ -217,7 +261,6 @@ def register_callbacks(app):
     from utils.adapters.anomaly_adapter import AnomalyAdapter
     from components.metrics.anomaly.comparison_chart import create_anomaly_comparison_chart
     import pandas as pd
-    from datetime import datetime, timedelta
     import json
     import traceback
     
@@ -343,7 +386,7 @@ def register_callbacks(app):
                     if os.path.isdir(project_path):
                         # Buscar archivos que coincidan con el patrón
                         for filename in os.listdir(project_path):
-                            if filename.startswith(f"daily_readings_{asset_id}_") and consumption_tag in filename and filename.endswith(".csv"):
+                            if filename.startswith(f"daily_readings_{asset_id}__") and consumption_tag in filename and filename.endswith(".csv"):
                                 file_path = os.path.join(project_path, filename)
                                 matching_files.append({
                                     "project_id": project_folder,
@@ -450,7 +493,8 @@ def register_callbacks(app):
                 dates = [start_date + timedelta(days=i) for i in range(delta.days + 1)]
             else:
                 # Si no se proporcionan fechas, usar los últimos 30 días
-                dates = [datetime.now() - timedelta(days=i) for i in range(30)]
+                current_date = datetime.now()
+                dates = [current_date - timedelta(days=i) for i in range(30)]
                 dates.reverse()  # Ordenar cronológicamente
             
             # Obtener lecturas para cada sensor y fecha
@@ -573,7 +617,8 @@ def register_callbacks(app):
             else:
                 logger.info("Usando datos de ejemplo para la detección de anomalías")
                 # Crear datos de ejemplo para demostración
-                dates = [datetime.now() - timedelta(days=i) for i in range(10)]
+                current_date = datetime.now()
+                dates = [current_date - timedelta(days=i) for i in range(10)]
                 dates.reverse()  # Ordenar cronológicamente
                 
                 # Simular un reinicio de contador
@@ -585,51 +630,44 @@ def register_callbacks(app):
                 })
                 logger.debug(f"Datos de ejemplo creados: {len(data)} registros")
             
-            # Crear detector con umbral personalizado
+            # Crear detector con umbral personalizado y repositorio
             from utils.anomaly.detector import AnomalyDetector
-            detector = AnomalyDetector()
+            from utils.repositories.reading_repository import ReadingRepository
+            
+            repository = ReadingRepository()
+            detector = AnomalyDetector(repository)
             logger.debug("Detector de anomalías creado")
             
-            # Modificar la lógica de detección para usar el umbral configurado
-            anomalies = []
-            for i in range(1, len(data)):
-                current = data.iloc[i]
-                previous = data.iloc[i-1]
-                
-                # Calcular la caída relativa
-                current_value = current['consumption']
-                previous_value = previous['consumption']
-                
-                # Detectar si el valor actual es menor que el valor anterior * umbral
-                # Ejemplo: si umbral=0.8, detecta caídas mayores al 20%
-                if current_value < previous_value * (1 - detection_threshold):
-                    anomalies.append({
-                        'type': 'counter_reset',
-                        'date': current['date'],
-                        'previous_value': previous_value,
-                        'current_value': current_value,
-                        'asset_id': asset_id,
-                        'consumption_type': consumption_type,
-                        'offset': previous_value - current_value
-                    })
-                    logger.debug(f"Anomalía detectada: fecha={current['date']}, valor_anterior={previous_value}, valor_actual={current_value}")
+            # Detectar anomalías con la opción de detectar reemplazos de sensores
+            # Esto permitirá que el detector identifique automáticamente posibles reemplazos de sensores
+            anomalies = detector.detect_counter_resets(data, detect_sensor_replacements=True)
             
             # Verificar si se detectaron anomalías
             if anomalies:
                 anomaly_count = len(anomalies)
                 logger.info(f"Se detectaron {anomaly_count} anomalías")
                 
+                # Crear mensaje con información sobre las anomalías detectadas
+                anomaly_info = []
+                for i, anomaly in enumerate(anomalies):
+                    anomaly_type = anomaly['type']
+                    anomaly_date = anomaly['date']
+                    if isinstance(anomaly_date, str):
+                        anomaly_date = datetime.fromisoformat(anomaly_date.replace('Z', '+00:00'))
+                    
+                    anomaly_info.append(html.P([
+                        f"Tipo: {anomaly_type}, ",
+                        f"Fecha: {anomaly_date.strftime('%Y-%m-%d')}, ",
+                        f"Valor anterior: {anomaly['previous_value']}, ",
+                        f"Valor actual: {anomaly['current_value']}, ",
+                        f"Offset aplicado: {anomaly['offset']}"
+                    ]))
+                
                 return dbc.Alert([
                     html.H4("Anomalías Detectadas", className="alert-heading"),
                     html.P(f"Se detectaron {anomaly_count} lecturas con anomalías en el asset {asset_id}."),
                     html.Hr(),
-                    html.P([
-                        f"Tipo: {anomalies[0]['type']}, ",
-                        f"Fecha: {anomalies[0]['date'].strftime('%Y-%m-%d')}, ",
-                        f"Valor anterior: {anomalies[0]['previous_value']}, ",
-                        f"Valor actual: {anomalies[0]['current_value']}, ",
-                        f"Offset aplicado: {anomalies[0]['offset']}"
-                    ]),
+                    *anomaly_info,
                     html.P(
                         "Haga clic en 'Visualizar Comparación' para ver los datos originales y corregidos.",
                         className="mb-0"
@@ -710,7 +748,8 @@ def register_callbacks(app):
             else:
                 logger.info("Usando datos de ejemplo para la visualización de comparación")
                 # Crear datos de ejemplo para demostración
-                dates = [datetime.now() - timedelta(days=i) for i in range(10)]
+                current_date = datetime.now()
+                dates = [current_date - timedelta(days=i) for i in range(10)]
                 dates.reverse()  # Ordenar cronológicamente
                 
                 # Simular un reinicio de contador
@@ -722,56 +761,40 @@ def register_callbacks(app):
                 })
                 logger.debug(f"Datos de ejemplo creados: {len(original_data)} registros")
             
-            # Crear detector con umbral personalizado
-            from utils.anomaly.detector import AnomalyDetector
-            detector = AnomalyDetector()
-            logger.debug("Detector de anomalías creado")
+            # Obtener anomalías desde el repositorio en lugar de detectarlas nuevamente
+            # Esto asegura que se usen las anomalías reclasificadas
+            from utils.repositories.reading_repository import ReadingRepository
+            repository = ReadingRepository()
+            anomalies = repository.get_anomalies(
+                asset_id=asset_id,
+                consumption_type=consumption_type,
+                start_date=start_date,
+                end_date=end_date
+            )
             
-            # Detectar anomalías usando el mismo método que en detect_anomalies
-            anomalies = []
-            for i in range(1, len(original_data)):
-                current = original_data.iloc[i]
-                previous = original_data.iloc[i-1]
+            # Si no hay anomalías en el repositorio, detectarlas
+            if not anomalies:
+                logger.info("No se encontraron anomalías en el repositorio, detectando nuevas anomalías")
+                from utils.anomaly.detector import AnomalyDetector
+                detector = AnomalyDetector(repository)
                 
-                current_value = current['consumption']
-                previous_value = previous['consumption']
-                
-                if current_value < previous_value * (1 - detection_threshold):
-                    anomalies.append({
-                        'type': 'counter_reset',
-                        'date': current['date'],
-                        'previous_value': previous_value,
-                        'current_value': current_value,
-                        'asset_id': asset_id,
-                        'consumption_type': consumption_type,
-                        'offset': previous_value - current_value
-                    })
+                # Detectar anomalías con la opción de detectar reemplazos de sensores
+                anomalies = detector.detect_counter_resets(original_data, detect_sensor_replacements=True)
+            else:
+                logger.info(f"Se encontraron {len(anomalies)} anomalías en el repositorio")
+                # Imprimir información de las anomalías para depuración
+                for i, anomaly in enumerate(anomalies):
+                    logger.debug(f"Anomalía {i+1}: tipo={anomaly['type']}, fecha={anomaly['date']}")
             
             # Crear datos corregidos
             corrected_data = original_data.copy()
             corrected_data['corrected_value'] = original_data['consumption'].copy()
             corrected_data['is_corrected'] = False
             
-            # Aplicar correcciones si se detectaron anomalías
-            if anomalies:
-                # Ordenar anomalías por fecha
-                anomalies = sorted(anomalies, key=lambda x: x['date'])
-                
-                # Aplicar correcciones para cada anomalía
-                for anomaly in anomalies:
-                    # Encontrar el índice de la fecha de la anomalía
-                    idx = corrected_data[corrected_data['date'] == anomaly['date']].index
-                    
-                    if len(idx) > 0:
-                        # Obtener el offset
-                        offset = anomaly['offset']
-                        
-                        # Aplicar el offset a todas las lecturas posteriores
-                        corrected_data.loc[idx[0]:, 'corrected_value'] = \
-                            corrected_data.loc[idx[0]:, 'consumption'] + offset
-                        
-                        # Marcar como corregidas
-                        corrected_data.loc[idx[0]:, 'is_corrected'] = True
+            # Aplicar correcciones usando el corrector
+            from utils.anomaly.corrector import AnomalyCorrector
+            corrector = AnomalyCorrector()
+            corrected_data = corrector.correct_counter_resets(corrected_data, anomalies)
             
             # Crear resultado
             result = {
@@ -792,4 +815,168 @@ def register_callbacks(app):
                 html.H4("Error en la visualización de comparación", className="alert-heading"),
                 html.P(f"Se produjo un error al procesar los datos: {str(e)}"),
                 html.Pre(traceback.format_exc(), className="small text-muted")
-            ], color="danger", className="mt-3") 
+            ], color="danger", className="mt-3")
+    
+    # Añadir callback para mostrar/ocultar el contenedor de reclasificación
+    @app.callback(
+        Output("anomaly-reclassification-container", "style"),
+        Input("anomaly-detection-results", "children")
+    )
+    def toggle_reclassification_container(results):
+        if results:
+            return {"display": "block"}
+        return {"display": "none"}
+    
+    # Callback para reclasificar anomalías
+    @app.callback(
+        [Output("anomaly-detection-results", "children", allow_duplicate=True),
+         Output("anomaly-comparison-chart", "children", allow_duplicate=True)],
+        Input("btn-reclassify-anomaly", "n_clicks"),
+        [State("input-asset-id", "value"),
+         State("select-consumption-type", "value"),
+         State("date-picker-anomaly", "date"),
+         State("select-anomaly-type", "value"),
+         State("switch-use-real-data", "value"),
+         State("date-picker-start", "date"),
+         State("date-picker-end", "date"),
+         State("jwt-token-store", "data")],
+        prevent_initial_call=True
+    )
+    def reclassify_anomaly(n_clicks, asset_id, consumption_type, anomaly_date, new_type, use_real_data, start_date, end_date, token_data):
+        if not n_clicks or not asset_id or not consumption_type or not anomaly_date:
+            return dash.no_update, dash.no_update
+        
+        logger.info(f"Reclasificando anomalía: asset_id={asset_id}, consumption_type={consumption_type}, fecha={anomaly_date}, nuevo_tipo={new_type}")
+        
+        try:
+            # Crear instancia del detector
+            from utils.anomaly.detector import AnomalyDetector
+            from utils.repositories.reading_repository import ReadingRepository
+            
+            repository = ReadingRepository()
+            detector = AnomalyDetector(repository)
+            
+            # Obtener anomalías para el asset y tipo de consumo
+            anomalies = repository.get_anomalies(
+                asset_id=asset_id,
+                consumption_type=consumption_type
+            )
+            
+            # Buscar la anomalía por fecha
+            try:
+                if isinstance(anomaly_date, str):
+                    anomaly_datetime = datetime.fromisoformat(anomaly_date.replace('Z', '+00:00'))
+                else:
+                    anomaly_datetime = anomaly_date
+            except ValueError:
+                # Intentar otro formato común
+                try:
+                    anomaly_datetime = datetime.strptime(anomaly_date.split('T')[0], '%Y-%m-%d')
+                except ValueError:
+                    logger.error(f"No se pudo convertir la fecha de anomalía: {anomaly_date}")
+                    return dbc.Alert(
+                        f"Error al procesar la fecha de anomalía: {anomaly_date}. Formato no válido.",
+                        color="danger",
+                        className="mt-3"
+                    ), dash.no_update
+            
+            target_anomaly = None
+            for anomaly in anomalies:
+                anomaly_date = anomaly['date']
+                if isinstance(anomaly_date, str):
+                    anomaly_date = datetime.fromisoformat(anomaly_date.replace('Z', '+00:00'))
+                
+                # Comparar solo la fecha (ignorar la hora)
+                if (anomaly_date.year == anomaly_datetime.year and 
+                    anomaly_date.month == anomaly_datetime.month and 
+                    anomaly_date.day == anomaly_datetime.day):
+                    target_anomaly = anomaly
+                    break
+            
+            if not target_anomaly:
+                return dbc.Alert(
+                    f"No se encontró ninguna anomalía para el asset {asset_id} en la fecha {anomaly_date}",
+                    color="warning",
+                    className="mt-3"
+                ), dash.no_update
+            
+            # Reclasificar la anomalía
+            updated_anomaly = detector.reclassify_anomaly(target_anomaly, new_type)
+            logger.info(f"Anomalía reclasificada: {updated_anomaly}")
+            
+            # Mensaje de éxito
+            success_message = dbc.Alert([
+                html.H4("Anomalía reclasificada correctamente", className="alert-heading"),
+                html.P(f"La anomalía del {anomaly_date} ha sido reclasificada como '{new_type}'."),
+                html.P("Se ha actualizado la visualización con la nueva clasificación.")
+            ], color="success", className="mt-3")
+            
+            # Actualizar la visualización con la nueva clasificación
+            # Obtener datos según la fuente seleccionada
+            if use_real_data:
+                # Obtener el token JWT si está disponible
+                jwt_token = None
+                if token_data and "token" in token_data:
+                    jwt_token = token_data["token"]
+                
+                # Obtener datos reales
+                original_data = get_real_data(asset_id, consumption_type, start_date, end_date, jwt_token)
+                
+                if original_data is None or original_data.empty:
+                    return success_message, dash.no_update
+            else:
+                # Crear datos de ejemplo para demostración
+                current_date = datetime.now()
+                dates = [current_date - timedelta(days=i) for i in range(10)]
+                dates.reverse()  # Ordenar cronológicamente
+                
+                # Simular un reinicio de contador
+                original_data = pd.DataFrame({
+                    'date': dates,
+                    'consumption': [100, 110, 120, 130, 140, 50, 60, 70, 80, 90],  # Reinicio después del día 5
+                    'asset_id': [asset_id] * 10,
+                    'consumption_type': [consumption_type] * 10
+                })
+            
+            # Obtener anomalías actualizadas desde el repositorio
+            updated_anomalies = repository.get_anomalies(
+                asset_id=asset_id,
+                consumption_type=consumption_type,
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            # Crear datos corregidos
+            corrected_data = original_data.copy()
+            corrected_data['corrected_value'] = original_data['consumption'].copy()
+            corrected_data['is_corrected'] = False
+            
+            # Aplicar correcciones usando el corrector
+            from utils.anomaly.corrector import AnomalyCorrector
+            corrector = AnomalyCorrector()
+            corrected_data = corrector.correct_counter_resets(corrected_data, updated_anomalies)
+            
+            # Crear resultado
+            result = {
+                'original': original_data,
+                'corrected': corrected_data,
+                'anomalies': updated_anomalies
+            }
+            
+            # Crear gráfico de comparación actualizado
+            updated_chart = html.Div([
+                html.H4("Comparación de Datos Originales vs. Corregidos (Actualizado)", className="mt-4 mb-3"),
+                create_anomaly_comparison_chart(result)
+            ], className="mt-3")
+            
+            return success_message, updated_chart
+            
+        except Exception as e:
+            logger.error(f"Error al reclasificar anomalía: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            error_message = dbc.Alert([
+                html.H4("Error al reclasificar anomalía", className="alert-heading"),
+                html.P(f"Se produjo un error: {str(e)}")
+            ], color="danger", className="mt-3")
+            return error_message, dash.no_update 

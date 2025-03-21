@@ -358,228 +358,120 @@ def generate_monthly_consumption_summary(df, start_date=None, end_date=None):
     
     if df is None or df.empty:
         print("[INFO] generate_monthly_consumption_summary: DataFrame is empty or None")
-        # Crear un DataFrame de ejemplo con datos ficticios para pruebas
-        print("[INFO] generate_monthly_consumption_summary: Creating sample data for testing")
-        
-        # Obtener fechas de inicio y fin
-        if start_date and end_date:
-            start = pd.to_datetime(start_date)
-            end = pd.to_datetime(end_date)
-        else:
-            # Si no se proporcionan fechas, usar los últimos 6 meses
-            end = pd.Timestamp.now()
-            start = end - pd.DateOffset(months=6)
-        
-        # Generar fechas mensuales
-        date_range = pd.date_range(start=start, end=end, freq='MS')
-        
-        # Crear DataFrame de ejemplo
-        sample_data = {
-            'month': [d.strftime('%Y-%m') for d in date_range],
-            'total_consumption': [100 * (i+1) for i in range(len(date_range))],
-            'average_consumption': [50 * (i+1) for i in range(len(date_range))],
-            'min_consumption': [10 * (i+1) for i in range(len(date_range))],
-            'max_consumption': [200 * (i+1) for i in range(len(date_range))],
-            'asset_count': [5 for _ in range(len(date_range))],
-            'date': date_range
-        }
-        
-        sample_df = pd.DataFrame(sample_data)
-        print(f"[INFO] generate_monthly_consumption_summary: Created sample DataFrame with {len(sample_df)} rows")
-        print(f"[INFO] Sample data: {sample_df.head().to_dict()}")
-        
-        return sample_df
+        # Devolver un DataFrame vacío en lugar de datos de ejemplo
+        return pd.DataFrame()
     
-    print(f"[INFO] generate_monthly_consumption_summary: Processing DataFrame with {len(df)} rows")
-    print(f"[INFO] generate_monthly_consumption_summary: DataFrame columns: {df.columns.tolist()}")
-    print(f"[INFO] generate_monthly_consumption_summary: DataFrame sample: {df.head().to_dict() if not df.empty else 'Empty DataFrame'}")
+    # Verificar que las columnas necesarias estén presentes
+    required_columns = ['date', 'consumption', 'asset_id']
+    if not all(col in df.columns for col in required_columns):
+        print(f"[ERROR] generate_monthly_consumption_summary: Missing required columns. Available columns: {df.columns.tolist()}")
+        return pd.DataFrame()
     
-    # Ensure date is datetime
-    df['date'] = pd.to_datetime(df['date'])
+    # Convertir fechas a datetime si son strings
+    if not pd.api.types.is_datetime64_any_dtype(df['date']):
+        df['date'] = pd.to_datetime(df['date'], errors='coerce')
+        # Eliminar filas con fechas inválidas
+        df = df.dropna(subset=['date'])
     
-    # Filter by date range if provided
-    if start_date:
-        start_date_dt = pd.to_datetime(start_date)
-        df = df[df['date'] >= start_date_dt]
-        print(f"[INFO] Filtered by start_date {start_date}: {len(df)} rows remaining")
-    if end_date:
-        end_date_dt = pd.to_datetime(end_date)
-        df = df[df['date'] <= end_date_dt]
-        print(f"[INFO] Filtered by end_date {end_date}: {len(df)} rows remaining")
+    # Convertir consumo a numérico si no lo es
+    if not pd.api.types.is_numeric_dtype(df['consumption']):
+        df['consumption'] = pd.to_numeric(df['consumption'], errors='coerce')
+        # Eliminar filas con consumos inválidos
+        df = df.dropna(subset=['consumption'])
     
-    # Add month column for grouping
+    # Verificar si hay datos después de la limpieza
+    if df.empty:
+        print("[ERROR] generate_monthly_consumption_summary: DataFrame is empty after cleaning")
+        return pd.DataFrame()
+    
+    # Añadir columna de mes
     df['month'] = df['date'].dt.strftime('%Y-%m')
     
-    # Determine which column to use for consumption data
+    # Determinar la columna de consumo
     consumption_column = 'consumption'
-    if consumption_column not in df.columns and 'value' in df.columns:
-        consumption_column = 'value'
-        print(f"[INFO] Using 'value' column instead of 'consumption' column")
+    if 'corrected_value' in df.columns:
+        consumption_column = 'corrected_value'
     
-    print(f"[INFO] Using consumption column: {consumption_column}")
-    print(f"[INFO] Unique values in consumption column: {df[consumption_column].unique().tolist() if consumption_column in df.columns else 'Column not found'}")
-    
+    # Agrupar por mes y calcular estadísticas
     try:
-        # NUEVA IMPLEMENTACIÓN: Calcular consumos reales a partir de lecturas acumuladas
-        if 'asset_id' in df.columns:
-            print(f"[INFO] Calculating real consumption from accumulated readings")
+        # Crear un DataFrame para almacenar los consumos reales mensuales
+        monthly_consumption_df = pd.DataFrame()
+        
+        # Procesar cada activo por separado
+        for asset_id, asset_group in df.groupby('asset_id'):
+            print(f"[INFO] Processing asset_id: {asset_id}")
             
-            # Crear un DataFrame para almacenar los consumos reales
-            real_consumption_df = pd.DataFrame()
+            # Ordenar por fecha para asegurar el cálculo correcto
+            asset_group = asset_group.sort_values('date')
             
-            # Crear un diccionario para almacenar detalles de consumo máximo para depuración
-            max_consumption_details = {
-                'max_consumption': 0,
-                'max_asset_id': None,
-                'max_month': None,
-                'max_first_reading': None,
-                'max_last_reading': None
-            }
+            # Procesar cada mes para este activo
+            monthly_consumptions = []
             
-            # Crear un diccionario para almacenar todos los consumos de marzo
-            march_consumptions = []
-            
-            # Procesar cada activo por separado
-            for asset_id, asset_group in df.groupby('asset_id'):
-                print(f"[DEBUG] Processing asset_id: {asset_id}")
+            for month, month_group in asset_group.groupby('month'):
+                print(f"[INFO] Processing month: {month} for asset_id: {asset_id}")
                 
-                # Ordenar por fecha para asegurar el cálculo correcto
-                asset_group = asset_group.sort_values('date')
+                # Ordenar por fecha dentro del mes
+                month_group = month_group.sort_values('date')
                 
-                # Procesar cada mes para este activo
-                monthly_consumptions = []
+                # Obtener primera y última lectura del mes
+                first_reading = month_group[consumption_column].iloc[0]
+                last_reading = month_group[consumption_column].iloc[-1]
                 
-                for month, month_group in asset_group.groupby('month'):
-                    print(f"[DEBUG] Processing month: {month} for asset_id: {asset_id}")
+                # Calcular consumo mensual (última lectura - primera lectura)
+                try:
+                    # Convertir a números si son strings
+                    if isinstance(first_reading, str):
+                        first_reading = float(first_reading)
+                    if isinstance(last_reading, str):
+                        last_reading = float(last_reading)
                     
-                    # Ordenar por fecha dentro del mes
-                    month_group = month_group.sort_values('date')
+                    # Calcular el consumo real
+                    real_consumption = last_reading - first_reading
                     
-                    # Obtener primera y última lectura del mes
-                    first_reading = month_group[consumption_column].iloc[0]
-                    last_reading = month_group[consumption_column].iloc[-1]
-                    
-                    # Calcular consumo mensual (última lectura - primera lectura)
-                    monthly_consumption = last_reading - first_reading
-                    
-                    print(f"[DEBUG] Asset: {asset_id}, Month: {month}, First reading: {first_reading}, Last reading: {last_reading}, Consumption: {monthly_consumption}")
-                    
-                    # Almacenar consumos de marzo para análisis detallado
-                    if month == '2025-03':
-                        march_consumptions.append({
-                            'asset_id': asset_id,
-                            'consumption': monthly_consumption,
-                            'first_reading': first_reading,
-                            'last_reading': last_reading
-                        })
-                    
-                    # Verificar si este es el consumo máximo hasta ahora
-                    if monthly_consumption > max_consumption_details['max_consumption']:
-                        max_consumption_details['max_consumption'] = monthly_consumption
-                        max_consumption_details['max_asset_id'] = asset_id
-                        max_consumption_details['max_month'] = month
-                        max_consumption_details['max_first_reading'] = first_reading
-                        max_consumption_details['max_last_reading'] = last_reading
+                    # Si el consumo es negativo (posible error o reinicio), usar el último valor
+                    if real_consumption < 0:
+                        print(f"[WARNING] Negative consumption detected for asset {asset_id}, month {month}: {real_consumption}. Using last reading: {last_reading}")
+                        real_consumption = last_reading
                     
                     # Guardar el resultado
                     monthly_consumptions.append({
                         'asset_id': asset_id,
                         'month': month,
-                        'real_consumption': monthly_consumption,
+                        'real_consumption': real_consumption,
                         'first_reading': first_reading,
                         'last_reading': last_reading
                     })
-                
-                # Añadir los consumos mensuales de este activo al DataFrame de consumos reales
-                if monthly_consumptions:
-                    asset_consumption_df = pd.DataFrame(monthly_consumptions)
-                    real_consumption_df = pd.concat([real_consumption_df, asset_consumption_df])
-            
-            # Imprimir detalles del consumo máximo para depuración
-            print(f"[DEBUG] Max consumption details: {max_consumption_details}")
-            
-            # Analizar consumos de marzo en detalle
-            if march_consumptions:
-                march_df = pd.DataFrame(march_consumptions)
-                march_df = march_df.sort_values('consumption', ascending=False)
-                print("\n[DEBUG] ========== MARCH CONSUMPTIONS (SORTED) ==========")
-                for _, row in march_df.iterrows():
-                    print(f"[DEBUG] Asset: {row['asset_id']}, Consumption: {row['consumption']}, First: {row['first_reading']}, Last: {row['last_reading']}")
-                print("[DEBUG] ================================================\n")
-                
-                # Verificar si hay valores extremadamente altos
-                if len(march_df) > 0:
-                    max_march = march_df.iloc[0]
-                    if max_march['consumption'] > 1000:  # Umbral arbitrario para valores sospechosos
-                        print(f"[WARNING] Extremely high consumption detected for asset {max_march['asset_id']}: {max_march['consumption']}")
-                        print(f"[WARNING] This might be an error in the data or calculation")
-            
-            # Si no hay consumos reales calculados, usar el método anterior
-            if real_consumption_df.empty:
-                print(f"[INFO] No real consumption calculated, using previous method")
-                monthly_asset_consumption = df.groupby(['month', 'asset_id'])[consumption_column].sum().reset_index()
-                
-                monthly_summary = monthly_asset_consumption.groupby('month').agg(
-                    total_consumption=(consumption_column, 'sum'),
-                    average_consumption=(consumption_column, 'mean'),
-                    min_consumption=(consumption_column, 'min'),
-                    max_consumption=(consumption_column, 'max'),
-                    asset_count=('asset_id', 'nunique')
-                ).reset_index()
-            else:
-                # Calcular estadísticas sobre los consumos reales
-                print(f"[INFO] Calculating statistics on real consumption")
-                
-                # Imprimir los consumos reales para depuración
-                print(f"[DEBUG] Real consumption DataFrame:")
-                for month, month_group in real_consumption_df.groupby('month'):
-                    print(f"[DEBUG] Month: {month}")
-                    for _, row in month_group.iterrows():
-                        print(f"[DEBUG]   Asset: {row['asset_id']}, Consumption: {row['real_consumption']}, First: {row['first_reading']}, Last: {row['last_reading']}")
                     
-                    # Encontrar el máximo para este mes
-                    if not month_group.empty:
-                        max_row = month_group.loc[month_group['real_consumption'].idxmax()]
-                        print(f"[DEBUG]   MAX for {month}: Asset: {max_row['asset_id']}, Consumption: {max_row['real_consumption']}, First: {max_row['first_reading']}, Last: {max_row['last_reading']}")
-                
-                monthly_summary = real_consumption_df.groupby('month').agg(
-                    total_consumption=('real_consumption', 'sum'),
-                    average_consumption=('real_consumption', 'mean'),
-                    min_consumption=('real_consumption', 'min'),
-                    max_consumption=('real_consumption', 'max'),
-                    asset_count=('asset_id', 'nunique')
-                ).reset_index()
-                
-                # Imprimir el resumen mensual para depuración
-                print(f"[DEBUG] Monthly summary after aggregation:")
-                for _, row in monthly_summary.iterrows():
-                    print(f"[DEBUG]   Month: {row['month']}, Total: {row['total_consumption']}, Avg: {row['average_consumption']}, Min: {row['min_consumption']}, Max: {row['max_consumption']}, Assets: {row['asset_count']}")
-                
-                # Verificar específicamente el valor máximo para marzo
-                march_summary = monthly_summary[monthly_summary['month'] == '2025-03']
-                if not march_summary.empty:
-                    march_max = march_summary['max_consumption'].iloc[0]
-                    print(f"[DEBUG] March max consumption from summary: {march_max}")
-                    
-                    # Verificar si coincide con el máximo calculado manualmente
-                    if march_consumptions:
-                        march_df = pd.DataFrame(march_consumptions)
-                        manual_max = march_df['consumption'].max()
-                        print(f"[DEBUG] March max consumption calculated manually: {manual_max}")
-                        
-                        if abs(march_max - manual_max) > 0.01:  # Permitir pequeñas diferencias por redondeo
-                            print(f"[ERROR] Discrepancy detected in March max consumption!")
-                            print(f"[ERROR] Summary value: {march_max}, Manual calculation: {manual_max}")
-        else:
-            # Si no hay columna asset_id, usar el método anterior
-            print(f"[INFO] No asset_id column found, using previous method")
+                    print(f"[INFO] Asset: {asset_id}, Month: {month}, First reading: {first_reading}, Last reading: {last_reading}, Consumption: {real_consumption}")
+                except (ValueError, TypeError) as e:
+                    print(f"[ERROR] Error calculating consumption for asset {asset_id}, month {month}: {str(e)}")
+            
+            # Añadir los consumos mensuales de este activo al DataFrame de consumos reales
+            if monthly_consumptions:
+                asset_consumption_df = pd.DataFrame(monthly_consumptions)
+                monthly_consumption_df = pd.concat([monthly_consumption_df, asset_consumption_df])
+        
+        # Verificar si hay consumos reales calculados
+        if monthly_consumption_df.empty:
+            print(f"[WARNING] No real consumption calculated, using aggregation method")
+            # Usar método de agregación como fallback
             monthly_summary = df.groupby('month').agg(
                 total_consumption=(consumption_column, 'sum'),
                 average_consumption=(consumption_column, 'mean'),
                 min_consumption=(consumption_column, 'min'),
-                max_consumption=(consumption_column, 'max')
+                max_consumption=(consumption_column, 'max'),
+                asset_count=('asset_id', 'nunique')
             ).reset_index()
-            monthly_summary['asset_count'] = 1  # Default value
+        else:
+            # Calcular estadísticas sobre los consumos reales
+            print(f"[INFO] Calculating statistics on real consumption")
+            monthly_summary = monthly_consumption_df.groupby('month').agg(
+                total_consumption=('real_consumption', 'sum'),
+                average_consumption=('real_consumption', 'mean'),
+                min_consumption=('real_consumption', 'min'),
+                max_consumption=('real_consumption', 'max'),
+                asset_count=('asset_id', 'nunique')
+            ).reset_index()
         
         # Add date column for sorting
         monthly_summary['date'] = pd.to_datetime(monthly_summary['month'] + '-01')
@@ -587,48 +479,14 @@ def generate_monthly_consumption_summary(df, start_date=None, end_date=None):
         # Sort by date
         monthly_summary = monthly_summary.sort_values('date')
         
-        print(f"[INFO] Generated monthly summary with {len(monthly_summary)} rows")
-        print(f"[INFO] Monthly summary columns: {monthly_summary.columns.tolist() if not monthly_summary.empty else 'Empty DataFrame'}")
-        if not monthly_summary.empty:
-            print(f"[INFO] Monthly summary sample: {monthly_summary.head().to_dict()}")
-        
+        print(f"[INFO] generate_monthly_consumption_summary: Generated monthly summary with {len(monthly_summary)} rows")
         return monthly_summary
-    
+        
     except Exception as e:
-        print(f"[ERROR] Error in generate_monthly_consumption_summary: {str(e)}")
+        print(f"[ERROR] generate_monthly_consumption_summary: {str(e)}")
         import traceback
         print(traceback.format_exc())
-        
-        # En caso de error, crear un DataFrame de ejemplo con datos ficticios
-        print("[INFO] generate_monthly_consumption_summary: Creating sample data after error")
-        
-        # Obtener fechas de inicio y fin
-        if start_date and end_date:
-            start = pd.to_datetime(start_date)
-            end = pd.to_datetime(end_date)
-        else:
-            # Si no se proporcionan fechas, usar los últimos 6 meses
-            end = pd.Timestamp.now()
-            start = end - pd.DateOffset(months=6)
-        
-        # Generar fechas mensuales
-        date_range = pd.date_range(start=start, end=end, freq='MS')
-        
-        # Crear DataFrame de ejemplo
-        sample_data = {
-            'month': [d.strftime('%Y-%m') for d in date_range],
-            'total_consumption': [100 * (i+1) for i in range(len(date_range))],
-            'average_consumption': [50 * (i+1) for i in range(len(date_range))],
-            'min_consumption': [10 * (i+1) for i in range(len(date_range))],
-            'max_consumption': [200 * (i+1) for i in range(len(date_range))],
-            'asset_count': [5 for _ in range(len(date_range))],
-            'date': date_range
-        }
-        
-        sample_df = pd.DataFrame(sample_data)
-        print(f"[INFO] generate_monthly_consumption_summary: Created sample DataFrame with {len(sample_df)} rows after error")
-        
-        return sample_df
+        return pd.DataFrame()
 
 def generate_calculation_metadata(df, monthly_summary):
     """
@@ -714,12 +572,22 @@ def generate_calculation_metadata(df, monthly_summary):
                             if len(asset_group) >= 2:
                                 first_reading = asset_group[consumption_column].iloc[0]
                                 last_reading = asset_group[consumption_column].iloc[-1]
-                                real_consumption = last_reading - first_reading
                                 
-                                # Actualizar si es el mínimo
-                                if min_consumption is None or real_consumption < min_consumption:
-                                    min_consumption = real_consumption
-                                    min_asset = asset_id
+                                # Convertir a números si son strings
+                                try:
+                                    if isinstance(first_reading, str):
+                                        first_reading = float(first_reading)
+                                    if isinstance(last_reading, str):
+                                        last_reading = float(last_reading)
+                                    
+                                    real_consumption = last_reading - first_reading
+                                    
+                                    # Actualizar si es el mínimo
+                                    if min_consumption is None or real_consumption < min_consumption:
+                                        min_consumption = real_consumption
+                                        min_asset = asset_id
+                                except (ValueError, TypeError) as e:
+                                    print(f"Error al convertir lecturas a números para el activo {asset_id}: {str(e)}")
                     except Exception as e:
                         print(f"Error al calcular activo con consumo mínimo: {str(e)}")
                     
@@ -756,12 +624,22 @@ def generate_calculation_metadata(df, monthly_summary):
                             if len(asset_group) >= 2:
                                 first_reading = asset_group[consumption_column].iloc[0]
                                 last_reading = asset_group[consumption_column].iloc[-1]
-                                real_consumption = last_reading - first_reading
                                 
-                                # Actualizar si es el máximo
-                                if max_consumption is None or real_consumption > max_consumption:
-                                    max_consumption = real_consumption
-                                    max_asset = asset_id
+                                # Convertir a números si son strings
+                                try:
+                                    if isinstance(first_reading, str):
+                                        first_reading = float(first_reading)
+                                    if isinstance(last_reading, str):
+                                        last_reading = float(last_reading)
+                                    
+                                    real_consumption = last_reading - first_reading
+                                    
+                                    # Actualizar si es el máximo
+                                    if max_consumption is None or real_consumption > max_consumption:
+                                        max_consumption = real_consumption
+                                        max_asset = asset_id
+                                except (ValueError, TypeError) as e:
+                                    print(f"Error al convertir lecturas a números para el activo {asset_id}: {str(e)}")
                     except Exception as e:
                         print(f"Error al calcular activo con consumo máximo: {str(e)}")
                     

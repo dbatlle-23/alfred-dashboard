@@ -394,7 +394,7 @@ def regenerate_readings(asset_id, consumption_type, project_id, token_data, mont
         project_folder = ensure_project_folder_exists(project_id)
         
         # Nombre del archivo de lecturas
-        file_name = f"daily_readings_{asset_id}_{tag}.csv"
+        file_name = f"daily_readings_{asset_id}__{tag}.csv"
         file_path = os.path.join(project_folder, file_name)
         
         # Verificar si el archivo existe y limpiar errores si es necesario

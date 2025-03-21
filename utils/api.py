@@ -8,6 +8,10 @@ from datetime import datetime, timedelta
 import os
 from tqdm import tqdm
 import pandas as pd
+import re
+import pickle
+import glob
+import shutil
 
 logger = get_logger(__name__)
 
@@ -660,7 +664,16 @@ def get_sensors_with_tags(asset_id, token=None):
 def ensure_project_folder_exists(project_id):
     """
     Asegura que exista una carpeta para un proyecto dentro del directorio analyzed_data.
+    Valida el formato del project_id para mantener una estructura de carpetas coherente.
     """
+    # Verificar si el project_id tiene formato incorrecto (comienza con "asset_")
+    if project_id and isinstance(project_id, str) and project_id.startswith("asset_"):
+        logger.warning(f"Se detectó un formato incorrecto de project_id: {project_id}")
+        # Extraer el ID del asset del project_id incorrecto
+        asset_id = project_id.replace("asset_", "")
+        logger.info(f"Usando 'general' como project_id en lugar de asset_{asset_id}")
+        project_id = "general"  # Usar una carpeta general para todos los assets sin proyecto
+
     logger.info(f"Asegurando que exista una carpeta para el proyecto {project_id} dentro del directorio analyzed_data.")
     base_folder = "data/analyzed_data"
     project_folder = os.path.join(base_folder, project_id)
@@ -697,7 +710,7 @@ def process_asset_tags(asset_id, tags, project_folder, token=None):
     """
     for tag_name in tags:
         # Construir el nombre del archivo esperado
-        file_name = f"daily_readings_{asset_id}_{tag_name}.csv"
+        file_name = f"daily_readings_{asset_id}__{tag_name}.csv"
         file_path = os.path.join(project_folder, file_name)
 
         # Si no existe, procesar las lecturas
@@ -747,6 +760,7 @@ def get_sensor_value_for_date(asset_id, device_id, sensor_id, gateway_id, date, 
     headers = get_auth_headers(token)
     
     logger.debug(f"Obteniendo valor para sensor (device_id: {device_id}, sensor_id: {sensor_id}, gateway_id: {gateway_id}) en fecha {date} con token: {token[:10]}...")
+    logger.debug(f"Asegúrate de que la fecha esté en formato MM-DD-YYYY: {date}")
 
     try:
         response = requests.get(url, headers=headers, params=params)
@@ -755,7 +769,7 @@ def get_sensor_value_for_date(asset_id, device_id, sensor_id, gateway_id, date, 
             if data:
                 last_entry = data[-1]
                 value = last_entry.get("v", "Sin datos disponibles")
-                timestamp = datetime.fromtimestamp(last_entry.get("ts") / 1000).strftime("%Y-%m-%d")
+                timestamp = last_entry.get("ts")
                 return value, timestamp
             else:
                 # No hay datos disponibles para la fecha
@@ -783,9 +797,22 @@ def get_daily_readings_for_tag(asset_id, tag_name, project_folder, token=None):
         project_folder (str): Ruta a la carpeta del proyecto
         token (str, optional): Token JWT para autenticación
     """
-    # Nombre del archivo donde se guardan las lecturas
-    file_name = f"daily_readings_{asset_id}_{tag_name}.csv"
+    # Nombre del archivo donde se guardan las lecturas (con doble guion bajo entre asset_id y tag_name)
+    file_name = f"daily_readings_{asset_id}__{tag_name}.csv"  # Notar el doble guion bajo
     file_path = os.path.join(project_folder, file_name)
+    
+    # También verificar si existe archivo con formato antiguo (un solo guion bajo)
+    old_format_file_name = f"daily_readings_{asset_id}__{tag_name}.csv"
+    old_format_file_path = os.path.join(project_folder, old_format_file_name)
+    
+    # Si existe el archivo con formato antiguo pero no el nuevo, renombrar
+    if os.path.exists(old_format_file_path) and not os.path.exists(file_path):
+        try:
+            import shutil
+            shutil.copy2(old_format_file_path, file_path)
+            logger.info(f"Archivo migrado de formato antiguo a nuevo: {old_format_file_path} -> {file_path}")
+        except Exception as e:
+            logger.error(f"Error al migrar archivo de formato antiguo a nuevo: {str(e)}")
     
     # Verificar si el archivo existe y limpiar errores si es necesario
     if os.path.exists(file_path):
@@ -868,7 +895,7 @@ def get_daily_readings_with_sensor_params(asset_id, gateway_id, device_id, senso
     end_date = datetime.now()
     
     # Nombre del archivo donde se guardan las lecturas
-    file_name = f"daily_readings_{asset_id}_{tag_name}.csv"
+    file_name = f"daily_readings_{asset_id}__{tag_name}.csv"
     file_path = os.path.join(project_folder, file_name)
     
     # Verificar si el archivo ya existe y cargarlo
@@ -941,9 +968,11 @@ def get_daily_readings_with_sensor_params(asset_id, gateway_id, device_id, senso
         logger.info(f"No hay nuevas lecturas para actualizar. Última fecha registrada: {start_date.strftime('%Y-%m-%d')}")
         return existing_data
     
-    # Formatear fechas para la API
+    # Formatear fechas para la API - Formato MM-DD-YYYY que espera la API
     from_date = start_date.strftime("%m-%d-%Y")
     until_date = end_date.strftime("%m-%d-%Y")
+    
+    logger.debug(f"Fechas formateadas para la API: from_date={from_date}, until_date={until_date} (formato MM-DD-YYYY)")
     
     # Construir la URL para obtener las lecturas
     url = f"{BASE_URL}/data/assets/time-series/{asset_id}"
@@ -972,6 +1001,9 @@ def get_daily_readings_with_sensor_params(asset_id, gateway_id, device_id, senso
     
     # Realizar la solicitud a la API
     try:
+        logger.info(f"Solicitando datos a la API para el período {from_date} a {until_date}")
+        logger.debug(f"URL: {url}")
+        logger.debug(f"Parámetros completos: {params}")
         response = requests.get(url, headers=headers, params=params)
         
         if response.status_code == 200:
@@ -1191,3 +1223,387 @@ def get_daily_readings_for_year_multiple_tags_project_parallel(project_id, tags,
         message = f"Error al procesar lecturas diarias: {str(e)}"
         logger.error(message)
         return {"success": False, "message": message}
+
+def migrate_readings_file_if_needed(asset_id, tag_name, project_id="general"):
+    """
+    Migra un archivo de lectura desde la estructura antigua a la nueva si existe.
+    
+    Args:
+        asset_id (str): ID del asset
+        tag_name (str): Nombre del tag
+        project_id (str): ID del proyecto destino (por defecto "general")
+        
+    Returns:
+        bool: True si se migró un archivo, False si no era necesario
+    """
+    # Rutas de carpetas en estructura antigua y nueva
+    old_project_folder = os.path.join("data/analyzed_data", f"asset_{asset_id}")
+    new_project_folder = os.path.join("data/analyzed_data", project_id)
+    
+    # Nombre del archivo que buscamos en la estructura antigua
+    old_file_patterns = [
+        f"daily_readings_{asset_id}_{tag_name}.csv",  # Sin mes en el nombre
+        f"daily_readings_{asset_id}_{tag_name}_*.csv"  # Con mes en el nombre
+    ]
+    
+    # Nombre del archivo en la estructura nueva
+    new_file_name = f"daily_readings_{asset_id}__{tag_name}.csv"
+    new_file_path = os.path.join(new_project_folder, new_file_name)
+    
+    # Verificar si la carpeta antigua existe
+    if os.path.exists(old_project_folder):
+        # Buscar archivo en la carpeta antigua
+        found_files = []
+        for pattern in old_file_patterns:
+            found_files.extend(glob.glob(os.path.join(old_project_folder, pattern)))
+        
+        if found_files:
+            # Asegurar que existe la carpeta de destino
+            os.makedirs(new_project_folder, exist_ok=True)
+            
+            # Si hay varios archivos (con meses distintos), combinarlos
+            if len(found_files) > 1:
+                logger.info(f"Encontrados {len(found_files)} archivos para {asset_id}/{tag_name} en estructura antigua. Combinando.")
+                combined_data = pd.DataFrame()
+                
+                for file_path in found_files:
+                    try:
+                        data = pd.read_csv(file_path)
+                        combined_data = pd.concat([combined_data, data], ignore_index=True)
+                    except Exception as e:
+                        logger.error(f"Error al leer archivo {file_path} durante migración: {str(e)}")
+                
+                # Eliminar duplicados si hay
+                if 'date' in combined_data.columns:
+                    combined_data['date'] = pd.to_datetime(combined_data['date'])
+                    combined_data = combined_data.sort_values('date').groupby('date', as_index=False).last()
+                    combined_data['date'] = combined_data['date'].dt.strftime('%Y-%m-%d')
+                
+                # Guardar en nueva ubicación
+                combined_data.to_csv(new_file_path, index=False)
+                logger.info(f"Archivo combinado guardado en nueva estructura: {new_file_path}")
+            else:
+                # Si solo hay un archivo, moverlo directamente
+                old_file_path = found_files[0]
+                shutil.copy2(old_file_path, new_file_path)
+                logger.info(f"Archivo migrado de {old_file_path} a {new_file_path}")
+            
+            return True
+    
+    return False
+
+def get_daily_readings_for_tag_monthly(asset_id, tag, month, project_folder, token=None):
+    """
+    Obtiene lecturas diarias para un tag y mes específico utilizando los parámetros del sensor.
+    Si se solicita el mes actual, solo se obtendrán datos hasta el día de hoy (no incluye fechas futuras).
+    Guarda los datos en formato CSV en la estructura estándar del proyecto.
+    
+    Args:
+        asset_id (str): ID del asset para obtener datos
+        tag (dict): Diccionario con las propiedades device_id, sensor_id y gateway_id del sensor
+        month (str): Mes en formato YYYY-MM (por ejemplo, '2024-01' para enero 2024)
+                    Este valor se utilizará para calcular el primer y último día del mes
+        project_folder (str): Carpeta del proyecto donde se guardarán los datos
+        token (str, opcional): Token JWT para autenticación
+        
+    Returns:
+        pandas.DataFrame: DataFrame con los datos de lecturas diarias o None si hay un error
+    """
+    # Extraer el ID del proyecto del project_folder
+    project_id = os.path.basename(project_folder)
+    
+    # Validar formato del mes
+    if not month or not re.match(r'^\d{4}-\d{2}$', month):
+        logger.error(f"Formato de mes inválido: {month}. Debe ser YYYY-MM")
+        return None
+        
+    # Extraer el sensor del tag
+    device_id = tag.get('device_id')
+    sensor_id = tag.get('sensor_id')
+    gateway_id = tag.get('gateway_id')
+    tag_name = tag.get('tag_name', f"{device_id}_{sensor_id}_{gateway_id}")
+    
+    # Verificar que los parámetros del sensor están presentes
+    if not all([device_id, sensor_id, gateway_id]):
+        logger.error(f"Parámetros de sensor incompletos: device_id={device_id}, sensor_id={sensor_id}, gateway_id={gateway_id}")
+        return None
+    
+    # Verificar si el mes solicitado es futuro (no hay datos disponibles)
+    try:
+        year, month_num = month.split('-')
+        current_date = datetime.now()
+        request_date = datetime(int(year), int(month_num), 1)
+        
+        if request_date > current_date:
+            logger.warning(f"Se solicitaron datos para un mes futuro: {month}. No hay datos disponibles.")
+            return pd.DataFrame(columns=['date', 'value', 'timestamp'])
+    except Exception as e:
+        logger.error(f"Error al validar la fecha del mes: {str(e)}")
+    
+    # Nombre del archivo donde se guardan las lecturas (usando el mismo patrón que get_daily_readings_for_tag)
+    file_name = f"daily_readings_{asset_id}__{tag_name}.csv"
+    file_path = os.path.join(project_folder, file_name)
+    
+    # Si el archivo no existe en la nueva estructura, intentar migrarlo desde la antigua
+    if not os.path.exists(file_path):
+        logger.debug(f"Archivo {file_path} no encontrado. Verificando estructura antigua...")
+        was_migrated = migrate_readings_file_if_needed(asset_id, tag_name, project_id)
+        if was_migrated:
+            logger.info(f"Archivo migrado desde estructura antigua para {asset_id}/{tag_name}")
+    
+    # Verificar si el archivo existe y limpiar errores si es necesario
+    if os.path.exists(file_path):
+        logger.info(f"Verificando y limpiando errores en el archivo {file_name}")
+        clean_data, error_dates = clean_readings_file_errors(file_path)
+        
+        # Si el archivo existe, verificar si hay datos actualizados
+        try:
+            existing_data = pd.read_csv(file_path)
+            
+            # Convertir la columna de fecha a datetime
+            if 'date' in existing_data.columns:
+                existing_data["date"] = pd.to_datetime(existing_data["date"], errors='coerce')
+                
+                # Si es el mes actual, verificar si es necesario actualizar los datos
+                if int(year) == current_date.year and int(month_num) == current_date.month:
+                    if not existing_data.empty:
+                        latest_date = existing_data['date'].max()
+                        today = pd.to_datetime(current_date.strftime('%Y-%m-%d'))
+                        
+                        if latest_date >= today and not error_dates:
+                            logger.debug(f"Los datos están actualizados hasta hoy ({today.strftime('%Y-%m-%d')})")
+                            return existing_data
+                        else:
+                            if error_dates:
+                                logger.debug(f"Se encontraron {len(error_dates)} fechas con errores que se intentarán actualizar.")
+                            else:
+                                logger.debug(f"Los datos existentes llegan hasta {latest_date.strftime('%Y-%m-%d')}, actualizando hasta hoy ({today.strftime('%Y-%m-%d')})")
+                else:
+                    # Para meses pasados, si no hay fechas con errores, no es necesario actualizar
+                    if not error_dates and 'date' in existing_data.columns:
+                        # Filtrar solo datos del mes solicitado
+                        month_mask = (existing_data['date'].dt.year == int(year)) & (existing_data['date'].dt.month == int(month_num))
+                        month_data = existing_data[month_mask]
+                        if not month_data.empty:
+                            logger.debug(f"Ya existen datos para el mes {month} y no hay errores que corregir.")
+                            return month_data
+            
+            # Si hay errores o no se puede determinar la última fecha, continuar con la obtención de nuevos datos
+        except Exception as e:
+            logger.error(f"Error al procesar el archivo existente {file_path}: {str(e)}")
+            # Si hay un error al cargar, continuar con la obtención de nuevos datos
+    
+    # Obtener lecturas desde la API (para el mes específico)
+    readings_df = get_daily_readings_with_sensor_params_monthly(
+        asset_id, device_id, sensor_id, gateway_id, month, token
+    )
+    
+    # Procesar y guardar los datos si se obtuvieron correctamente
+    if readings_df is not None and not readings_df.empty:
+        try:
+            # Convertir la columna de fecha a string en formato YYYY-MM-DD si existe
+            if 'date' in readings_df.columns:
+                if pd.api.types.is_datetime64_any_dtype(readings_df['date']):
+                    readings_df['date'] = readings_df['date'].dt.strftime('%Y-%m-%d')
+            
+            # Si hay datos existentes, combinarlos con los nuevos
+            if os.path.exists(file_path):
+                try:
+                    existing_data = pd.read_csv(file_path)
+                    
+                    # Convertir las fechas a datetime para comparación
+                    if 'date' in existing_data.columns and 'date' in readings_df.columns:
+                        existing_data['date'] = pd.to_datetime(existing_data['date'])
+                        readings_df['date'] = pd.to_datetime(readings_df['date'])
+                        
+                        # Eliminar fechas duplicadas (preferir nuevas lecturas)
+                        existing_data = existing_data[~existing_data['date'].isin(readings_df['date'])]
+                        
+                        # Combinar y ordenar por fecha
+                        combined_data = pd.concat([existing_data, readings_df], ignore_index=True)
+                        combined_data = combined_data.sort_values('date')
+                        
+                        # Convertir las fechas de nuevo a string
+                        combined_data['date'] = combined_data['date'].dt.strftime('%Y-%m-%d')
+                        
+                        # Guardar los datos combinados
+                        combined_data.to_csv(file_path, index=False)
+                        logger.info(f"Datos actualizados guardados en {file_path}. Total: {len(combined_data)} registros.")
+                        
+                        # Devolver los datos combinados
+                        return combined_data
+                except Exception as e:
+                    logger.error(f"Error al combinar datos existentes con nuevos datos: {str(e)}")
+            
+            # Si no hay datos existentes o hubo error en la combinación, guardar solo los nuevos datos
+            readings_df.to_csv(file_path, index=False)
+            logger.info(f"Datos actualizados guardados en {file_path}. Total: {len(readings_df)} registros.")
+        except Exception as e:
+            logger.error(f"Error al guardar datos en {file_path}: {str(e)}")
+    else:
+        logger.warning(f"No se obtuvieron datos para el mes {month}.")
+        # Si no hay datos nuevos pero había existentes, devolver los existentes
+        if os.path.exists(file_path):
+            try:
+                existing_data = pd.read_csv(file_path)
+                # Filtrar solo datos del mes solicitado si existe la columna de fecha
+                if 'date' in existing_data.columns:
+                    existing_data['date'] = pd.to_datetime(existing_data['date'])
+                    month_mask = (existing_data['date'].dt.year == int(year)) & (existing_data['date'].dt.month == int(month_num))
+                    month_data = existing_data[month_mask]
+                    return month_data
+                return existing_data
+            except Exception:
+                pass
+    
+    return readings_df
+
+def get_daily_readings_with_sensor_params_monthly(asset_id, device_id, sensor_id, gateway_id, month, token=None):
+    """
+    Obtiene lecturas diarias para un sensor específico limitado a un mes concreto.
+    Si se solicita el mes actual, la fecha final será el día actual en lugar del último día del mes.
+    Procesa los datos en formato compatible con get_daily_readings_with_sensor_params.
+    
+    Args:
+        asset_id (str): ID del asset
+        device_id (str): ID del dispositivo
+        sensor_id (str): ID del sensor
+        gateway_id (str): ID del gateway
+        month (str): Mes en formato YYYY-MM (por ejemplo, '2024-01' para enero 2024)
+        token (str, opcional): Token JWT para autenticación
+        
+    Returns:
+        pandas.DataFrame: DataFrame con los datos de lecturas diarias o None si hay un error
+    """
+    # Obtener el token si no se proporciona
+    if not token:
+        token = auth_service.get_token()
+        
+    if not token:
+        logger.error("No se pudo obtener un token JWT válido para consultar datos")
+        return None
+    
+    # Extraer el año y mes del parámetro month (formato YYYY-MM)
+    try:
+        year, month_num = month.split('-')
+        year = int(year)
+        month_num = int(month_num)
+    except ValueError:
+        logger.error(f"Formato de mes inválido: {month}. Debe ser YYYY-MM")
+        return None
+    
+    # Calcular el primer y último día del mes
+    import calendar
+    from datetime import datetime
+    
+    # Obtener el número de días en el mes
+    _, last_day = calendar.monthrange(year, month_num)
+    
+    # Crear objeto de fecha para el primer día del mes
+    start_date = datetime(year, month_num, 1)
+    
+    # Obtener la fecha actual
+    current_date = datetime.now()
+    
+    # Para el mes actual, usar la fecha actual como fecha final
+    if year == current_date.year and month_num == current_date.month:
+        end_date = current_date
+        logger.debug(f"Mes actual detectado: limitando fecha final al día de hoy ({current_date.strftime('%Y-%m-%d')})")
+    else:
+        # Para meses pasados, usar el último día del mes
+        end_date = datetime(year, month_num, last_day)
+    
+    # Validar que el rango de fechas es válido
+    if start_date > current_date:
+        logger.warning(f"Se solicitaron datos para un mes futuro: {month}. No hay datos disponibles.")
+        return pd.DataFrame(columns=['date', 'value', 'timestamp'])
+    
+    # Formatear las fechas en el formato esperado por la API (MM-DD-YYYY)
+    from_date = start_date.strftime("%m-%d-%Y")
+    until_date = end_date.strftime("%m-%d-%Y")
+    
+    logger.debug(f"Obteniendo lecturas para el período: {from_date} hasta {until_date}")
+    
+    # URL para la API
+    url = f'{BASE_URL}/data/assets/time-series/{asset_id}'
+    
+    # Parámetros para la solicitud
+    params = {
+        'from': from_date,
+        'until': until_date,
+        'sensor': '',
+        'device_id': device_id,
+        'sensor_id': sensor_id,
+        'gateway_id': gateway_id,
+    }
+    
+    # Obtener los datos de usuario del token para extraer el email
+    try:
+        user_data = auth_service.get_user_data_from_token(token)
+        if user_data and 'email' in user_data:
+            params['email'] = user_data['email']
+            logger.debug(f"Añadiendo email al request: {user_data['email']}")
+        else:
+            logger.warning("No se encontró email en el token JWT para añadir a la solicitud")
+    except Exception as e:
+        logger.warning(f"Error al intentar extraer email del token: {str(e)}")
+    
+    # Registrar la URL y los parámetros completos
+    logger.debug(f"URL para obtener lecturas: {url}")
+    logger.debug(f"Parámetros completos: {params}")
+    
+    # Obtener los encabezados de autenticación
+    headers = get_auth_headers(token)
+    
+    try:
+        # Hacer la solicitud a la API
+        response = requests.get(url, params=params, headers=headers)
+        
+        # Verificar si la solicitud fue exitosa
+        if response.status_code == 200:
+            # Procesar la respuesta
+            data = response.json().get('data', [])
+            if not data:
+                logger.warning(f"No se encontraron datos para el sensor (device_id: {device_id}, sensor_id: {sensor_id}) en el período {from_date} a {until_date}")
+                return pd.DataFrame(columns=['date', 'value', 'timestamp'])
+            
+            # Procesar las lecturas de manera similar a get_daily_readings_with_sensor_params
+            processed_readings = []
+            for reading in data:
+                timestamp = reading.get("ts")
+                value = reading.get("v")
+                
+                if timestamp and value is not None:
+                    # Convertir el timestamp (segundos) a fecha, igual que en get_daily_readings_with_sensor_params
+                    date = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
+                    processed_readings.append({
+                        "date": date,
+                        "value": value,
+                        "timestamp": timestamp
+                    })
+            
+            # Crear DataFrame con las lecturas procesadas
+            readings_df = pd.DataFrame(processed_readings)
+            if readings_df.empty:
+                logger.warning("No se pudieron procesar las lecturas obtenidas")
+                return pd.DataFrame(columns=['date', 'value', 'timestamp'])
+            
+            # Convertir la columna de fecha a datetime
+            readings_df["date"] = pd.to_datetime(readings_df["date"])
+            
+            # Agrupar por fecha y tomar el último valor de cada día
+            readings_df = readings_df.sort_values("timestamp").groupby("date").last().reset_index()
+            
+            logger.info(f"Se obtuvieron {len(readings_df)} lecturas para el sensor (device_id: {device_id}, sensor_id: {sensor_id}) en el período {from_date} a {until_date}")
+            return readings_df
+        else:
+            # Manejar error
+            try:
+                error_detail = response.json()
+                logger.error(f"Error al obtener lecturas: {response.status_code} - {json.dumps(error_detail)}")
+            except:
+                logger.error(f"Error al obtener lecturas: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        logger.error(f"Error al obtener lecturas: {str(e)}")
+        return None

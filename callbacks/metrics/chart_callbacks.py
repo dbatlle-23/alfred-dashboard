@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import numpy as np
 import html
+import os
 
 from utils.api import get_daily_readings_for_year_multiple_tags_project_parallel
 from utils.metrics.data_processing import (
@@ -78,6 +79,26 @@ def register_chart_callbacks(app):
             
             # Cargar datos desde archivos CSV locales
             print(f"[INFO METRICS] load_data - Cargando datos desde archivos CSV para proyecto {project_id}, tags {consumption_tags}")
+            
+            # Verificar que la ruta de datos existe
+            base_path = "data/analyzed_data"
+            if not os.path.exists(base_path):
+                print(f"[ERROR METRICS] load_data - La ruta de datos {base_path} no existe")
+                os.makedirs(base_path, exist_ok=True)
+                print(f"[INFO METRICS] load_data - Se creó la ruta de datos {base_path}")
+            
+            # Listar los archivos disponibles para depuración
+            if os.path.exists(base_path):
+                print(f"[INFO METRICS] load_data - Archivos disponibles en {base_path}:")
+                for root, dirs, files in os.walk(base_path):
+                    print(f"  Directorio: {root}")
+                    for dir_name in dirs:
+                        print(f"    Subdirectorio: {dir_name}")
+                    for file_name in files:
+                        if file_name.endswith('.csv'):
+                            print(f"    Archivo CSV: {file_name}")
+            
+            # Cargar los datos
             df = load_all_csv_data(consumption_tags=consumption_tags, project_id=project_id, jwt_token=token)
             
             if df is None or df.empty:
@@ -100,16 +121,32 @@ def register_chart_callbacks(app):
                                 'asset_id': f"asset_{asset_id}",
                                 'consumption_type': consumption_type,
                                 'client_id': client_id,
-                                'project_id': project_id
+                                'project_id': project_id if project_id else "project_1"
                             })
                 
-                return json.dumps(sample_data)
+                df = pd.DataFrame(sample_data)
+                print(f"[INFO METRICS] load_data - Creados {len(df)} registros de ejemplo")
+            else:
+                print(f"[INFO METRICS] load_data - Cargados {len(df)} registros reales desde archivos CSV")
+                print(f"[INFO METRICS] load_data - Columnas disponibles: {df.columns.tolist()}")
+                print(f"[INFO METRICS] load_data - Primeros registros: {df.head().to_dict()}")
             
-            # Asegurarse de que el DataFrame tiene las columnas necesarias
+            # Asegurar que el DataFrame tiene las columnas necesarias
             required_columns = ['date', 'consumption', 'asset_id', 'consumption_type']
             if not all(col in df.columns for col in required_columns):
                 print(f"[ERROR METRICS] load_data - Faltan columnas requeridas. Columnas disponibles: {df.columns.tolist()}")
-                return json.dumps([])
+                
+                # Añadir columnas faltantes
+                for col in required_columns:
+                    if col not in df.columns:
+                        if col == 'date':
+                            df['date'] = pd.Timestamp.now().strftime('%Y-%m-%d')
+                        elif col == 'consumption':
+                            df['consumption'] = 100.0
+                        elif col == 'asset_id':
+                            df['asset_id'] = 'asset_1'
+                        elif col == 'consumption_type':
+                            df['consumption_type'] = consumption_tags[0] if consumption_tags else 'ENERGY_CONSUMPTION'
             
             # Añadir client_id si no existe
             if 'client_id' not in df.columns:
@@ -117,7 +154,19 @@ def register_chart_callbacks(app):
             
             # Añadir project_id si no existe
             if 'project_id' not in df.columns:
-                df['project_id'] = project_id
+                df['project_id'] = project_id if project_id else "project_1"
+            
+            # Convertir la columna date a datetime si no lo es
+            if 'date' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['date']):
+                df['date'] = pd.to_datetime(df['date'], errors='coerce')
+                # Eliminar filas con fechas inválidas
+                df = df.dropna(subset=['date'])
+            
+            # Convertir la columna consumption a float si no lo es
+            if 'consumption' in df.columns and not pd.api.types.is_float_dtype(df['consumption']):
+                df['consumption'] = pd.to_numeric(df['consumption'], errors='coerce')
+                # Eliminar filas con consumos inválidos
+                df = df.dropna(subset=['consumption'])
             
             # Simplificar el DataFrame para evitar problemas de serialización
             try:
@@ -144,53 +193,23 @@ def register_chart_callbacks(app):
                             simplified_row[col] = row[col]
                     simplified_data.append(simplified_row)
                 
-                # Convertir a JSON con el serializador personalizado
-                json_data = json.dumps(simplified_data, default=custom_json_serializer)
+                # Convertir a JSON
+                json_data = json.dumps(simplified_data)
                 
-                print(f"[INFO METRICS] load_data - Se cargaron {len(df)} registros desde archivos CSV")
+                print(f"[INFO METRICS] load_data - Datos serializados a JSON correctamente, {len(simplified_data)} registros")
                 return json_data
+                
             except Exception as e:
                 print(f"[ERROR METRICS] load_data - Error al serializar a JSON: {str(e)}")
-                # Enfoque aún más simple: solo incluir las columnas requeridas como strings
-                simplified_data = []
-                for _, row in df.iterrows():
-                    simplified_row = {}
-                    for col in required_columns:
-                        simplified_row[col] = str(row[col])
-                    if 'client_id' in df.columns:
-                        simplified_row['client_id'] = str(row['client_id'])
-                    if 'project_id' in df.columns:
-                        simplified_row['project_id'] = str(row['project_id'])
-                    simplified_data.append(simplified_row)
-                
-                return json.dumps(simplified_data)
+                import traceback
+                print(traceback.format_exc())
+                return json.dumps([])
             
         except Exception as e:
             print(f"[ERROR METRICS] load_data: {str(e)}")
             import traceback
             print(traceback.format_exc())
-            
-            # Crear datos de ejemplo en caso de error
-            print("[INFO METRICS] load_data - Creando datos de ejemplo debido a un error")
-            end = pd.Timestamp.now()
-            start = end - pd.DateOffset(months=6)
-            date_range = pd.date_range(start=start, end=end, freq='D')
-            
-            # Crear datos de ejemplo
-            sample_data = []
-            for date in date_range:
-                for asset_id in range(1, 4):  # 3 activos de ejemplo
-                    for consumption_type in consumption_tags if consumption_tags else ["_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_DOMESTIC_WATER_GENERAL"]:
-                        sample_data.append({
-                            'date': date.strftime('%Y-%m-%d'),
-                            'consumption': float(np.random.randint(50, 200)),
-                            'asset_id': f"asset_{asset_id}",
-                            'consumption_type': consumption_type,
-                            'client_id': client_id,
-                            'project_id': project_id
-                        })
-            
-            return json.dumps(sample_data)
+            return json.dumps([])
     
     @app.callback(
         Output("metrics-visualization-container", "style"),

@@ -258,4 +258,70 @@ def get_anomaly_config():
     Returns:
         dict: Anomaly configuration
     """
-    return load_anomaly_config() 
+    return load_anomaly_config()
+
+def analyze_readings(df, asset_id=None, consumption_type=None, use_config=True):
+    """
+    Analyze readings for anomalies.
+    
+    Args:
+        df (pd.DataFrame): DataFrame with readings data (must have 'date' and 'value' columns)
+        asset_id (str, optional): Asset ID
+        consumption_type (str, optional): Consumption type
+        use_config (bool): Whether to use the anomaly_config.json configuration
+        
+    Returns:
+        dict: Analysis results including anomalies and thresholds
+    """
+    try:
+        logger.info(f"Analyzing readings for asset {asset_id} and consumption type {consumption_type}")
+        
+        # Create detector
+        detector = ContextualAnomalyDetector(asset_id, consumption_type)
+        
+        # Prepare data for detection
+        # The detector expects 'consumption' column, so rename 'value' to 'consumption'
+        detection_df = df.copy()
+        if 'value' in detection_df.columns and 'consumption' not in detection_df.columns:
+            detection_df = detection_df.rename(columns={'value': 'consumption'})
+        
+        # Add asset_id and consumption_type if provided
+        if asset_id is not None and 'asset_id' not in detection_df.columns:
+            detection_df['asset_id'] = asset_id
+        
+        if consumption_type is not None and 'consumption_type' not in detection_df.columns:
+            detection_df['consumption_type'] = consumption_type
+        
+        # Run detection
+        result_df = detector.detect_anomalies(detection_df, threshold_method="config" if use_config else "std_dev")
+        
+        # Extract anomalies
+        anomalies_df = None
+        if 'is_contextual_anomaly' in result_df.columns:
+            anomalies_df = result_df[result_df['is_contextual_anomaly']].copy()
+            
+            # Rename 'consumption' back to 'value' for consistency
+            if 'consumption' in anomalies_df.columns and 'value' not in anomalies_df.columns:
+                anomalies_df = anomalies_df.rename(columns={'consumption': 'value'})
+        
+        # Get thresholds
+        calculator = ThresholdCalculator(asset_id, consumption_type)
+        thresholds = calculator.get_thresholds(df=detection_df, method="config" if use_config else "std_dev")
+        
+        # Prepare results
+        results = {
+            "anomalies": anomalies_df,
+            "thresholds": thresholds,
+            "total_records": len(df),
+            "anomaly_records": len(anomalies_df) if anomalies_df is not None else 0,
+            "asset_id": asset_id,
+            "consumption_type": consumption_type
+        }
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"Error analyzing readings: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {"anomalies": None, "thresholds": None, "error": str(e)} 

@@ -35,7 +35,7 @@ class TestDataLoader(unittest.TestCase):
         self.assertEqual(tag, "__TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_THERMAL_ENERGY_COOLING")
         
         # Caso 2: Formato alternativo
-        filename = "daily_readings_DE3PC675TMVB8_domestic_hot_water_2024.csv"
+        filename = "daily_readings_DE3PC675TMVB8__domestic_hot_water_2024.csv"
         asset_id, tag = extract_asset_and_tag(filename)
         self.assertEqual(asset_id, "DE3PC675TMVB8")
         self.assertEqual(tag, "_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_DOMESTIC_HOT_WATER")

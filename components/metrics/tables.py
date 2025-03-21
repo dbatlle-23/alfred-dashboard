@@ -14,7 +14,12 @@ def create_monthly_readings_table(df, title="Lecturas Mensuales"):
     Returns:
         html.Div: Table component
     """
+    # Logs para depuración
+    print(f"[DEBUG] create_monthly_readings_table - Creando tabla con título: {title}")
+    print(f"[DEBUG] create_monthly_readings_table - DataFrame shape: {df.shape if df is not None and not df.empty else 'DataFrame vacío'}")
+    
     if df is None or df.empty:
+        print(f"[INFO] create_monthly_readings_table - No hay datos disponibles para la tabla")
         return html.Div([
             html.Div([
                 dbc.Row([
@@ -28,20 +33,29 @@ def create_monthly_readings_table(df, title="Lecturas Mensuales"):
     # Create a copy to avoid modifying the original
     table_df = df.copy()
     
+    # Logs para depuración - Columnas disponibles
+    print(f"[DEBUG] create_monthly_readings_table - Columnas disponibles: {table_df.columns.tolist()}")
+    
     # Format numeric columns
     for col in table_df.columns:
         if col not in ['Asset', 'block_number', 'staircase', 'apartment', 'consumption_type'] and not col.endswith('(Consumo)'):
             try:
-                table_df[col] = pd.to_numeric(table_df[col], errors='coerce')
-                table_df[col] = table_df[col].map('{:.2f}'.format)
-            except:
-                pass
+                # Convert to numeric only if not "Sin Datos"
+                mask = table_df[col] != "Sin Datos"
+                if mask.any():
+                    table_df.loc[mask, col] = pd.to_numeric(table_df.loc[mask, col], errors='coerce')
+                    table_df.loc[mask, col] = table_df.loc[mask, col].map('{:.2f}'.format)
+            except Exception as e:
+                print(f"[ERROR] create_monthly_readings_table - Error al formatear columna {col}: {str(e)}")
         elif col.endswith('(Consumo)'):
             try:
-                table_df[col] = pd.to_numeric(table_df[col], errors='coerce')
-                table_df[col] = table_df[col].map('{:.2f}'.format)
-            except:
-                pass
+                # Convert to numeric only if not "Sin Datos"
+                mask = table_df[col] != "Sin Datos"
+                if mask.any():
+                    table_df.loc[mask, col] = pd.to_numeric(table_df.loc[mask, col], errors='coerce')
+                    table_df.loc[mask, col] = table_df.loc[mask, col].map('{:.2f}'.format)
+            except Exception as e:
+                print(f"[ERROR] create_monthly_readings_table - Error al formatear columna de consumo {col}: {str(e)}")
     
     # Create conditional styling for consumption columns
     style_data_conditional = [
@@ -78,9 +92,42 @@ def create_monthly_readings_table(df, title="Lecturas Mensuales"):
             'fontWeight': 'bold'
         })
     
+    # Add styling for "Sin Datos" cells
+    for col in table_df.columns:
+        if col not in ['Asset', 'block_number', 'staircase', 'apartment', 'consumption_type']:
+            style_data_conditional.append({
+                'if': {
+                    'filter_query': '{{{0}}} = "Sin Datos"'.format(col),
+                    'column_id': col
+                },
+                'backgroundColor': 'rgba(240, 240, 240, 0.7)',
+                'color': 'rgba(128, 128, 128, 0.7)',
+                'fontStyle': 'italic'
+            })
+    
+    # Add styling for clickable cells
+    for col in table_df.columns:
+        if col not in ['Asset', 'block_number', 'staircase', 'apartment', 'consumption_type']:
+            style_data_conditional.append({
+                'if': {'column_id': col},
+                'cursor': 'pointer'
+            })
+    
+    # Create tooltip data for clickable cells
+    tooltip_data = []
+    for i in range(len(table_df)):
+        row_tooltips = {}
+        for col in table_df.columns:
+            if col not in ['Asset', 'block_number', 'staircase', 'apartment', 'consumption_type']:
+                row_tooltips[col] = {'value': 'Haz clic para ver detalles', 'type': 'markdown'}
+        tooltip_data.append(row_tooltips)
+    
+    # Logs para depuración - Creación de la tabla
+    print(f"[DEBUG] create_monthly_readings_table - Creando tabla interactiva con {len(table_df)} filas")
+    
     # Create table
     table = dash_table.DataTable(
-        id='monthly-readings-table',
+        id='monthly-readings-table-interactive',
         columns=[{"name": col, "id": col} for col in table_df.columns],
         data=table_df.to_dict('records'),
         style_table={'overflowX': 'auto'},
@@ -96,10 +143,24 @@ def create_monthly_readings_table(df, title="Lecturas Mensuales"):
         },
         style_data_conditional=style_data_conditional,
         page_size=15,
+        page_current=0,
+        page_action='native',
         sort_action='native',
+        sort_mode='multi',
         filter_action='native',
-        export_format='csv'
+        filter_options={'case': 'insensitive'},
+        export_format='csv',
+        cell_selectable=True,
+        tooltip_data=tooltip_data,
+        tooltip_duration=None,
+        virtualization=False,
+        persistence=True,
+        persistence_type='session',
+        persisted_props=['filter_query', 'page_current', 'sort_by'],
     )
+    
+    # Logs para depuración - Tabla creada
+    print(f"[INFO] create_monthly_readings_table - Tabla interactiva creada correctamente con {len(table_df)} filas y {len(table_df.columns)} columnas")
     
     # Crear el encabezado con título y botones de exportación
     header = html.Div([
@@ -302,8 +363,15 @@ def create_monthly_summary_table(df, title="Resumen Mensual de Consumos"):
     if df is None or df.empty:
         print(f"[DEBUG] create_monthly_summary_table - DataFrame is empty or None")
         return html.Div([
-            html.H5(title),
-            html.P("No hay datos disponibles", className="text-muted")
+            html.Div([
+                dbc.Row([
+                    dbc.Col(html.H5(title if title != "Resumen Mensual de Consumos" else "Resumen Mensual de Consumos", className="mb-0"), width="auto"),
+                ], className="d-flex align-items-center"),
+            ], className="mb-3"),
+            html.Div([
+                html.I(className="fas fa-info-circle me-2"),
+                html.Span("No hay datos disponibles.")
+            ], className="alert alert-info")
         ])
     
     # Create a copy to avoid modifying the original

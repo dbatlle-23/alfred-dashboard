@@ -13,8 +13,8 @@ os.makedirs(LOG_DIR, exist_ok=True)
 LOG_FILE = os.path.join(LOG_DIR, f"alfred_dashboard_{datetime.now().strftime('%Y%m%d')}.log")
 
 # Configuración de niveles de log
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-CONSOLE_LOG_LEVEL = os.getenv("CONSOLE_LOG_LEVEL", "INFO").upper()
+LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()
+CONSOLE_LOG_LEVEL = os.getenv("CONSOLE_LOG_LEVEL", "DEBUG").upper()
 FILE_LOG_LEVEL = os.getenv("FILE_LOG_LEVEL", "DEBUG").upper()
 
 # Configuración de formato para logs JSON
@@ -68,12 +68,21 @@ def configure_logging():
     file_formatter = CustomJsonFormatter('%(timestamp)s %(level)s %(module)s %(function)s %(line)s %(message)s')
     file_handler.setFormatter(file_formatter)
     
+    # Handler específico para mensajes DEBUG (archivo separado)
+    debug_log_file = os.path.join(LOG_DIR, f"debug_{datetime.now().strftime('%Y-%m-%d')}.log")
+    debug_file_handler = logging.FileHandler(debug_log_file)
+    debug_file_handler.setLevel(logging.DEBUG)
+    debug_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - [%(module)s.%(funcName)s:%(lineno)d] %(message)s')
+    debug_file_handler.setFormatter(debug_formatter)
+    
     # Agregar handlers
     root_logger.addHandler(console_handler)
     root_logger.addHandler(file_handler)
+    root_logger.addHandler(debug_file_handler)
     
     # Log inicial
     logging.info(f"Logging configurado. Archivo de log: {LOG_FILE}")
+    logging.info(f"Archivo de debug: {debug_log_file}")
     
     return root_logger
 

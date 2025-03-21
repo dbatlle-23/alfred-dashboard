@@ -32,7 +32,7 @@ class ReadingRepository:
                 if os.path.isdir(project_path):
                     # Buscar archivos que coincidan con el patrón
                     for filename in os.listdir(project_path):
-                        if filename.startswith(f"daily_readings_{asset_id}_") and filename.endswith(".csv"):
+                        if filename.startswith(f"daily_readings_{asset_id}__") and filename.endswith(".csv"):
                             file_path = os.path.join(project_path, filename)
                             matching_files.append({
                                 "project_id": project_folder,

@@ -192,3 +192,78 @@ def register_filter_callbacks(app):
             return {"display": "block"}, dash.no_update, dash.no_update
         
         return {"display": "none"}, today - timedelta(days=30), today
+    
+    @app.callback(
+        [Output("metrics-asset-filter", "options"),
+         Output("metrics-asset-filter", "value")],
+        [Input("metrics-project-filter", "value"),
+         Input("metrics-selected-client-store", "data"),
+         Input("metrics-data-store", "data")],
+        [State("jwt-token-store", "data")]
+    )
+    def update_asset_options(project_id, client_selection, json_data, token_data):
+        """Update asset options based on selected project."""
+        # Solo actualizar cuando hay datos cargados
+        if not client_selection:
+            return [{"label": "Todos", "value": "all"}], "all"
+                
+        try:
+            # Obtener el ID del cliente seleccionado
+            client_id = client_selection.get("client_id")
+            
+            if not client_id:
+                return [{"label": "Todos", "value": "all"}], "all"
+            
+            # Obtener el token JWT directamente del store
+            token = token_data.get('token') if token_data else None
+            
+            if not token:
+                print("[ERROR METRICS] update_asset_options - No se encontró token JWT")
+                return [{"label": "Todos", "value": "all"}], "all"
+            
+            # Si no se ha seleccionado un proyecto específico, mostrar todos los assets del cliente
+            if not project_id or project_id == "all":
+                try:
+                    # Intentar obtener assets para el cliente seleccionado
+                    assets = get_assets(client_id=client_id, jwt_token=token)
+                    if assets:
+                        # Crear las opciones para el dropdown
+                        options = [{"label": "Todos", "value": "all"}]
+                        options.extend([
+                            {"label": a.get("name", f"Asset {a['id']}"), "value": a['id']} 
+                            for a in assets if isinstance(a, dict) and "id" in a
+                        ])
+                    
+                        print(f"[INFO METRICS] update_asset_options - Se cargaron {len(options)-1} assets para el cliente {client_id}")
+                        return options, "all"
+                    else:
+                        print(f"[WARNING METRICS] update_asset_options - No se encontraron assets para el cliente {client_id}")
+                except Exception as e:
+                    print(f"[ERROR METRICS] Error al cargar assets para el cliente {client_id}: {str(e)}")
+            else:
+                # Si se ha seleccionado un proyecto específico, obtener los assets de ese proyecto
+                try:
+                    # Intentar obtener assets para el proyecto seleccionado
+                    assets = get_project_assets(project_id, jwt_token=token)
+                    
+                    if assets:
+                        options = [{"label": "Todos", "value": "all"}]
+                        options.extend([
+                            {"label": asset.get("name", f"Asset {asset['id']}"), "value": asset["id"]}
+                            for asset in assets if isinstance(asset, dict) and "id" in asset
+                        ])
+                        
+                        print(f"[INFO METRICS] update_asset_options - Se cargaron {len(options)-1} assets para el proyecto {project_id}")
+                        return options, "all"
+                    else:
+                        print(f"[WARNING METRICS] update_asset_options - No se encontraron assets para el proyecto {project_id}")
+                except Exception as e:
+                    print(f"[ERROR METRICS] Error al cargar assets para el proyecto {project_id}: {str(e)}")
+                
+                # Si todo falla, devolver opción por defecto
+                return [{"label": "Todos", "value": "all"}], "all"
+        except Exception as e:
+            print(f"[ERROR METRICS] Error al actualizar opciones de asset: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+            return [{"label": "Todos", "value": "all"}], "all"

@@ -58,20 +58,42 @@ def create_anomaly_comparison_chart(data_result, title="Comparación de Lecturas
             from datetime import datetime
             anomaly_date = datetime.fromisoformat(anomaly_date.replace('Z', '+00:00'))
         
+        # Determinar color y símbolo según el tipo de anomalía
+        marker_color = 'red'
+        marker_symbol = 'x'
+        hover_prefix = "Anomalía"
+        
+        if anomaly['type'] == 'sensor_replacement':
+            marker_color = 'orange'
+            marker_symbol = 'star'
+            hover_prefix = "Reemplazo de sensor"
+        
         # Añadir marcador para la anomalía
         fig.add_trace(go.Scatter(
             x=[anomaly_date],
             y=[anomaly['current_value']],
             mode='markers',
-            name=f"Anomalía: {anomaly['type']}",
+            name=f"{hover_prefix}: {anomaly['type']}",
             marker=dict(
-                color='red',
-                size=10,
-                symbol='x'
+                color=marker_color,
+                size=12,
+                symbol=marker_symbol
             ),
             hoverinfo='text',
             hovertext=f"Tipo: {anomaly['type']}<br>Valor anterior: {anomaly['previous_value']}<br>Valor actual: {anomaly['current_value']}"
         ))
+        
+        # Si es un reemplazo de sensor, añadir una anotación
+        if anomaly['type'] == 'sensor_replacement':
+            fig.add_annotation(
+                x=anomaly_date,
+                y=anomaly['current_value'],
+                text="Reemplazo de sensor",
+                showarrow=True,
+                arrowhead=1,
+                ax=0,
+                ay=-40
+            )
     
     # Configurar layout
     fig.update_layout(
@@ -92,5 +114,19 @@ def create_anomaly_comparison_chart(data_result, title="Comparación de Lecturas
                     config={'displayModeBar': True}
                 )
             ])
-        ])
+        ]),
+        # Añadir leyenda explicativa
+        html.Div([
+            html.H5("Leyenda", className="mt-3"),
+            html.Ul([
+                html.Li([
+                    html.Span("X", className="text-danger font-weight-bold"),
+                    " - Reinicio de contador: Se aplica corrección sumando el offset a las lecturas posteriores."
+                ]),
+                html.Li([
+                    html.Span("★", className="text-warning font-weight-bold"),
+                    " - Reemplazo de sensor: No se aplica corrección, se considera un nuevo inicio de mediciones."
+                ])
+            ])
+        ], className="mt-3")
     ])

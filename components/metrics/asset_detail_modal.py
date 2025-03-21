@@ -120,76 +120,80 @@ def create_asset_detail_content(asset_id, month, detail_data, asset_metadata):
             # Seleccionar hasta 3 columnas numéricas para mostrar en gráficos, excluyendo 'timestamp'
             plot_cols = [col for col in numeric_cols if col.lower() != 'timestamp'][:3]
             
-            # Mantener un registro de las columnas ya visualizadas para evitar duplicados
-            visualized_columns = set()
+            # Asegurarse de que los datos son serializables
+            plot_data = detail_data.copy()
             
-            # Crear gráfico de línea para cada columna numérica
-            for col in plot_cols:
-                # Evitar duplicar gráficos para la misma columna o sus derivados
-                base_col = col.split('_')[0].lower()  # Nombre base de la columna, sin sufijos
-                if base_col in visualized_columns:
-                    continue
+            # Convertir a tipos serializables si es necesario
+            if pd.api.types.is_datetime64_any_dtype(plot_data[date_col]):
+                plot_data[date_col] = plot_data[date_col].astype(str)
+            
+            # Ordenar por fecha para asegurar cálculos correctos
+            plot_data = plot_data.sort_values(by=date_col)
+            
+            # Verificar si tenemos la columna 'value' para mostrar gráficos
+            if 'value' in plot_data.columns:
+                # 1. Gráfico de línea para mostrar la evolución de las lecturas acumuladas
+                fig_line = px.line(
+                    plot_data,
+                    x=date_col,
+                    y='value',
+                    title="Evolución de lecturas acumuladas",
+                    labels={'value': "Lectura acumulada", date_col: "Fecha"},
+                    template="plotly_white"
+                )
                 
-                # Añadir esta columna a las ya visualizadas
-                visualized_columns.add(base_col)
+                fig_line.update_traces(
+                    line=dict(color='rgb(8,48,107)', width=2),
+                    marker=dict(size=6)
+                )
                 
-                # Asegurarse de que los datos son serializables
-                plot_data = detail_data.copy()
-                
-                # Convertir a tipos serializables si es necesario
-                if pd.api.types.is_datetime64_any_dtype(plot_data[date_col]):
-                    plot_data[date_col] = plot_data[date_col].astype(str)
-                
-                # Calcular el consumo del periodo (diferencia entre lecturas consecutivas)
-                if col == 'value' or col.lower() == 'consumption' or col.lower().startswith('consumo'):
-                    # Ordenar por fecha para asegurar cálculos correctos
-                    plot_data = plot_data.sort_values(by=date_col)
-                    
-                    # Calcular diferencia entre lecturas consecutivas (consumo del periodo)
-                    period_consumption_col = f"{col}_periodo"
-                    plot_data[period_consumption_col] = plot_data[col].astype(float).diff()
-                    
-                    # Reemplazar valores negativos (pueden ocurrir por reinicios de contador) con 0 o NaN
-                    plot_data.loc[plot_data[period_consumption_col] < 0, period_consumption_col] = 0
-                    
-                    # Eliminar el primer valor que será NaN debido al diff()
-                    plot_data = plot_data.dropna(subset=[period_consumption_col])
-                    
-                    # Crear gráfico con el consumo del periodo
-                    fig = px.bar(
-                        plot_data, 
-                        x=date_col, 
-                        y=period_consumption_col,
-                        title=f"Consumo por periodo ({col})",
-                        labels={period_consumption_col: f"Consumo por periodo", date_col: "Fecha"},
-                        template="plotly_white"
-                    )
-                    
-                    # Personalizar el gráfico de barras para mejor visualización
-                    fig.update_traces(
-                        marker_color='rgb(55, 83, 109)',
-                        marker_line_color='rgb(8,48,107)',
-                        marker_line_width=1
-                    )
-                else:
-                    # Para otras columnas, mostrar el valor directo
-                    fig = px.line(
-                        plot_data, 
-                        x=date_col, 
-                        y=col,
-                        title=f"Evolución de {col}",
-                        labels={col: col, date_col: "Fecha"},
-                        template="plotly_white"
-                    )
-                
-                fig.update_layout(
+                fig_line.update_layout(
                     margin=dict(l=20, r=20, t=40, b=20),
                     height=300,
                     hovermode="x unified"
                 )
+                
                 content.append(html.Div([
-                    dcc.Graph(figure=fig)
+                    dcc.Graph(figure=fig_line)
                 ], className="mb-4"))
+                
+                # 2. Gráfico de barras para el consumo del periodo
+                # Calcular el consumo del período como la diferencia entre lecturas consecutivas
+                period_consumption_col = "consumo_periodo"
+                plot_data[period_consumption_col] = plot_data['value'].astype(float).diff()
+                
+                # Reemplazar valores negativos (pueden ocurrir por reinicios de contador) con 0
+                plot_data.loc[plot_data[period_consumption_col] < 0, period_consumption_col] = 0
+                
+                # Eliminar el primer valor que será NaN debido al diff()
+                plot_data_bars = plot_data.dropna(subset=[period_consumption_col])
+                
+                if not plot_data_bars.empty:
+                    # Gráfico de barras para consumo del periodo
+                    fig_bar = px.bar(
+                        plot_data_bars,
+                        x=date_col,
+                        y=period_consumption_col,
+                        title="Consumo por periodo",
+                        labels={period_consumption_col: "Consumo del periodo", date_col: "Fecha"},
+                        template="plotly_white"
+                    )
+                    
+                    fig_bar.update_traces(
+                        marker_color='rgb(55, 83, 109)',
+                        marker_line_color='rgb(8,48,107)',
+                        marker_line_width=1
+                    )
+                    
+                    fig_bar.update_layout(
+                        margin=dict(l=20, r=20, t=40, b=20),
+                        height=300,
+                        hovermode="x unified"
+                    )
+                    
+                    content.append(html.Div([
+                        dcc.Graph(figure=fig_bar)
+                    ], className="mb-4"))
         
         # Sección de tabla de datos
         # Asegurarse de que todos los datos son serializables
