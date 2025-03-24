@@ -88,6 +88,20 @@ def register_table_callbacks(app):
             data = json.loads(json_data)
             df = pd.DataFrame(data)
             
+            # Verificar si el DataFrame está vacío o no tiene datos
+            if df.empty:
+                print("El DataFrame está vacío, no hay datos para mostrar")
+                return html.Div("No hay datos disponibles para mostrar.", className="alert alert-warning"), None
+            
+            # Verificar si la columna 'date' existe
+            if 'date' not in df.columns:
+                print(f"[ERROR] La columna 'date' no existe en el DataFrame. Columnas disponibles: {df.columns.tolist()}")
+                return html.Div([
+                    html.H5("Error al procesar datos"),
+                    html.P("La columna 'date' no existe en los datos. Verifique los archivos CSV de origen."),
+                    html.P(f"Columnas disponibles: {', '.join(df.columns.tolist())}")
+                ], className="alert alert-danger"), None
+            
             # Filter data
             df = process_metrics_data(
                 df, 
@@ -445,11 +459,13 @@ def register_table_callbacks(app):
          State("metrics-asset-filter", "value"),
          State("metrics-consumption-tags-filter", "value"),
          State("metrics-date-range", "start_date"),
-         State("metrics-date-range", "end_date")],
+         State("metrics-date-range", "end_date"),
+         State("monthly-readings-complete-data", "data"),
+         State("jwt-token-store", "data")],
         prevent_initial_call=True
     )
     def export_monthly_readings(csv_clicks, excel_clicks, pdf_clicks, 
-                               json_data, client_id, project_id, asset_id, consumption_tags, start_date, end_date):
+                               json_data, client_id, project_id, asset_id, consumption_tags, start_date, end_date, complete_data, token_data):
         """Export monthly readings data in different formats."""
         # Determinar qué botón fue clickeado
         ctx = callback_context
@@ -504,13 +520,100 @@ def register_table_callbacks(app):
             # Crear una columna de mes
             filtered_df['month'] = filtered_df['date'].dt.strftime('%Y-%m')
             
-            # Pivotar la tabla para tener los meses como columnas
+            # Añadir metadatos de los assets
+            try:
+                print(f"[INFO METRICS] Iniciando proceso de obtención de metadatos para {len(filtered_df['asset_id'].unique())} assets únicos")
+                
+                # Inicializar diccionario de metadatos
+                asset_metadata = {}
+                
+                # Imprimir información sobre la estructura de complete_data para depuración
+                print(f"[DEBUG METRICS] complete_data type: {type(complete_data)}")
+                if complete_data:
+                    print(f"[DEBUG METRICS] complete_data keys: {list(complete_data.keys()) if isinstance(complete_data, dict) else 'No es un diccionario'}")
+                    if isinstance(complete_data, dict) and 'Asset' in complete_data:
+                        print(f"[DEBUG METRICS] complete_data['Asset'] type: {type(complete_data['Asset'])}")
+                        print(f"[DEBUG METRICS] complete_data['Asset'] length: {len(complete_data['Asset']) if hasattr(complete_data['Asset'], '__len__') else 'No tiene longitud'}")
+                
+                # Intentar obtener metadatos desde complete_data si está disponible
+                if complete_data and isinstance(complete_data, dict):
+                    # Verificar que existe block_number, staircase, apartment en complete_data
+                    metadata_keys = ['block_number', 'staircase', 'apartment']
+                    if all(key in complete_data for key in metadata_keys):
+                        # Crear un diccionario de asset_id -> {metadata} usando el diccionario anidado
+                        for idx, asset_id in complete_data.get('Asset', {}).items():
+                            if asset_id:  # Asegurarse de que asset_id no es None o vacío
+                                asset_metadata[asset_id] = {
+                                    'block_number': complete_data.get('block_number', {}).get(idx, 'N/A'),
+                                    'staircase': complete_data.get('staircase', {}).get(idx, 'N/A'),
+                                    'apartment': complete_data.get('apartment', {}).get(idx, 'N/A')
+                                }
+                        
+                        print(f"[INFO METRICS] Añadiendo metadatos de {len(asset_metadata)} assets desde complete_data")
+                        # Imprimir algunos ejemplos para depuración
+                        asset_examples = list(asset_metadata.items())[:3]
+                        print(f"[DEBUG METRICS] Ejemplos de metadatos: {asset_examples}")
+                
+                # Si no hay suficientes metadatos desde complete_data, intentar obtener más desde la API
+                missing_assets = set(filtered_df['asset_id'].unique()) - set(asset_metadata.keys())
+                if missing_assets and len(missing_assets) <= 50:
+                    # Obtener el token JWT
+                    jwt_token = token_data.get('token') if token_data else None
+                    
+                    if jwt_token:
+                        try:
+                            from utils.data_loader import get_asset_metadata
+                            print(f"[INFO METRICS] Obteniendo metadatos para {len(missing_assets)} assets faltantes desde la API")
+                            for asset_id_val in missing_assets:
+                                metadata = get_asset_metadata(asset_id_val, project_id, jwt_token)
+                                if metadata:
+                                    asset_metadata[asset_id_val] = metadata
+                        except Exception as e:
+                            print(f"[ERROR METRICS] Error al obtener metadatos adicionales desde la API: {str(e)}")
+                
+                # Añadir columnas de metadatos al DataFrame
+                filtered_df['block_number'] = filtered_df['asset_id'].apply(
+                    lambda x: asset_metadata.get(x, {}).get('block_number', 'N/A')
+                )
+                filtered_df['staircase'] = filtered_df['asset_id'].apply(
+                    lambda x: asset_metadata.get(x, {}).get('staircase', 'N/A')
+                )
+                filtered_df['apartment'] = filtered_df['asset_id'].apply(
+                    lambda x: asset_metadata.get(x, {}).get('apartment', 'N/A')
+                )
+            except Exception as e:
+                print(f"[ERROR METRICS] Error general al procesar metadatos: {str(e)}")
+                import traceback
+                print(traceback.format_exc())
+                
+                # En caso de error, asegurarse de que las columnas de metadatos existen
+                filtered_df['block_number'] = 'N/A'
+                filtered_df['staircase'] = 'N/A'
+                filtered_df['apartment'] = 'N/A'
+            
+            # Pivotar la tabla para tener los meses como columnas, incluyendo metadatos en el índice
+            index_columns = ['asset_id', 'block_number', 'staircase', 'apartment']
+            
+            # Verificar que todas las columnas del índice existen en el DataFrame
+            for col in index_columns:
+                if col not in filtered_df.columns:
+                    print(f"[WARNING METRICS] Columna {col} no encontrada en el DataFrame, se añadirá con valores por defecto")
+                    filtered_df[col] = 'N/A'
+            
+            # Crear la tabla pivotada
             pivot = filtered_df.pivot_table(
-                index='asset_id',
+                index=index_columns,
                 columns='month',
                 values='consumption',
                 aggfunc='sum'
             ).reset_index()
+            
+            # Información de depuración
+            print(f"[INFO METRICS] Tabla pivotada creada con éxito. Dimensiones: {pivot.shape}, Columnas: {pivot.columns.tolist()}")
+            # Imprimir un ejemplo de los primeros registros para depuración
+            print(f"[DEBUG METRICS] Primeras filas de la tabla pivotada:")
+            for i, row in pivot.head(3).iterrows():
+                print(f"[DEBUG METRICS] Fila {i}: {dict(row)}")
             
             # Generar nombre de archivo con fecha actual
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

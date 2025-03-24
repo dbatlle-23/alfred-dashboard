@@ -161,6 +161,11 @@ def load_csv_data(file_path: str) -> Optional[pd.DataFrame]:
         try:
             df = pd.read_csv(file_path)
             debug_log(f"[DEBUG DETALLADO] load_csv_data - Archivo cargado correctamente: {file_path}")
+            # Imprimir las primeras filas para depuración
+            debug_log(f"[DEBUG DETALLADO] load_csv_data - Primeras filas del archivo: {df.head().to_dict() if not df.empty else 'DataFrame vacío'}")
+            # Imprimir detalles de las columnas
+            debug_log(f"[DEBUG DETALLADO] load_csv_data - Columnas del archivo: {df.columns.tolist()}")
+            debug_log(f"[DEBUG DETALLADO] load_csv_data - Tipos de datos de las columnas: {df.dtypes.to_dict()}")
         except pd.errors.EmptyDataError:
             debug_log(f"[DEBUG DETALLADO] load_csv_data - Error al cargar el archivo {file_path}: No columns to parse from file")
             print(f"Error al cargar el archivo {file_path}: No columns to parse from file")
@@ -171,6 +176,8 @@ def load_csv_data(file_path: str) -> Optional[pd.DataFrame]:
             try:
                 df = pd.read_csv(file_path, sep=';')
                 debug_log(f"[DEBUG DETALLADO] load_csv_data - Archivo cargado correctamente con delimitador ';': {file_path}")
+                # Imprimir las primeras filas para depuración con este delimitador
+                debug_log(f"[DEBUG DETALLADO] load_csv_data - Primeras filas del archivo con delimitador ';': {df.head().to_dict() if not df.empty else 'DataFrame vacío'}")
             except:
                 debug_log(f"[DEBUG DETALLADO] load_csv_data - Error al cargar el archivo {file_path}: No se pudo determinar el delimitador")
                 print(f"Error al cargar el archivo {file_path}: No se pudo determinar el delimitador")
@@ -197,7 +204,55 @@ def load_csv_data(file_path: str) -> Optional[pd.DataFrame]:
         df['tag'] = tag
         
         # Convertir la columna de fecha a datetime
-        df['date'] = pd.to_datetime(df['date'], errors='coerce')
+        try:
+            # Guardar un registro de los valores de fecha antes de convertir
+            debug_log(f"[DEBUG DETALLADO] load_csv_data - Valores de fecha originales: {df['date'].head(5).tolist()}")
+            
+            # Intentar inferir el formato de fecha
+            date_formats = ['%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%Y/%m/%d']
+            date_conversion_success = False
+            
+            for date_format in date_formats:
+                try:
+                    df['date'] = pd.to_datetime(df['date'], format=date_format, errors='raise')
+                    date_conversion_success = True
+                    debug_log(f"[DEBUG DETALLADO] load_csv_data - Fechas convertidas correctamente con formato: {date_format}")
+                    break
+                except:
+                    continue
+            
+            # Si no funcionó ningún formato específico, intentar con inferencia automática
+            if not date_conversion_success:
+                df['date'] = pd.to_datetime(df['date'], errors='coerce')
+                
+            # Verificar si hubo valores NaT después de la conversión
+            nat_count = df['date'].isna().sum()
+            if nat_count > 0:
+                debug_log(f"[DEBUG DETALLADO] load_csv_data - Se encontraron {nat_count} valores NaT después de convertir a datetime")
+                print(f"[ADVERTENCIA] Se encontraron {nat_count} valores de fecha no válidos en el archivo {file_path}")
+                
+                # Eliminar filas con valores NaT en la columna date para evitar problemas posteriores
+                df = df.dropna(subset=['date'])
+                debug_log(f"[DEBUG DETALLADO] load_csv_data - Se eliminaron filas con fechas NaT, quedan {len(df)} filas")
+            
+            # Verificar y mostrar el rango de fechas
+            if not df.empty and not df['date'].isna().all():
+                min_date = df['date'].min()
+                max_date = df['date'].max()
+                debug_log(f"[DEBUG DETALLADO] load_csv_data - Rango de fechas: {min_date} a {max_date}")
+            else:
+                debug_log(f"[DEBUG DETALLADO] load_csv_data - Todas las fechas son NaT después de la conversión o DataFrame vacío")
+                if df.empty:
+                    print(f"[ERROR] No hay datos válidos después de eliminar fechas inválidas en el archivo {file_path}")
+                    return None
+                else:
+                    print(f"[ERROR] Todas las fechas son inválidas en el archivo {file_path}")
+                    return None
+        except Exception as e:
+            debug_log(f"[DEBUG DETALLADO] load_csv_data - Error al convertir la columna de fecha: {str(e)}")
+            print(f"[ERROR] Error al convertir la columna de fecha en el archivo {file_path}: {str(e)}")
+            # Si hay un error crítico con la columna de fecha, devolver None ya que esta columna es esencial
+            return None
         
         # Manejar valores de error en la columna 'value'
         # Primero, identificar filas con valores no numéricos
@@ -505,6 +560,66 @@ def get_project_for_asset(asset_id: str) -> Optional[str]:
     # Si llegamos aquí, no encontramos el asset en ningún proyecto
     debug_log(f"[DEBUG] get_project_for_asset - No se encontró ningún proyecto para el asset {asset_id}")
     return None
+
+def get_asset_metadata(asset_id: str, project_id: Optional[str] = None, jwt_token: Optional[str] = None) -> Dict[str, str]:
+    """
+    Obtiene los metadatos de un asset específico (bloque, escalera, apartamento).
+    
+    Args:
+        asset_id (str): ID del asset
+        project_id (str, optional): ID del proyecto al que pertenece el asset
+        jwt_token (str, optional): Token JWT para autenticación API
+        
+    Returns:
+        Dict[str, str]: Diccionario con los metadatos del asset (block_number, staircase, apartment)
+    """
+    debug_log(f"[DEBUG] get_asset_metadata - Buscando metadatos para el asset {asset_id}")
+    
+    # Valores predeterminados
+    metadata = {
+        'block_number': 'N/A',
+        'staircase': 'N/A',
+        'apartment': 'N/A'
+    }
+    
+    # Intentar obtener los metadatos desde la API
+    try:
+        from utils.api import get_assets, get_project_assets
+        
+        assets = []
+        if project_id and project_id != "all":
+            assets = get_project_assets(project_id, jwt_token=jwt_token)
+        else:
+            assets = get_assets(jwt_token=jwt_token)
+        
+        # Buscar el asset en la lista
+        asset_info = next((a for a in assets if a.get('id') == asset_id), None)
+        
+        if asset_info:
+            debug_log(f"[DEBUG] get_asset_metadata - Encontrado asset {asset_id} en la API")
+            metadata = {
+                'block_number': asset_info.get('block_number', 'N/A'),
+                'staircase': asset_info.get('staircase', 'N/A'),
+                'apartment': asset_info.get('apartment', 'N/A')
+            }
+            return metadata
+    except Exception as e:
+        debug_log(f"[ERROR] get_asset_metadata - Error al obtener metadatos desde la API: {str(e)}")
+    
+    # Si no se pudo obtener desde la API, intentar buscar en los datos locales
+    if not project_id:
+        project_id = get_project_for_asset(asset_id)
+    
+    if project_id:
+        # Buscar en los archivos de configuración o metadatos locales
+        try:
+            # Aquí podría buscar en archivos JSON de configuración o metadatos
+            # Por ahora, simplemente devolvemos los valores predeterminados
+            pass
+        except Exception as e:
+            debug_log(f"[ERROR] get_asset_metadata - Error al buscar metadatos locales: {str(e)}")
+    
+    return metadata
 
 def get_assets_with_data(df: pd.DataFrame, project_id: Optional[str] = None) -> List[Dict]:
     """

@@ -204,6 +204,17 @@ def create_asset_detail_content(asset_id, month, detail_data, asset_metadata):
             elif pd.api.types.is_period_dtype(table_data[col]):
                 table_data[col] = table_data[col].astype(str)
         
+        # Añadir los metadatos del asset al DataFrame para que se incluyan en la exportación
+        table_data['asset_id'] = str(asset_id)
+        table_data['block_number'] = str(asset_metadata.get('block_number', 'N/A'))
+        table_data['staircase'] = str(asset_metadata.get('staircase', 'N/A'))
+        table_data['apartment'] = str(asset_metadata.get('apartment', 'N/A'))
+        
+        # Reordenar las columnas para que los metadatos aparezcan primero
+        metadata_cols = ['asset_id', 'block_number', 'staircase', 'apartment']
+        other_cols = [col for col in table_data.columns if col not in metadata_cols]
+        table_data = table_data[metadata_cols + other_cols]
+        
         content.append(html.Div([
             html.H5("Datos Detallados", className="mb-3"),
             dash_table.DataTable(
@@ -231,7 +242,7 @@ def create_asset_detail_content(asset_id, month, detail_data, asset_metadata):
                 page_size=10,
                 sort_action="native",
                 filter_action="native",
-                export_format="csv",
+                export_format="xlsx csv",
             )
         ], className="mt-3"))
         

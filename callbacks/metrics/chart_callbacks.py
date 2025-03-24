@@ -170,13 +170,6 @@ def register_chart_callbacks(app):
             
             # Simplificar el DataFrame para evitar problemas de serialización
             try:
-                # Convertir la columna date a string para evitar problemas de serialización
-                if 'date' in df.columns:
-                    if pd.api.types.is_datetime64_any_dtype(df['date']):
-                        df['date'] = df['date'].dt.strftime('%Y-%m-%d')
-                    else:
-                        df['date'] = df['date'].astype(str)
-                
                 # Crear una lista de diccionarios simplificada
                 simplified_data = []
                 for _, row in df.iterrows():
@@ -184,9 +177,17 @@ def register_chart_callbacks(app):
                     for col in df.columns:
                         # Manejar diferentes tipos de datos
                         if pd.api.types.is_datetime64_any_dtype(pd.Series([row[col]])):
-                            simplified_row[col] = row[col].strftime('%Y-%m-%d')
+                            # Verificar si el valor es NaT antes de aplicar strftime
+                            if pd.isna(row[col]) or pd.isnull(row[col]):
+                                simplified_row[col] = None
+                            else:
+                                simplified_row[col] = row[col].strftime('%Y-%m-%d')
                         elif hasattr(row[col], 'to_timestamp'):  # Para objetos Period
-                            simplified_row[col] = row[col].to_timestamp().strftime('%Y-%m-%d')
+                            try:
+                                simplified_row[col] = row[col].to_timestamp().strftime('%Y-%m-%d')
+                            except:
+                                # Si hay error al convertir el período, usar None
+                                simplified_row[col] = None
                         elif pd.isna(row[col]):
                             simplified_row[col] = None
                         else:
@@ -194,11 +195,35 @@ def register_chart_callbacks(app):
                     simplified_data.append(simplified_row)
                 
                 # Convertir a JSON
-                json_data = json.dumps(simplified_data)
-                
-                print(f"[INFO METRICS] load_data - Datos serializados a JSON correctamente, {len(simplified_data)} registros")
-                return json_data
-                
+                try:
+                    json_data = json.dumps(simplified_data)
+                    
+                    print(f"[INFO METRICS] load_data - Datos serializados a JSON correctamente, {len(simplified_data)} registros")
+                    return json_data
+                except TypeError as e:
+                    # Capturar error de tipos no serializables
+                    print(f"[ERROR METRICS] load_data - Error de tipo al serializar a JSON: {str(e)}")
+                    
+                    # Intentar una segunda pasada con conversión más estricta
+                    try:
+                        # Convertir todos los valores problemáticos a str o None
+                        for i, item in enumerate(simplified_data):
+                            for key, value in list(item.items()):
+                                if not (isinstance(value, (str, int, float, bool, type(None)))):
+                                    try:
+                                        simplified_data[i][key] = str(value)
+                                    except:
+                                        simplified_data[i][key] = None
+                        
+                        json_data = json.dumps(simplified_data)
+                        print(f"[INFO METRICS] load_data - Datos serializados a JSON en segunda pasada, {len(simplified_data)} registros")
+                        return json_data
+                    except Exception as e2:
+                        print(f"[ERROR METRICS] load_data - Error en segunda pasada al serializar a JSON: {str(e2)}")
+                        import traceback
+                        print(traceback.format_exc())
+                        return json.dumps([])
+                    
             except Exception as e:
                 print(f"[ERROR METRICS] load_data - Error al serializar a JSON: {str(e)}")
                 import traceback

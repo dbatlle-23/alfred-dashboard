@@ -288,10 +288,13 @@ def register_metrics_callbacks(app):
         [Input("metrics-update-readings-button", "n_clicks")],
         [State("metrics-project-filter", "value"),
          State("metrics-consumption-tags-filter", "value"),
+         State("metrics-date-period", "value"),
+         State("metrics-date-range", "start_date"),
+         State("metrics-date-range", "end_date"),
          State("jwt-token-store", "data")],
         prevent_initial_call=True
     )
-    def update_readings(n_clicks, project_id, consumption_tags, token_data):
+    def update_readings(n_clicks, project_id, consumption_tags, date_period, start_date, end_date, token_data):
         """Update readings when the update button is clicked."""
         if not n_clicks:
             return ""
@@ -311,19 +314,30 @@ def register_metrics_callbacks(app):
         if token_data and "token" in token_data:
             token = token_data["token"]
         
-        # Llamar a la función para actualizar las lecturas
-        from utils.api import get_daily_readings_for_year_multiple_tags_project_parallel
+        # Llamar a la función para actualizar las lecturas solo para el período seleccionado
+        from utils.api import get_daily_readings_for_period_multiple_tags_project_parallel
         
         try:
-            print(f"[INFO] Actualizando lecturas para proyecto {project_id}, tags {consumption_tags}")
-            result = get_daily_readings_for_year_multiple_tags_project_parallel(project_id, consumption_tags, token=token)
+            print(f"[INFO] Actualizando lecturas para proyecto {project_id}, tags {consumption_tags}, período: {start_date} a {end_date}")
+            result = get_daily_readings_for_period_multiple_tags_project_parallel(
+                project_id, 
+                consumption_tags, 
+                start_date, 
+                end_date, 
+                token=token
+            )
             
             if result.get("success", False):
+                # Formatear los meses procesados para su mejor visualización
+                months_processed = result.get('months_processed', [])
+                months_display = ", ".join(months_processed) if months_processed else "Ninguno"
+                
                 return html.Div([
                     html.P(result.get("message", "Lecturas actualizadas con éxito"), className="text-success"),
-                    html.P(f"Total de assets: {result.get('total_assets', 0)}", className="text-info"),
-                    html.P(f"Assets procesados con éxito: {result.get('success_count', 0)}", className="text-info"),
-                    html.P(f"Assets con errores: {result.get('error_count', 0)}", className="text-info"),
+                    html.P(f"Total de tareas: {result.get('total_tasks', 0)}", className="text-info"),
+                    html.P(f"Tareas procesadas con éxito: {result.get('success_count', 0)}", className="text-info"),
+                    html.P(f"Tareas con errores: {result.get('error_count', 0)}", className="text-info"),
+                    html.P(f"Meses procesados: {months_display}", className="text-info"),
                     html.Button("Actualizar datos", id="refresh-data-btn", className="btn btn-primary mt-2")
                 ])
             else:
@@ -386,34 +400,66 @@ def register_metrics_callbacks(app):
             
             # Simplificar el DataFrame para evitar problemas de serialización
             try:
-                # Convertir la columna date a string para evitar problemas de serialización
-                if 'date' in df.columns:
-                    if pd.api.types.is_datetime64_any_dtype(df['date']):
-                        df['date'] = df['date'].dt.strftime('%Y-%m-%d')
-                    else:
-                        df['date'] = df['date'].astype(str)
-                
-                # Crear una lista de diccionarios simplificada
-                simplified_data = []
-                for _, row in df.iterrows():
-                    simplified_row = {}
-                    for col in df.columns:
-                        # Manejar diferentes tipos de datos
-                        if pd.api.types.is_datetime64_any_dtype(pd.Series([row[col]])):
-                            simplified_row[col] = row[col].strftime('%Y-%m-%d')
-                        elif hasattr(row[col], 'to_timestamp'):  # Para objetos Period
-                            simplified_row[col] = row[col].to_timestamp().strftime('%Y-%m-%d')
-                        elif pd.isna(row[col]):
-                            simplified_row[col] = None
-                        else:
-                            simplified_row[col] = row[col]
-                    simplified_data.append(simplified_row)
-                
                 # Convertir a JSON
-                json_data = json.dumps(simplified_data)
-                
-                print(f"[INFO] Se cargaron {len(df)} registros desde archivos CSV")
-                return json_data
+                try:
+                    # Crear una lista de diccionarios simplificada
+                    simplified_data = []
+                    for _, row in df.iterrows():
+                        simplified_row = {}
+                        for col in df.columns:
+                            # Manejar diferentes tipos de datos
+                            if pd.api.types.is_datetime64_any_dtype(pd.Series([row[col]])):
+                                # Verificar si el valor es NaT antes de aplicar strftime
+                                if pd.isna(row[col]) or pd.isnull(row[col]):
+                                    simplified_row[col] = None
+                                else:
+                                    simplified_row[col] = row[col].strftime('%Y-%m-%d')
+                            elif hasattr(row[col], 'to_timestamp'):  # Para objetos Period
+                                try:
+                                    simplified_row[col] = row[col].to_timestamp().strftime('%Y-%m-%d')
+                                except:
+                                    # Si hay error al convertir el período, usar None
+                                    simplified_row[col] = None
+                            elif pd.isna(row[col]):
+                                simplified_row[col] = None
+                            else:
+                                simplified_row[col] = row[col]
+                        simplified_data.append(simplified_row)
+                    
+                    # Convertir a JSON
+                    try:
+                        json_data = json.dumps(simplified_data)
+                        
+                        print(f"[INFO] Se cargaron {len(df)} registros desde archivos CSV")
+                        return json_data
+                    except TypeError as e:
+                        # Capturar error de tipos no serializables
+                        print(f"[ERROR] Error de tipo al serializar a JSON: {str(e)}")
+                        
+                        # Intentar una segunda pasada con conversión más estricta
+                        try:
+                            # Convertir todos los valores problemáticos a str o None
+                            for i, item in enumerate(simplified_data):
+                                for key, value in list(item.items()):
+                                    if not (isinstance(value, (str, int, float, bool, type(None)))):
+                                        try:
+                                            simplified_data[i][key] = str(value)
+                                        except:
+                                            simplified_data[i][key] = None
+                            
+                            json_data = json.dumps(simplified_data)
+                            print(f"[INFO] Datos serializados a JSON en segunda pasada, {len(simplified_data)} registros")
+                            return json_data
+                        except Exception as e2:
+                            print(f"[ERROR] Error en segunda pasada al serializar a JSON: {str(e2)}")
+                            import traceback
+                            print(traceback.format_exc())
+                            return dash.no_update
+                except Exception as e:
+                    print(f"[ERROR] Error al crear lista simplificada: {str(e)}")
+                    import traceback
+                    print(traceback.format_exc())
+                    return dash.no_update
             except Exception as e:
                 print(f"[ERROR] Error al serializar a JSON: {str(e)}")
                 import traceback

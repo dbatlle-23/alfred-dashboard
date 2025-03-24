@@ -43,107 +43,133 @@ def process_metrics_data(df, client_id=None, project_id=None, asset_id=None,
     # Make a copy to avoid modifying the original
     processed_df = df.copy()
 
-    # Ensure date column is datetime
-    if 'date' in processed_df.columns:
+    # Verificar si existe la columna 'date' antes de procesarla
+    if 'date' not in processed_df.columns:
+        print(f"[ERROR] process_metrics_data - La columna 'date' no existe en el DataFrame. Columnas disponibles: {processed_df.columns.tolist()}")
+        
+        # Verificar si podemos crear la columna 'date' a partir de otras columnas
+        if 'timestamp' in processed_df.columns:
+            print(f"[INFO] process_metrics_data - Intentando crear columna 'date' a partir de 'timestamp'")
+            try:
+                processed_df['date'] = pd.to_datetime(processed_df['timestamp'], unit='s')
+                print(f"[INFO] process_metrics_data - Columna 'date' creada correctamente a partir de 'timestamp'")
+            except Exception as e:
+                print(f"[ERROR] process_metrics_data - No se pudo crear columna 'date' a partir de 'timestamp': {str(e)}")
+                import traceback
+                print(traceback.format_exc())
+                # Devolver DataFrame vacío para evitar errores posteriores
+                return pd.DataFrame()
+        else:
+            # Si no podemos crear la columna 'date', devolver DataFrame vacío para evitar errores posteriores
+            print(f"[ERROR] process_metrics_data - No hay columna 'date' ni 'timestamp' para procesar los datos")
+            return pd.DataFrame()
+    else:
+        # Ensure date column is datetime
         processed_df['date'] = pd.to_datetime(processed_df['date'])
 
-    # Apply filters
+    # Verificar que existan las columnas necesarias para el filtrado
+    required_columns = ['asset_id']
     if client_id:
+        required_columns.append('client_id')
+    if project_id and project_id != "all":
+        required_columns.append('project_id')
+    
+    missing_columns = [col for col in required_columns if col not in processed_df.columns]
+    if missing_columns:
+        print(f"[ERROR] process_metrics_data - Faltan columnas requeridas para el filtrado: {missing_columns}")
+        # Agregar las columnas faltantes con valores por defecto
+        for col in missing_columns:
+            processed_df[col] = 'unknown'
+        print(f"[INFO] process_metrics_data - Se agregaron columnas faltantes con valores por defecto")
+
+    # Apply filters
+    if client_id and 'client_id' in processed_df.columns:
         processed_df = processed_df[processed_df['client_id'] == client_id]
         print(f"[DEBUG] process_metrics_data - After client_id filter: {len(processed_df)} rows")
     
-    if project_id and project_id != "all":
+    if project_id and project_id != "all" and 'project_id' in processed_df.columns:
         processed_df = processed_df[processed_df['project_id'] == project_id]
         print(f"[DEBUG] process_metrics_data - After project_id filter: {len(processed_df)} rows")
     
-    if asset_id and asset_id != "all":
+    if asset_id and asset_id != "all" and 'asset_id' in processed_df.columns:
         processed_df = processed_df[processed_df['asset_id'] == asset_id]
         print(f"[DEBUG] process_metrics_data - After asset_id filter: {len(processed_df)} rows")
     
     # Filtrado más flexible para consumption_tags
-    if consumption_tags:
+    if consumption_tags and len(processed_df) > 0:
         print(f"[DEBUG] process_metrics_data - Applying consumption_tags filter: {consumption_tags}")
         
-        # Verificar si hay datos antes del filtrado
-        print(f"[DEBUG] process_metrics_data - Unique consumption_type values before filtering: {processed_df['consumption_type'].unique().tolist() if 'consumption_type' in processed_df.columns else 'No consumption_type column'}")
+        # Verificar si existen las columnas para el filtrado
+        consumption_columns = ['consumption_type', 'tag']
+        available_columns = [col for col in consumption_columns if col in processed_df.columns]
         
-        # Crear una máscara para el filtrado
-        mask = pd.Series(False, index=processed_df.index)
-        
-        for tag in consumption_tags:
-            # Verificar si el tag está en la columna consumption_type
-            if 'consumption_type' in processed_df.columns:
-                type_mask = processed_df['consumption_type'] == tag
-                mask = mask | type_mask
-                print(f"[DEBUG] process_metrics_data - Matches for tag {tag} in consumption_type: {type_mask.sum()}")
-            
-            # Verificar si el tag está en la columna tag
-            if 'tag' in processed_df.columns:
-                tag_mask = processed_df['tag'] == tag
-                mask = mask | tag_mask
-                print(f"[DEBUG] process_metrics_data - Matches for tag {tag} in tag column: {tag_mask.sum()}")
-            
-            # Búsqueda más flexible: verificar si el tag está contenido en consumption_type o tag
-            if 'consumption_type' in processed_df.columns:
-                contains_mask = processed_df['consumption_type'].astype(str).str.contains(tag, case=False, na=False)
-                mask = mask | contains_mask
-                print(f"[DEBUG] process_metrics_data - Matches for tag {tag} contained in consumption_type: {contains_mask.sum()}")
-            
-            if 'tag' in processed_df.columns:
-                contains_tag_mask = processed_df['tag'].astype(str).str.contains(tag, case=False, na=False)
-                mask = mask | contains_tag_mask
-                print(f"[DEBUG] process_metrics_data - Matches for tag {tag} contained in tag column: {contains_tag_mask.sum()}")
-        
-        # Si no hay coincidencias, no aplicar el filtro
-        if mask.sum() > 0:
-            processed_df = processed_df[mask]
-            print(f"[DEBUG] process_metrics_data - After consumption_tags filter: {len(processed_df)} rows")
+        if not available_columns:
+            print(f"[WARNING] process_metrics_data - No se encontraron columnas para filtrar por consumption_tags ({consumption_columns})")
         else:
-            print(f"[DEBUG] process_metrics_data - No matches found for consumption_tags, keeping all rows")
+            # Verificar si hay datos antes del filtrado
+            for col in available_columns:
+                print(f"[DEBUG] process_metrics_data - Unique {col} values before filtering: {processed_df[col].unique().tolist()}")
+            
+            # Crear una máscara para el filtrado
+            mask = pd.Series(False, index=processed_df.index)
+            
+            for tag in consumption_tags:
+                # Verificar si el tag está en la columna consumption_type
+                if 'consumption_type' in processed_df.columns:
+                    type_mask = processed_df['consumption_type'] == tag
+                    mask = mask | type_mask
+                    print(f"[DEBUG] process_metrics_data - Matches for tag {tag} in consumption_type: {type_mask.sum()}")
+                
+                # Verificar si el tag está en la columna tag
+                if 'tag' in processed_df.columns:
+                    tag_mask = processed_df['tag'] == tag
+                    mask = mask | tag_mask
+                    print(f"[DEBUG] process_metrics_data - Matches for tag {tag} in tag column: {tag_mask.sum()}")
+                
+                # Búsqueda más flexible: verificar si el tag está contenido en consumption_type o tag
+                if 'consumption_type' in processed_df.columns:
+                    contains_mask = processed_df['consumption_type'].astype(str).str.contains(tag, case=False, na=False)
+                    mask = mask | contains_mask
+                    print(f"[DEBUG] process_metrics_data - Matches for tag {tag} contained in consumption_type: {contains_mask.sum()}")
+                
+                if 'tag' in processed_df.columns:
+                    contains_tag_mask = processed_df['tag'].astype(str).str.contains(tag, case=False, na=False)
+                    mask = mask | contains_tag_mask
+                    print(f"[DEBUG] process_metrics_data - Matches for tag {tag} contained in tag column: {contains_tag_mask.sum()}")
+            
+            # Si no hay coincidencias, no aplicar el filtro
+            if mask.sum() > 0:
+                processed_df = processed_df[mask]
+                print(f"[DEBUG] process_metrics_data - After consumption_tags filter: {len(processed_df)} rows")
+            else:
+                print(f"[DEBUG] process_metrics_data - No matches found for consumption_tags, keeping all rows")
     
-    if start_date:
-        start_date = pd.to_datetime(start_date)
-        processed_df = processed_df[processed_df['date'] >= start_date]
-        print(f"[DEBUG] process_metrics_data - After start_date filter: {len(processed_df)} rows")
+    # Aplicar filtros de fecha solo si la columna 'date' existe y está en formato datetime
+    if 'date' in processed_df.columns:
+        if start_date:
+            try:
+                start_date = pd.to_datetime(start_date)
+                processed_df = processed_df[processed_df['date'] >= start_date]
+                print(f"[DEBUG] process_metrics_data - After start_date filter: {len(processed_df)} rows")
+            except Exception as e:
+                print(f"[ERROR] process_metrics_data - Error al aplicar filtro de start_date: {str(e)}")
+                
+        if end_date:
+            try:
+                end_date = pd.to_datetime(end_date)
+                processed_df = processed_df[processed_df['date'] <= end_date]
+                print(f"[DEBUG] process_metrics_data - After end_date filter: {len(processed_df)} rows")
+            except Exception as e:
+                print(f"[ERROR] process_metrics_data - Error al aplicar filtro de end_date: {str(e)}")
+    else:
+        print(f"[WARNING] process_metrics_data - No se pudo aplicar filtro de fechas porque la columna 'date' no existe")
     
-    if end_date:
-        end_date = pd.to_datetime(end_date)
-        processed_df = processed_df[processed_df['date'] <= end_date]
-        print(f"[DEBUG] process_metrics_data - After end_date filter: {len(processed_df)} rows")
-
-    # Limit rows if necessary
-    if len(processed_df) > DATA_PROCESSING['max_rows']:
-        processed_df = processed_df.sample(DATA_PROCESSING['max_rows'], random_state=42)
-        print(f"[DEBUG] process_metrics_data - After max_rows limit: {len(processed_df)} rows")
-
-    # Aplicar detección y corrección de anomalías
-    try:
-        # Crear instancia del adaptador de anomalías
-        anomaly_adapter = AnomalyAdapter()
+    # Verificar si el DataFrame resultante tiene datos
+    if processed_df.empty:
+        print(f"[WARNING] process_metrics_data - Después de aplicar todos los filtros, el DataFrame está vacío")
+    else:
+        print(f"[INFO] process_metrics_data - DataFrame resultante tiene {len(processed_df)} filas y {len(processed_df.columns)} columnas")
         
-        # Procesar los datos para detectar y corregir anomalías
-        # El adaptador verificará internamente si los feature flags están habilitados
-        processed_df = anomaly_adapter.process_readings(processed_df)
-        
-        # Si hay una columna 'corrected_value', usarla como 'consumption'
-        if 'corrected_value' in processed_df.columns:
-            # Guardar los valores originales en una columna separada si no existe
-            if 'original_consumption' not in processed_df.columns:
-                processed_df['original_consumption'] = processed_df['consumption']
-            
-            # Usar los valores corregidos como valores principales
-            processed_df['consumption'] = processed_df['corrected_value']
-            
-            # Contar cuántos valores fueron corregidos
-            corrected_count = processed_df['is_corrected'].sum() if 'is_corrected' in processed_df.columns else 0
-            
-            logger.info(f"Aplicada corrección de anomalías: {corrected_count} valores corregidos")
-            print(f"[DEBUG] process_metrics_data - Aplicada corrección de anomalías: {corrected_count} valores corregidos")
-    except Exception as e:
-        logger.error(f"Error al aplicar corrección de anomalías: {str(e)}")
-        print(f"[DEBUG] process_metrics_data - Error al aplicar corrección de anomalías: {str(e)}")
-
-    print(f"[DEBUG] process_metrics_data - Final DataFrame shape: {processed_df.shape}")
     return processed_df
 
 def aggregate_data_by_project(df):
