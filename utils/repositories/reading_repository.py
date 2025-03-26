@@ -32,19 +32,33 @@ class ReadingRepository:
                 if os.path.isdir(project_path):
                     # Buscar archivos que coincidan con el patrón
                     for filename in os.listdir(project_path):
-                        if filename.startswith(f"daily_readings_{asset_id}__") and filename.endswith(".csv"):
+                        # Buscar archivos con un solo guion bajo (formato según PROJECT_CONTEXT.md)
+                        if filename.startswith(f"daily_readings_{asset_id}_") and filename.endswith(".csv"):
                             file_path = os.path.join(project_path, filename)
                             matching_files.append({
                                 "project_id": project_folder,
                                 "filename": filename,
-                                "full_path": file_path
+                                "full_path": file_path,
+                                "priority": 1  # Mayor prioridad para el formato según PROJECT_CONTEXT.md
+                            })
+                        # Buscar archivos con doble guion bajo (formato antiguo)
+                        elif filename.startswith(f"daily_readings_{asset_id}__") and filename.endswith(".csv"):
+                            file_path = os.path.join(project_path, filename)
+                            matching_files.append({
+                                "project_id": project_folder,
+                                "filename": filename,
+                                "full_path": file_path,
+                                "priority": 2  # Menor prioridad para el formato antiguo
                             })
         
         # Si encontramos archivos CSV, cargar los datos
         if matching_files:
             logger.info(f"Se encontraron {len(matching_files)} archivos CSV para el asset {asset_id}")
             
-            # Usar el primer archivo encontrado
+            # Ordenar por prioridad (primero los de formato nuevo, luego los antiguos)
+            matching_files.sort(key=lambda x: x.get("priority", 99))
+            
+            # Usar el primer archivo encontrado según la prioridad
             file_path = matching_files[0]["full_path"]
             logger.info(f"Cargando datos desde {file_path}")
             

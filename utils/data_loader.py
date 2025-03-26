@@ -63,20 +63,21 @@ TAGS_TO_CONSUMPTION_TYPE = {
     "_TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_THERMAL_ENERGY_HEAT": "Energía térmica calor"
 }
 
-def extract_asset_and_tag(filename: str) -> Tuple[str, str]:
+def extract_asset_and_tag(filename: str) -> Tuple[Optional[str], Optional[str]]:
     """
     Extrae el ID del asset y el tag del nombre del archivo.
     
-    Formatos soportados:
-    - daily_readings_ASSETID__tag_name.csv
-    - daily_readings_ASSETID__TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_tag_name.csv
-    - daily_readings_ASSETID__tag_name_YYYY.csv
+    Formatos soportados (en orden de prioridad):
+    1. daily_readings_<asset_id>_<consumption_type>.csv (Formato principal según PROJECT_CONTEXT.md)
+    2. daily_readings_<asset_id>__TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_<tag>.csv
+    3. daily_readings_<asset_id>__<tag>.csv
+    4. daily_readings_<asset_id>__<tag>_<year>.csv
     
     Args:
         filename: Nombre del archivo
         
     Returns:
-        Tupla con (asset_id, tag)
+        Tupla con (asset_id, tag) o (None, None) si no se puede extraer
     """
     try:
         # Obtener solo el nombre del archivo sin la ruta
@@ -88,8 +89,76 @@ def extract_asset_and_tag(filename: str) -> Tuple[str, str]:
             debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - Formato de archivo no reconocido: {base_filename}")
             return None, None
         
-        # Verificar si el archivo contiene el formato TRANSVERSAL
-        if '__TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_' in base_filename:
+        # Remover el prefijo 'daily_readings_'
+        filename_without_prefix = base_filename.replace('daily_readings_', '')
+        
+        # CASO 1: Verificar si el archivo usa el formato del PROJECT_CONTEXT.md: 
+        # daily_readings_<asset_id>_<consumption_type>.csv
+        if '_' in filename_without_prefix and not filename_without_prefix.startswith('_'):
+            # Este es el formato principal según la documentación
+            parts = filename_without_prefix.split('_')
+            asset_id = parts[0]
+            
+            # Extraer el tipo de consumo (todo lo que viene después del primer guión bajo)
+            consumption_type_part = '_'.join(parts[1:]).replace('.csv', '')
+            
+            # Intentar encontrar el tag correspondiente al tipo de consumo
+            tag = None
+            
+            # Buscar coincidencias exactas primero
+            for known_tag, _ in TAGS_TO_CONSUMPTION_TYPE.items():
+                if consumption_type_part in known_tag:
+                    tag = known_tag
+                    break
+            
+            # Si no se encuentra, buscar por la última parte (short name)
+            if not tag:
+                # Buscar en los tags conocidos para encontrar coincidencias parciales
+                for known_tag in TAGS_TO_CONSUMPTION_TYPE.keys():
+                    short_name = known_tag.split('_')[-1].lower()
+                    consumption_type_lower = consumption_type_part.lower()
+                    
+                    if short_name in consumption_type_lower or consumption_type_lower in short_name:
+                        tag = known_tag
+                        break
+            
+            # Si aún no se encuentra, intentar con formato de prefijo TRANSVERSAL
+            if not tag and 'TRANSVERSAL' in consumption_type_part:
+                # Normalizar el formato para que tenga un guión bajo al inicio
+                tag = '_' + consumption_type_part
+            
+            # Si sigue sin encontrarse, buscar palabras clave
+            if not tag:
+                # Buscar coincidencias parciales por palabra clave
+                for known_tag in TAGS_TO_CONSUMPTION_TYPE.keys():
+                    for keyword in ["WATER", "ENERGY", "FLOW", "DOMESTIC", "THERMAL"]:
+                        if keyword in consumption_type_part and keyword in known_tag:
+                            tag = known_tag
+                            break
+                    if tag:
+                        break
+            
+            # Si no se ha encontrado ninguna coincidencia, usar el tag original
+            if not tag:
+                tag = consumption_type_part
+            
+            debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - Formato PROJECT_CONTEXT: Asset ID: {asset_id}, Tag: {tag}")
+            
+            # Verificar si el tag está en el mapeo TAGS_TO_CONSUMPTION_TYPE
+            consumption_type = TAGS_TO_CONSUMPTION_TYPE.get(tag, "Desconocido")
+            debug_log(f"[DEBUG CRÍTICO] extract_asset_and_tag - Tag '{tag}' mapeado a tipo de consumo: '{consumption_type}'")
+            
+            if consumption_type == "Desconocido":
+                debug_log(f"[DEBUG CRÍTICO] extract_asset_and_tag - ¡ALERTA! Tag '{tag}' no encontrado en TAGS_TO_CONSUMPTION_TYPE")
+                # Listar todas las claves disponibles en el mapeo para depuración
+                available_tags = list(TAGS_TO_CONSUMPTION_TYPE.keys())
+                debug_log(f"[DEBUG CRÍTICO] extract_asset_and_tag - Tags disponibles en mapeo: {available_tags}")
+            
+            return asset_id, tag
+        
+        # CASO 2: Formato con doble guión bajo y tag transversal
+        # daily_readings_<asset_id>__TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_<tag>.csv
+        elif '__TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_' in base_filename:
             # Formato: daily_readings_ASSETID__TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_tag_name.csv
             debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - Detectado formato con __TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_")
             
@@ -107,41 +176,104 @@ def extract_asset_and_tag(filename: str) -> Tuple[str, str]:
             tag = '_' + tag_part
             debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - Tag extraído y normalizado: {tag}")
             
+            # DEBUG: Verificar si el tag está en el mapeo TAGS_TO_CONSUMPTION_TYPE
+            consumption_type = TAGS_TO_CONSUMPTION_TYPE.get(tag, "Desconocido")
+            debug_log(f"[DEBUG CRÍTICO] extract_asset_and_tag - Tag '{tag}' mapeado a tipo de consumo: '{consumption_type}'")
+            
+            if consumption_type == "Desconocido":
+                debug_log(f"[DEBUG CRÍTICO] extract_asset_and_tag - ¡ALERTA! Tag '{tag}' no encontrado en TAGS_TO_CONSUMPTION_TYPE")
+                # Listar todas las claves disponibles en el mapeo para depuración
+                available_tags = list(TAGS_TO_CONSUMPTION_TYPE.keys())
+                debug_log(f"[DEBUG CRÍTICO] extract_asset_and_tag - Tags disponibles en mapeo: {available_tags}")
+            
             debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - Archivo: {base_filename} -> Asset ID: {asset_id}, Tag: {tag}")
             return asset_id, tag
+        
+        # CASO 3: Formato con doble guión bajo pero sin tag transversal
+        # daily_readings_<asset_id>__<tag>.csv
+        elif '__' in base_filename:
+            parts = base_filename.split('__')
+            asset_id = parts[0].replace('daily_readings_', '')
+            tag_part = parts[1]
+            debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - Formato con doble guión bajo: partes={parts}")
             
-        # Para otros formatos, usar la lógica original
+            # Eliminar la extensión .csv
+            if tag_part.endswith('.csv'):
+                tag_part = tag_part[:-4]
+            
+            # CASO 4: Verificar si tiene año al final
+            # daily_readings_<asset_id>__<tag>_<year>.csv
+            if '_' in tag_part and tag_part.split('_')[-1].isdigit():
+                # Quitar el año del final
+                tag_parts = tag_part.split('_')
+                tag = '_'.join(tag_parts[:-1])
+                debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - Detectado año al final: {tag_parts[-1]}, tag sin año: {tag}")
+            else:
+                tag = tag_part
+            
+            debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - Asset ID: {asset_id}, Tag: {tag}")
+            
+            # Verificar si el tag está en el mapeo TAGS_TO_CONSUMPTION_TYPE
+            # Primero intentamos con el tag tal cual
+            consumption_type = TAGS_TO_CONSUMPTION_TYPE.get(tag, None)
+            
+            # Si no se encuentra, intentamos con un guión bajo al inicio
+            if consumption_type is None and not tag.startswith('_'):
+                prefixed_tag = '_' + tag
+                consumption_type = TAGS_TO_CONSUMPTION_TYPE.get(prefixed_tag, None)
+                if consumption_type is not None:
+                    tag = prefixed_tag
+                    debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - Tag normalizado con guión bajo inicial: {tag}")
+            
+            # Si aún no se encuentra, usamos la lógica de coincidencia parcial
+            if consumption_type is None:
+                # Buscar coincidencias parciales
+                for known_tag, known_type in TAGS_TO_CONSUMPTION_TYPE.items():
+                    # Extraer últimas partes de ambos tags para comparación
+                    known_parts = known_tag.split('_')
+                    tag_parts = tag.split('_')
+                    
+                    if tag_parts[-1].lower() == known_parts[-1].lower():
+                        tag = known_tag
+                        consumption_type = known_type
+                        debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - Coincidencia parcial encontrada, usando tag: {tag}")
+                        break
+            
+            # Si no se encontró ninguna coincidencia, asignamos "Desconocido"
+            if consumption_type is None:
+                consumption_type = "Desconocido"
+                debug_log(f"[DEBUG CRÍTICO] extract_asset_and_tag - ¡ALERTA! Tag '{tag}' no encontrado en TAGS_TO_CONSUMPTION_TYPE")
+                # Listar todas las claves disponibles en el mapeo para depuración
+                available_tags = list(TAGS_TO_CONSUMPTION_TYPE.keys())
+                debug_log(f"[DEBUG CRÍTICO] extract_asset_and_tag - Tags disponibles en mapeo: {available_tags}")
+            
+            return asset_id, tag
+        
+        # Si llegamos aquí, intentar un último esfuerzo con la lógica original
         # Eliminar 'daily_readings_' del inicio
-        parts = base_filename.replace('daily_readings_', '').split('_')
-        debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - Partes del nombre después de eliminar 'daily_readings_': {parts}")
+        parts = filename_without_prefix.split('_')
+        debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - Último intento, partes: {parts}")
         
-        # Extraer el asset_id (primera parte después de daily_readings_)
-        asset_id = parts[0]
-        debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - Asset ID extraído: {asset_id}")
-        
-        # Determinar el tag basado en el formato del archivo
-        if len(parts) >= 3 and parts[-1].endswith('.csv'):
-            # Formato: daily_readings_ASSETID__tag_name.csv
-            # Unir todas las partes excepto el asset_id y la extensión
-            tag = '_'.join(parts[1:]).replace('.csv', '')
-            debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - Tag extraído del formato estándar: {tag}")
-        elif len(parts) >= 3 and parts[-1].isdigit():
-            # Formato: daily_readings_ASSETID__tag_name_YYYY.csv
-            # Unir todas las partes excepto el asset_id y el año
-            tag = '_'.join(parts[1:-1])
-            debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - Tag extraído del formato con año: {tag}")
-        else:
-            # Si no podemos determinar el formato, usamos un valor por defecto
-            tag = 'unknown'
-            debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - No se pudo determinar el formato del archivo: {base_filename}")
-        
-        # Añadir log para depuración
-        debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - Archivo: {base_filename} -> Asset ID: {asset_id}, Tag: {tag}")
+        if len(parts) >= 1:
+            asset_id = parts[0]
+            debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - Asset ID extraído: {asset_id}")
             
-        return asset_id, tag
+            if len(parts) >= 2:
+                # Intentar construir un tag que tenga sentido
+                tag = '_'.join(parts[1:]).replace('.csv', '')
+                debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - Tag extraído: {tag}")
+                return asset_id, tag
+            else:
+                debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - No se pudo extraer un tag, usando 'unknown'")
+                return asset_id, 'unknown'
+        
+        # Si no podemos identificar ningún formato
+        debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - No se pudo identificar ningún formato conocido: {base_filename}")
+        return None, None
+        
     except Exception as e:
         debug_log(f"[DEBUG DETALLADO] extract_asset_and_tag - No se pudo extraer assetId y tag de {filename}: {str(e)}")
-        print(f"No se pudo extraer assetId y tag de {filename}")
+        print(f"No se pudo extraer assetId y tag de {filename}: {str(e)}")
         return None, None
 
 def load_csv_data(file_path: str) -> Optional[pd.DataFrame]:
@@ -304,6 +436,34 @@ def load_csv_data(file_path: str) -> Optional[pd.DataFrame]:
         consumption_type = TAGS_TO_CONSUMPTION_TYPE.get(tag, "Desconocido")
         df['consumption_type'] = consumption_type
         debug_log(f"[DEBUG DETALLADO] load_csv_data - Tipo de consumo mapeado: {consumption_type} para tag: {tag}")
+        
+        # Logs adicionales para debugging
+        debug_log(f"[DEBUG CRÍTICO] load_csv_data - Asignando tipo de consumo para el archivo: {file_path}")
+        debug_log(f"[DEBUG CRÍTICO] load_csv_data - Tag extraído: '{tag}'")
+        debug_log(f"[DEBUG CRÍTICO] load_csv_data - Tipo de consumo asignado: '{consumption_type}'")
+        
+        if consumption_type == "Desconocido":
+            debug_log(f"[DEBUG CRÍTICO] load_csv_data - ¡ALERTA! El tag '{tag}' no corresponde a ningún tipo de consumo conocido")
+            debug_log(f"[DEBUG CRÍTICO] load_csv_data - Verificando si el tag está presente en otra forma en el mapeo:")
+            
+            # Intentar encontrar coincidencias parciales
+            partial_matches = []
+            for known_tag, known_type in TAGS_TO_CONSUMPTION_TYPE.items():
+                if tag in known_tag or known_tag in tag:
+                    partial_matches.append((known_tag, known_type))
+            
+            if partial_matches:
+                debug_log(f"[DEBUG CRÍTICO] load_csv_data - Coincidencias parciales encontradas: {partial_matches}")
+            else:
+                debug_log(f"[DEBUG CRÍTICO] load_csv_data - No se encontraron coincidencias parciales")
+            
+            # Ver si el tag sin guión bajo inicial está en el mapeo
+            if tag.startswith('_') and tag[1:] in TAGS_TO_CONSUMPTION_TYPE:
+                debug_log(f"[DEBUG CRÍTICO] load_csv_data - El tag sin guión bajo inicial '{tag[1:]}' está en el mapeo")
+            
+            # Ver si el tag con guión bajo inicial está en el mapeo
+            if not tag.startswith('_') and f"_{tag}" in TAGS_TO_CONSUMPTION_TYPE:
+                debug_log(f"[DEBUG CRÍTICO] load_csv_data - El tag con guión bajo inicial '_{tag}' está en el mapeo")
         
         # Extraer el project_id del path (asumiendo estructura de carpetas)
         path_parts = file_path.split(os.sep)

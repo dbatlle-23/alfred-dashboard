@@ -411,7 +411,7 @@ def create_monthly_summary_table(df, title="Resumen Mensual de Consumos"):
     
     # Create the table with cell selection enabled
     table = dash_table.DataTable(
-        id='monthly-summary-table',
+        id='metrics-monthly-summary-table',
         columns=[
             {"name": "Mes", "id": "month"},
             {"name": "Consumo Total", "id": "total_consumption"},
@@ -446,8 +446,6 @@ def create_monthly_summary_table(df, title="Resumen Mensual de Consumos"):
     
     return html.Div([
         html.H5(title, className="mb-3"),
-        table,
-        # Añadir un store para los metadatos de cálculo
-        dcc.Store(id="monthly-summary-calculation-metadata")
+        table
     ])
 

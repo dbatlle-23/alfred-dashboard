@@ -444,7 +444,7 @@ Data files are organized in the following structure:
 data/
 └── analyzed_data/
     ├── <project_id>/                      # Directories named with project UUIDs
-    │   └── daily_readings_<asset_id>__<consumption_type>.csv  # Daily consumption readings for specific assets
+    │   └── daily_readings_<asset_id>_<consumption_type>.csv  # Daily consumption readings for specific assets
     ├── anomaly_config.json                # Configuration for anomaly detection thresholds
     ├── corrections_log.json               # Log of manual corrections applied to readings
     ├── anomaly_learning.json              # Learning data for anomaly detection
@@ -456,7 +456,7 @@ data/
 #### Daily Readings CSV Files
 
 Daily consumption readings are stored in CSV files with the following naming convention:
-`daily_readings_<asset_id>__<consumption_type>.csv`
+`daily_readings_<asset_id>_<consumption_type>.csv`
 
 These files contain the following columns:
 - `date`: Date of the reading in YYYY-MM-DD format

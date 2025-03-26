@@ -337,7 +337,9 @@ def create_layout():
                         dbc.Row([
                             dbc.Col([
                                 html.H5("Tabla de Resumen Mensual", className="mt-4"),
-                                html.Div(id="metrics-monthly-summary-table")
+                                html.Div(id="metrics-monthly-summary-table"),
+                                # Store para los metadatos de cálculo mensual
+                                dcc.Store(id="metrics-monthly-summary-calculation-metadata")
                             ], width=12)
                         ]),
                         

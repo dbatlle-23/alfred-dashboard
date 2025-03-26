@@ -11,10 +11,10 @@ def register_modal_callbacks(app):
         [Output("calculation-detail-modal", "is_open"),
          Output("calculation-detail-modal-header", "children"),
          Output("calculation-detail-modal-content", "children")],
-        [Input("monthly-summary-table", "active_cell"),
+        [Input("metrics-monthly-summary-table", "active_cell"),
          Input("close-calculation-detail-modal", "n_clicks")],
-        [State("monthly-summary-table", "data"),
-         State("monthly-summary-calculation-metadata", "data")]
+        [State("metrics-monthly-summary-table", "data"),
+         State("metrics-monthly-summary-calculation-metadata", "data")]
     )
     def toggle_calculation_detail_modal(active_cell, close_clicks, table_data, metadata):
         """
@@ -45,7 +45,7 @@ def register_modal_callbacks(app):
             return False, "", ""
         
         # Si se seleccionó una celda
-        if trigger_id == "monthly-summary-table" and active_cell:
+        if trigger_id == "metrics-monthly-summary-table" and active_cell:
             # Verificar que tenemos los datos necesarios
             if not table_data or not metadata:
                 return True, "Error", "No se pudieron cargar los detalles de cálculo."
@@ -80,7 +80,7 @@ def register_modal_callbacks(app):
         return default_return
     
     @app.callback(
-        Output("monthly-summary-calculation-metadata", "data"),
+        Output("metrics-monthly-summary-calculation-metadata", "data"),
         [Input("metrics-data-store", "data"),
          Input("metrics-monthly-summary-table", "children")],
         [State("metrics-client-filter", "value"),

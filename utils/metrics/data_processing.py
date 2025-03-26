@@ -723,3 +723,112 @@ def get_consumption_unit(df):
     
     # Si no se puede determinar, devolver un valor por defecto
     return "Unidades"
+
+def generate_monthly_readings_table(df, start_date=None, end_date=None):
+    """
+    Genera una tabla de lecturas mensuales por activo.
+    
+    Args:
+        df: DataFrame con los datos
+        start_date: Fecha de inicio (opcional)
+        end_date: Fecha de fin (opcional)
+        
+    Returns:
+        DataFrame con la tabla de lecturas mensuales
+    """
+    if df.empty:
+        print("No data available to generate monthly readings table")
+        return pd.DataFrame()
+    
+    # Print information about the dataframe for debugging
+    print(f"[DEBUG TABLA MENSUAL] Columnas en DataFrame: {df.columns.tolist()}")
+    print(f"[DEBUG TABLA MENSUAL] Tipos de consumo únicos: {df['consumption_type'].unique() if 'consumption_type' in df.columns else 'No hay columna consumption_type'}")
+    if 'tag' in df.columns:
+        print(f"[DEBUG TABLA MENSUAL] Tags únicos: {df['tag'].unique()}")
+    
+    try:
+        # Filter by date range if provided
+        if start_date:
+            start_date = pd.to_datetime(start_date)
+            df = df[df['date'] >= start_date]
+        
+        if end_date:
+            end_date = pd.to_datetime(end_date)
+            df = df[df['date'] <= end_date]
+        
+        # Process each asset
+        asset_readings = {}
+        for asset_id, asset_group in df.groupby('asset_id'):
+            print(f"[DEBUG TABLA MENSUAL] Procesando asset {asset_id}")
+            
+            # Get consumption type for this asset
+            if 'consumption_type' in asset_group.columns:
+                consumption_type = asset_group['consumption_type'].mode().iloc[0] if not asset_group['consumption_type'].empty else "Desconocido"
+                print(f"[DEBUG TABLA MENSUAL] Asset {asset_id}: consumption_type = {consumption_type}")
+                unique_types = asset_group['consumption_type'].unique()
+                print(f"[DEBUG TABLA MENSUAL] Asset {asset_id}: consumptions_types únicos = {unique_types}")
+            else:
+                print(f"[DEBUG TABLA MENSUAL] Asset {asset_id}: No hay columna consumption_type")
+                consumption_type = "Desconocido"
+
+            # Process each month
+            monthly_readings = {}
+            for month, month_group in asset_group.groupby('month'):
+                try:
+                    # Sort by date
+                    month_group = month_group.sort_values('date')
+                    
+                    # Get first and last readings
+                    first_reading = month_group['consumption'].iloc[0]
+                    last_reading = month_group['consumption'].iloc[-1]
+                    
+                    # Calculate monthly consumption
+                    monthly_consumption = last_reading - first_reading
+                    
+                    # Store in dict
+                    month_name = pd.to_datetime(str(month)).strftime('%B %Y')
+                    monthly_readings[month_name] = {
+                        'first_reading': first_reading,
+                        'last_reading': last_reading,
+                        'consumption': monthly_consumption
+                    }
+                except Exception as e:
+                    print(f"Error processing month {month} for asset {asset_id}: {str(e)}")
+            
+            # Store asset data
+            asset_readings[asset_id] = {
+                'consumption_type': consumption_type,
+                'monthly_readings': monthly_readings
+            }
+        
+        # Create pivot table
+        rows = []
+        for asset_id, asset_data in asset_readings.items():
+            consumption_type = asset_data['consumption_type']
+            row = {'Asset': asset_id, 'consumption_type': consumption_type}
+            
+            # Add monthly readings
+            for month, readings in asset_data['monthly_readings'].items():
+                row[month] = readings['consumption']
+            
+            rows.append(row)
+        
+        # If no rows, return empty DataFrame
+        if not rows:
+            print("No rows generated for monthly readings table")
+            return pd.DataFrame()
+        
+        # Create DataFrame
+        pivot = pd.DataFrame(rows)
+        
+        # Print the DataFrame for debugging
+        print(f"[DEBUG TABLA MENSUAL] DataFrame final generado: {pivot.shape}")
+        print(f"[DEBUG TABLA MENSUAL] Columnas en DataFrame final: {pivot.columns.tolist()}")
+        print(f"[DEBUG TABLA MENSUAL] Valores únicos de consumption_type en DataFrame final: {pivot['consumption_type'].unique() if 'consumption_type' in pivot.columns else 'No hay columna consumption_type'}")
+        
+        return pivot
+    except Exception as e:
+        print(f"Error generating monthly readings table: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return pd.DataFrame()

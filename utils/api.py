@@ -623,42 +623,78 @@ def get_sensors_with_tags(asset_id, token=None):
         'Accept': 'application/json, text/plain, */*',
     })
     
-    logger.debug(f"Obteniendo sensores para el asset {asset_id} con token: {token[:10]}...")
-    response = requests.get(url, headers=headers)
+    logger.debug(f"[DEBUG] get_sensors_with_tags - Obteniendo sensores para el asset {asset_id}")
+    
+    # Añadir parámetros para obtener más información
+    params = {
+        "include_details": True,
+        "active_only": True
+    }
+    
+    try:
+        logger.debug(f"[DEBUG] get_sensors_with_tags - URL: {url}, Params: {params}")
+        response = requests.get(url, headers=headers, params=params)
+        
+        logger.debug(f"[DEBUG] get_sensors_with_tags - Status Code: {response.status_code}")
+        
+        if response.status_code == 200:
+            response_data = response.json()
+            logger.debug(f"[DEBUG] get_sensors_with_tags - Respuesta completa: {response_data}")
+            
+            sensors = response_data.get('data', [])
+            logger.debug(f"[DEBUG] get_sensors_with_tags - Sensores obtenidos: {sensors}")
+            
+            if not sensors:
+                logger.warning(f"[WARNING] get_sensors_with_tags - No se encontraron sensores disponibles para el asset {asset_id}")
+                return []
+            else:
+                sensor_list = []
+                for sensor in sensors:
+                    gateway_id = sensor.get('gateway_id')
+                    device_id = sensor.get('device_id')
+                    sensor_id = sensor.get('sensor_id')
+                    tag_name = sensor.get('tag_name')
+                    
+                    logger.debug(f"[DEBUG] get_sensors_with_tags - Procesando sensor: gateway_id={gateway_id}, device_id={device_id}, sensor_id={sensor_id}, tag_name={tag_name}")
 
-    if response.status_code == 200:
-        sensors = response.json().get('data', [])
-        if not sensors:
-            logger.warning("No se encontraron sensores disponibles para este asset.")
-            return []
+                    # Obtener el sensor_uuid utilizando la función auxiliar
+                    sensor_uuid = get_sensor_uuid(gateway_id, device_id, sensor_id, token)
+                    logger.debug(f"[DEBUG] get_sensors_with_tags - Sensor UUID obtenido: {sensor_uuid}")
+
+                    # Agregar el sensor con todos sus datos al listado
+                    sensor_data = {
+                        "sensor_id": sensor_id,
+                        "sensor_type": sensor.get('sensor_type'),
+                        "tag_name": tag_name,
+                        "sensor_uuid": sensor_uuid,
+                        "gateway_id": gateway_id,
+                        "device_id": device_id
+                    }
+                    sensor_list.append(sensor_data)
+                    logger.debug(f"[DEBUG] get_sensors_with_tags - Sensor agregado: {sensor_data}")
+                
+                # Registrar información sobre los sensores encontrados
+                logger.info(f"[INFO] get_sensors_with_tags - Se encontraron {len(sensor_list)} sensores para el asset {asset_id}")
+                
+                # Crear un diccionario para facilitar la búsqueda por tag_name
+                sensor_dict = {}
+                for s in sensor_list:
+                    logger.debug(f"[DEBUG] get_sensors_with_tags - Sensor procesado: tag={s['tag_name']}, gateway={s['gateway_id']}, device={s['device_id']}, sensor={s['sensor_id']}")
+                    if s['tag_name']:
+                        sensor_dict[s['tag_name']] = s
+                
+                # Imprimir el diccionario final para depuración
+                logger.debug(f"[DEBUG] get_sensors_with_tags - Diccionario de sensores final: {sensor_dict}")
+                
+                # Retornar la lista original como se espera
+                return sensor_list
         else:
-            sensor_list = []
-            for sensor in sensors:
-                gateway_id = sensor.get('gateway_id')
-                device_id = sensor.get('device_id')
-                sensor_id = sensor.get('sensor_id')
-
-                # Obtener el sensor_uuid utilizando la función auxiliar
-                sensor_uuid = get_sensor_uuid(gateway_id, device_id, sensor_id, token)
-
-                # Agregar el sensor con todos sus datos al listado
-                sensor_list.append({
-                    "sensor_id": sensor_id,
-                    "sensor_type": sensor.get('sensor_type'),
-                    "tag_name": sensor.get('tag_name'),
-                    "sensor_uuid": sensor_uuid,
-                    "gateway_id": gateway_id,
-                    "device_id": device_id
-                })
-            
-            # Registrar información sobre los sensores encontrados
-            logger.info(f"Se encontraron {len(sensor_list)} sensores para el asset {asset_id}")
-            for s in sensor_list:
-                logger.debug(f"Sensor: tag={s['tag_name']}, gateway={s['gateway_id']}, device={s['device_id']}, sensor={s['sensor_id']}")
-            
-            return sensor_list
-    else:
-        logger.error(f"Error al obtener sensores: {response.status_code}, {response.text}")
+            logger.error(f"[ERROR] get_sensors_with_tags - Error al obtener sensores: {response.status_code}, {response.text}")
+            return []
+    except Exception as e:
+        logger.error(f"[ERROR] get_sensors_with_tags - Excepción: {str(e)}")
+        import traceback
+        logger.error(f"[ERROR] get_sensors_with_tags - Traceback: {traceback.format_exc()}")
         return []
 
 def ensure_project_folder_exists(project_id):
@@ -797,15 +833,15 @@ def get_daily_readings_for_tag(asset_id, tag_name, project_folder, token=None):
         project_folder (str): Ruta a la carpeta del proyecto
         token (str, optional): Token JWT para autenticación
     """
-    # Nombre del archivo donde se guardan las lecturas (con doble guion bajo entre asset_id y tag_name)
-    file_name = f"daily_readings_{asset_id}__{tag_name}.csv"  # Notar el doble guion bajo
+    # Nombre del archivo donde se guardan las lecturas (con un solo guion bajo entre asset_id y tag_name)
+    file_name = f"daily_readings_{asset_id}_{tag_name}.csv"  # Formato según PROJECT_CONTEXT.md
     file_path = os.path.join(project_folder, file_name)
     
-    # También verificar si existe archivo con formato antiguo (un solo guion bajo)
+    # También verificar si existe archivo con formato antiguo (doble guion bajo)
     old_format_file_name = f"daily_readings_{asset_id}__{tag_name}.csv"
     old_format_file_path = os.path.join(project_folder, old_format_file_name)
     
-    # Si existe el archivo con formato antiguo pero no el nuevo, renombrar
+    # Si existe el archivo con formato antiguo pero no el nuevo, migrar
     if os.path.exists(old_format_file_path) and not os.path.exists(file_path):
         try:
             import shutil
@@ -894,9 +930,22 @@ def get_daily_readings_with_sensor_params(asset_id, gateway_id, device_id, senso
     start_date = datetime(2024, 1, 1)
     end_date = datetime.now()
     
-    # Nombre del archivo donde se guardan las lecturas
-    file_name = f"daily_readings_{asset_id}__{tag_name}.csv"
+    # Nombre del archivo donde se guardan las lecturas (con un solo guion bajo)
+    file_name = f"daily_readings_{asset_id}_{tag_name}.csv"  # Formato según PROJECT_CONTEXT.md
     file_path = os.path.join(project_folder, file_name)
+    
+    # Verificar si existe archivo con formato antiguo (doble guion bajo)
+    old_format_file_name = f"daily_readings_{asset_id}__{tag_name}.csv"
+    old_format_file_path = os.path.join(project_folder, old_format_file_name)
+    
+    # Si existe el archivo con formato antiguo pero no el nuevo, migrar
+    if os.path.exists(old_format_file_path) and not os.path.exists(file_path):
+        try:
+            import shutil
+            shutil.copy2(old_format_file_path, file_path)
+            logger.info(f"Archivo migrado de formato antiguo a nuevo: {old_format_file_path} -> {file_path}")
+        except Exception as e:
+            logger.error(f"Error al migrar archivo de formato antiguo a nuevo: {str(e)}")
     
     # Verificar si el archivo ya existe y cargarlo
     existing_data = None
@@ -1224,6 +1273,189 @@ def get_daily_readings_for_year_multiple_tags_project_parallel(project_id, tags,
         logger.error(message)
         return {"success": False, "message": message}
 
+def get_daily_readings_for_period_multiple_tags_project_parallel(project_id, tags, start_date, end_date, token=None):
+    """
+    Obtiene lecturas diarias para múltiples tags durante un período específico para todos los assets de un proyecto.
+    Procesa el rango por meses y actualiza solo los meses dentro del período seleccionado.
+    
+    Args:
+        project_id (str): ID del proyecto
+        tags (list): Lista de tags de consumo
+        start_date (str o datetime): Fecha de inicio del período en formato YYYY-MM-DD
+        end_date (str o datetime): Fecha de fin del período en formato YYYY-MM-DD
+        token (str, optional): Token JWT para autenticación
+        
+    Returns:
+        dict: Resultado de la operación con mensaje de éxito o error
+    """
+    try:
+        # Convertir fechas a objetos datetime si son strings
+        if isinstance(start_date, str):
+            start_date = datetime.strptime(start_date, "%Y-%m-%d")
+        if isinstance(end_date, str):
+            end_date = datetime.strptime(end_date, "%Y-%m-%d")
+            
+        # Generar lista de meses (YYYY-MM) entre start_date y end_date
+        months_to_process = []
+        current_month = datetime(start_date.year, start_date.month, 1)
+        while current_month <= end_date:
+            months_to_process.append(current_month.strftime("%Y-%m"))
+            # Avanzar al siguiente mes
+            if current_month.month == 12:
+                current_month = datetime(current_month.year + 1, 1, 1)
+            else:
+                current_month = datetime(current_month.year, current_month.month + 1, 1)
+        
+        logger.info(f"Procesando lecturas para los meses: {months_to_process}")
+        
+        # Asegurar la carpeta del proyecto
+        project_folder = ensure_project_folder_exists(project_id)
+        
+        # Obtener los asset IDs del proyecto
+        asset_ids = get_asset_ids_from_project(project_id, token)
+        if not asset_ids:
+            message = f"No se encontraron assets para el proyecto {project_id}."
+            logger.error(message)
+            return {"success": False, "message": message}
+        
+        # Crear una función de procesamiento para cada combinación de asset, tag y mes
+        def process_asset_tag_month(asset_id, tag_name, month):
+            try:
+                # Obtener sensor con parámetros para el tag
+                sensors = get_sensors_with_tags(asset_id, token)
+                logger.debug(f"[DEBUG] process_asset_tag_month - Sensores obtenidos para {asset_id}: {sensors}")
+                
+                # Mejorar la verificación del tag en los sensores
+                if not sensors:
+                    logger.warning(f"[WARNING] process_asset_tag_month - No se encontraron sensores para el asset {asset_id}")
+                    return False
+                
+                # Verificar si el tag existe en los sensores
+                # La función get_sensors_with_tags devuelve una lista de diccionarios
+                tag_data = None
+                
+                # Buscar el tag_name en la lista de sensores
+                for sensor in sensors:
+                    if isinstance(sensor, dict) and sensor.get('tag_name') == tag_name:
+                        tag_data = sensor
+                        logger.debug(f"[DEBUG] process_asset_tag_month - Tag {tag_name} encontrado en sensor: {sensor}")
+                        break
+                
+                if not tag_data:
+                    # Registrar más información para depuración
+                    logger.warning(f"[WARNING] process_asset_tag_month - No se encontró el tag {tag_name} para el asset {asset_id}")
+                    logger.debug(f"[DEBUG] process_asset_tag_month - Tags disponibles: {[s.get('tag_name') for s in sensors if isinstance(s, dict)]}")
+                    
+                    # Verificar en la API directamente
+                    import requests
+                    url = f"{BASE_URL}/data/assets/{asset_id}/available-utilities-sensors"
+                    headers = get_auth_headers(token)
+                    params = {
+                        "include_details": True,
+                        "active_only": True
+                    }
+                    
+                    try:
+                        response = requests.get(url, headers=headers, params=params)
+                        logger.debug(f"[DEBUG] process_asset_tag_month - API response status: {response.status_code}")
+                        
+                        if response.status_code == 200:
+                            data = response.json().get('data', [])
+                            logger.debug(f"[DEBUG] process_asset_tag_month - Sensores desde API directa: {data}")
+                            
+                            # Buscar el tag en los datos de la API
+                            for sensor in data:
+                                if sensor.get('tag_name') == tag_name:
+                                    # Crear la estructura que espera get_daily_readings_for_tag_monthly
+                                    tag_data = {
+                                        "gateway_id": sensor.get('gateway_id'),
+                                        "device_id": sensor.get('device_id'),
+                                        "sensor_id": sensor.get('sensor_id'),
+                                        "tag_name": sensor.get('tag_name'),
+                                        "sensor_type": sensor.get('sensor_type')
+                                    }
+                                    logger.info(f"[INFO] process_asset_tag_month - Tag {tag_name} encontrado a través de consulta directa a la API")
+                                    break
+                    except Exception as e:
+                        logger.error(f"[ERROR] process_asset_tag_month - Error al consultar la API directamente: {str(e)}")
+                
+                if not tag_data:
+                    logger.warning(f"[WARNING] process_asset_tag_month - No se pudo encontrar información para el tag {tag_name} en el asset {asset_id}")
+                    return False
+                
+                # Log de los datos del tag que se van a usar
+                logger.debug(f"[DEBUG] process_asset_tag_month - Utilizando datos de tag: {tag_data}")
+                
+                # Llamar a get_daily_readings_for_tag_monthly
+                result = get_daily_readings_for_tag_monthly(
+                    asset_id,
+                    tag_data,
+                    month,
+                    project_folder,
+                    token
+                )
+                
+                success = result is not None
+                logger.debug(f"[DEBUG] process_asset_tag_month - Resultado para {asset_id}, {tag_name}, {month}: {'éxito' if success else 'fallido'}")
+                return success
+            except Exception as e:
+                logger.error(f"[ERROR] process_asset_tag_month - Error procesando asset {asset_id}, tag {tag_name}, mes {month}: {str(e)}")
+                import traceback
+                logger.error(f"[ERROR] process_asset_tag_month - Traceback: {traceback.format_exc()}")
+                return False
+        
+        # Crear todas las tareas para procesar
+        tasks = []
+        for asset_id in asset_ids:
+            for tag_name in tags:
+                for month in months_to_process:
+                    tasks.append((asset_id, tag_name, month))
+        
+        logger.info(f"Total de tareas a procesar: {len(tasks)}")
+        
+        # Procesar en paralelo usando ThreadPoolExecutor
+        success_count = 0
+        error_count = 0
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
+            future_to_task = {
+                executor.submit(process_asset_tag_month, asset_id, tag_name, month): (asset_id, tag_name, month)
+                for asset_id, tag_name, month in tasks
+            }
+            
+            for future in concurrent.futures.as_completed(future_to_task):
+                asset_id, tag_name, month = future_to_task[future]
+                try:
+                    success = future.result()
+                    if success:
+                        success_count += 1
+                        logger.debug(f"Procesado con éxito: asset {asset_id}, tag {tag_name}, mes {month}")
+                    else:
+                        error_count += 1
+                        logger.warning(f"Error en: asset {asset_id}, tag {tag_name}, mes {month}")
+                except Exception as e:
+                    error_count += 1
+                    logger.error(f"Excepción en: asset {asset_id}, tag {tag_name}, mes {month}: {str(e)}")
+        
+        message = f"Lecturas actualizadas para el período {start_date.strftime('%Y-%m-%d')} a {end_date.strftime('%Y-%m-%d')}. {success_count} procesos exitosos, {error_count} con errores."
+        logger.info(message)
+        
+        return {
+            "success": True,
+            "message": message,
+            "total_tasks": len(tasks),
+            "success_count": success_count,
+            "error_count": error_count,
+            "months_processed": months_to_process
+        }
+        
+    except Exception as e:
+        message = f"Error al procesar lecturas para el período: {str(e)}"
+        logger.error(message)
+        import traceback
+        logger.error(traceback.format_exc())
+        return {"success": False, "message": message}
+
 def migrate_readings_file_if_needed(asset_id, tag_name, project_id="general"):
     """
     Migra un archivo de lectura desde la estructura antigua a la nueva si existe.
@@ -1242,12 +1474,14 @@ def migrate_readings_file_if_needed(asset_id, tag_name, project_id="general"):
     
     # Nombre del archivo que buscamos en la estructura antigua
     old_file_patterns = [
-        f"daily_readings_{asset_id}_{tag_name}.csv",  # Sin mes en el nombre
-        f"daily_readings_{asset_id}_{tag_name}_*.csv"  # Con mes en el nombre
+        f"daily_readings_{asset_id}_{tag_name}.csv",  # Formato según PROJECT_CONTEXT.md
+        f"daily_readings_{asset_id}_{tag_name}_*.csv",  # Con mes en el nombre
+        f"daily_readings_{asset_id}__{tag_name}.csv",  # Formato con doble guion bajo
+        f"daily_readings_{asset_id}__{tag_name}_*.csv"  # Formato con doble guion bajo y mes
     ]
     
-    # Nombre del archivo en la estructura nueva
-    new_file_name = f"daily_readings_{asset_id}__{tag_name}.csv"
+    # Nombre del archivo en la estructura nueva (según PROJECT_CONTEXT.md)
+    new_file_name = f"daily_readings_{asset_id}_{tag_name}.csv"
     new_file_path = os.path.join(new_project_folder, new_file_name)
     
     # Verificar si la carpeta antigua existe
@@ -1312,9 +1546,12 @@ def get_daily_readings_for_tag_monthly(asset_id, tag, month, project_folder, tok
     # Extraer el ID del proyecto del project_folder
     project_id = os.path.basename(project_folder)
     
+    logger.debug(f"[DEBUG] get_daily_readings_for_tag_monthly - Iniciando para asset: {asset_id}, mes: {month}, project_id: {project_id}")
+    logger.debug(f"[DEBUG] get_daily_readings_for_tag_monthly - Tag recibido: {tag}")
+    
     # Validar formato del mes
     if not month or not re.match(r'^\d{4}-\d{2}$', month):
-        logger.error(f"Formato de mes inválido: {month}. Debe ser YYYY-MM")
+        logger.error(f"[ERROR] get_daily_readings_for_tag_monthly - Formato de mes inválido: {month}. Debe ser YYYY-MM")
         return None
         
     # Extraer el sensor del tag
@@ -1323,9 +1560,12 @@ def get_daily_readings_for_tag_monthly(asset_id, tag, month, project_folder, tok
     gateway_id = tag.get('gateway_id')
     tag_name = tag.get('tag_name', f"{device_id}_{sensor_id}_{gateway_id}")
     
+    logger.debug(f"[DEBUG] get_daily_readings_for_tag_monthly - Parámetros extraídos: device_id={device_id}, sensor_id={sensor_id}, gateway_id={gateway_id}, tag_name={tag_name}")
+    
     # Verificar que los parámetros del sensor están presentes
     if not all([device_id, sensor_id, gateway_id]):
-        logger.error(f"Parámetros de sensor incompletos: device_id={device_id}, sensor_id={sensor_id}, gateway_id={gateway_id}")
+        logger.error(f"[ERROR] get_daily_readings_for_tag_monthly - Parámetros de sensor incompletos: device_id={device_id}, sensor_id={sensor_id}, gateway_id={gateway_id}")
+        logger.debug(f"[DEBUG] get_daily_readings_for_tag_monthly - Estructura completa del tag: {tag}")
         return None
     
     # Verificar si el mes solicitado es futuro (no hay datos disponibles)
@@ -1334,31 +1574,51 @@ def get_daily_readings_for_tag_monthly(asset_id, tag, month, project_folder, tok
         current_date = datetime.now()
         request_date = datetime(int(year), int(month_num), 1)
         
+        logger.debug(f"[DEBUG] get_daily_readings_for_tag_monthly - Procesando año={year}, mes={month_num}, fecha actual={current_date}")
+        
         if request_date > current_date:
-            logger.warning(f"Se solicitaron datos para un mes futuro: {month}. No hay datos disponibles.")
+            logger.warning(f"[WARNING] get_daily_readings_for_tag_monthly - Se solicitaron datos para un mes futuro: {month}. No hay datos disponibles.")
             return pd.DataFrame(columns=['date', 'value', 'timestamp'])
     except Exception as e:
-        logger.error(f"Error al validar la fecha del mes: {str(e)}")
+        logger.error(f"[ERROR] get_daily_readings_for_tag_monthly - Error al validar la fecha del mes: {str(e)}")
+        import traceback
+        logger.error(f"[ERROR] get_daily_readings_for_tag_monthly - Traceback: {traceback.format_exc()}")
     
-    # Nombre del archivo donde se guardan las lecturas (usando el mismo patrón que get_daily_readings_for_tag)
-    file_name = f"daily_readings_{asset_id}__{tag_name}.csv"
+    # Nombre del archivo donde se guardan las lecturas (usando el formato según PROJECT_CONTEXT.md)
+    file_name = f"daily_readings_{asset_id}_{tag_name}.csv"
     file_path = os.path.join(project_folder, file_name)
     
-    # Si el archivo no existe en la nueva estructura, intentar migrarlo desde la antigua
+    logger.debug(f"[DEBUG] get_daily_readings_for_tag_monthly - Archivo a procesar: {file_path}")
+    
+    # Verificar si existe archivo con formato antiguo (doble guion bajo)
+    old_format_file_name = f"daily_readings_{asset_id}__{tag_name}.csv"
+    old_format_file_path = os.path.join(project_folder, old_format_file_name)
+    
+    # Si existe el archivo con formato antiguo pero no el nuevo, migrar
+    if os.path.exists(old_format_file_path) and not os.path.exists(file_path):
+        try:
+            import shutil
+            shutil.copy2(old_format_file_path, file_path)
+            logger.info(f"[INFO] get_daily_readings_for_tag_monthly - Archivo migrado de formato antiguo a nuevo: {old_format_file_path} -> {file_path}")
+        except Exception as e:
+            logger.error(f"[ERROR] get_daily_readings_for_tag_monthly - Error al migrar archivo de formato antiguo a nuevo: {str(e)}")
+    
+    # Si el archivo no existe en ningún formato, intentar migrarlo desde la antigua estructura de carpetas
     if not os.path.exists(file_path):
-        logger.debug(f"Archivo {file_path} no encontrado. Verificando estructura antigua...")
+        logger.debug(f"[DEBUG] get_daily_readings_for_tag_monthly - Archivo {file_path} no encontrado. Verificando estructura antigua...")
         was_migrated = migrate_readings_file_if_needed(asset_id, tag_name, project_id)
         if was_migrated:
-            logger.info(f"Archivo migrado desde estructura antigua para {asset_id}/{tag_name}")
+            logger.info(f"[INFO] get_daily_readings_for_tag_monthly - Archivo migrado desde estructura antigua para {asset_id}/{tag_name}")
     
     # Verificar si el archivo existe y limpiar errores si es necesario
     if os.path.exists(file_path):
-        logger.info(f"Verificando y limpiando errores en el archivo {file_name}")
+        logger.info(f"[INFO] get_daily_readings_for_tag_monthly - Verificando y limpiando errores en el archivo {file_name}")
         clean_data, error_dates = clean_readings_file_errors(file_path)
         
         # Si el archivo existe, verificar si hay datos actualizados
         try:
             existing_data = pd.read_csv(file_path)
+            logger.debug(f"[DEBUG] get_daily_readings_for_tag_monthly - Datos existentes cargados: {len(existing_data)} registros")
             
             # Convertir la columna de fecha a datetime
             if 'date' in existing_data.columns:
@@ -1370,14 +1630,20 @@ def get_daily_readings_for_tag_monthly(asset_id, tag, month, project_folder, tok
                         latest_date = existing_data['date'].max()
                         today = pd.to_datetime(current_date.strftime('%Y-%m-%d'))
                         
+                        logger.debug(f"[DEBUG] get_daily_readings_for_tag_monthly - Mes actual: {month}, última fecha: {latest_date}, hoy: {today}")
+                        
                         if latest_date >= today and not error_dates:
-                            logger.debug(f"Los datos están actualizados hasta hoy ({today.strftime('%Y-%m-%d')})")
-                            return existing_data
+                            logger.debug(f"[DEBUG] get_daily_readings_for_tag_monthly - Los datos están actualizados hasta hoy ({today.strftime('%Y-%m-%d')})")
+                            # Filtrar solo datos del mes solicitado
+                            month_mask = (existing_data['date'].dt.year == int(year)) & (existing_data['date'].dt.month == int(month_num))
+                            month_data = existing_data[month_mask]
+                            logger.debug(f"[DEBUG] get_daily_readings_for_tag_monthly - Retornando {len(month_data)} registros filtrados del mes")
+                            return month_data
                         else:
                             if error_dates:
-                                logger.debug(f"Se encontraron {len(error_dates)} fechas con errores que se intentarán actualizar.")
+                                logger.debug(f"[DEBUG] get_daily_readings_for_tag_monthly - Se encontraron {len(error_dates)} fechas con errores que se intentarán actualizar.")
                             else:
-                                logger.debug(f"Los datos existentes llegan hasta {latest_date.strftime('%Y-%m-%d')}, actualizando hasta hoy ({today.strftime('%Y-%m-%d')})")
+                                logger.debug(f"[DEBUG] get_daily_readings_for_tag_monthly - Los datos existentes llegan hasta {latest_date.strftime('%Y-%m-%d')}, actualizando hasta hoy ({today.strftime('%Y-%m-%d')})")
                 else:
                     # Para meses pasados, si no hay fechas con errores, no es necesario actualizar
                     if not error_dates and 'date' in existing_data.columns:
@@ -1385,18 +1651,25 @@ def get_daily_readings_for_tag_monthly(asset_id, tag, month, project_folder, tok
                         month_mask = (existing_data['date'].dt.year == int(year)) & (existing_data['date'].dt.month == int(month_num))
                         month_data = existing_data[month_mask]
                         if not month_data.empty:
-                            logger.debug(f"Ya existen datos para el mes {month} y no hay errores que corregir.")
+                            logger.debug(f"[DEBUG] get_daily_readings_for_tag_monthly - Ya existen datos para el mes {month} y no hay errores que corregir. Retornando {len(month_data)} registros.")
                             return month_data
             
             # Si hay errores o no se puede determinar la última fecha, continuar con la obtención de nuevos datos
+            logger.debug(f"[DEBUG] get_daily_readings_for_tag_monthly - Se requiere obtener nuevos datos para el mes {month}")
         except Exception as e:
-            logger.error(f"Error al procesar el archivo existente {file_path}: {str(e)}")
+            logger.error(f"[ERROR] get_daily_readings_for_tag_monthly - Error al procesar el archivo existente {file_path}: {str(e)}")
+            import traceback
+            logger.error(f"[ERROR] get_daily_readings_for_tag_monthly - Traceback: {traceback.format_exc()}")
             # Si hay un error al cargar, continuar con la obtención de nuevos datos
     
     # Obtener lecturas desde la API (para el mes específico)
+    logger.debug(f"[DEBUG] get_daily_readings_for_tag_monthly - Llamando a get_daily_readings_with_sensor_params_monthly con: asset_id={asset_id}, device_id={device_id}, sensor_id={sensor_id}, gateway_id={gateway_id}, month={month}")
+    
     readings_df = get_daily_readings_with_sensor_params_monthly(
         asset_id, device_id, sensor_id, gateway_id, month, token
     )
+    
+    logger.debug(f"[DEBUG] get_daily_readings_for_tag_monthly - Resultado de get_daily_readings_with_sensor_params_monthly: {readings_df is not None}, filas: {len(readings_df) if readings_df is not None else 0}")
     
     # Procesar y guardar los datos si se obtuvieron correctamente
     if readings_df is not None and not readings_df.empty:
@@ -1410,6 +1683,7 @@ def get_daily_readings_for_tag_monthly(asset_id, tag, month, project_folder, tok
             if os.path.exists(file_path):
                 try:
                     existing_data = pd.read_csv(file_path)
+                    logger.debug(f"[DEBUG] get_daily_readings_for_tag_monthly - Combinando datos existentes ({len(existing_data)} registros) con nuevos datos ({len(readings_df)} registros)")
                     
                     # Convertir las fechas a datetime para comparación
                     if 'date' in existing_data.columns and 'date' in readings_df.columns:
@@ -1428,34 +1702,43 @@ def get_daily_readings_for_tag_monthly(asset_id, tag, month, project_folder, tok
                         
                         # Guardar los datos combinados
                         combined_data.to_csv(file_path, index=False)
-                        logger.info(f"Datos actualizados guardados en {file_path}. Total: {len(combined_data)} registros.")
+                        logger.info(f"[INFO] get_daily_readings_for_tag_monthly - Datos actualizados guardados en {file_path}. Total: {len(combined_data)} registros.")
                         
                         # Devolver los datos combinados
                         return combined_data
                 except Exception as e:
-                    logger.error(f"Error al combinar datos existentes con nuevos datos: {str(e)}")
+                    logger.error(f"[ERROR] get_daily_readings_for_tag_monthly - Error al combinar datos existentes con nuevos datos: {str(e)}")
+                    import traceback
+                    logger.error(f"[ERROR] get_daily_readings_for_tag_monthly - Traceback: {traceback.format_exc()}")
             
             # Si no hay datos existentes o hubo error en la combinación, guardar solo los nuevos datos
             readings_df.to_csv(file_path, index=False)
-            logger.info(f"Datos actualizados guardados en {file_path}. Total: {len(readings_df)} registros.")
+            logger.info(f"[INFO] get_daily_readings_for_tag_monthly - Datos actualizados guardados en {file_path}. Total: {len(readings_df)} registros.")
         except Exception as e:
-            logger.error(f"Error al guardar datos en {file_path}: {str(e)}")
+            logger.error(f"[ERROR] get_daily_readings_for_tag_monthly - Error al guardar datos en {file_path}: {str(e)}")
+            import traceback
+            logger.error(f"[ERROR] get_daily_readings_for_tag_monthly - Traceback: {traceback.format_exc()}")
     else:
-        logger.warning(f"No se obtuvieron datos para el mes {month}.")
+        logger.warning(f"[WARNING] get_daily_readings_for_tag_monthly - No se obtuvieron datos para el mes {month}.")
         # Si no hay datos nuevos pero había existentes, devolver los existentes
         if os.path.exists(file_path):
             try:
                 existing_data = pd.read_csv(file_path)
+                logger.debug(f"[DEBUG] get_daily_readings_for_tag_monthly - No hay datos nuevos, intentando retornar datos existentes filtrados")
                 # Filtrar solo datos del mes solicitado si existe la columna de fecha
                 if 'date' in existing_data.columns:
                     existing_data['date'] = pd.to_datetime(existing_data['date'])
                     month_mask = (existing_data['date'].dt.year == int(year)) & (existing_data['date'].dt.month == int(month_num))
                     month_data = existing_data[month_mask]
+                    logger.debug(f"[DEBUG] get_daily_readings_for_tag_monthly - Retornando {len(month_data)} registros filtrados del mes")
                     return month_data
                 return existing_data
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[ERROR] get_daily_readings_for_tag_monthly - Error al procesar datos existentes: {str(e)}")
+                import traceback
+                logger.error(f"[ERROR] get_daily_readings_for_tag_monthly - Traceback: {traceback.format_exc()}")
     
+    logger.debug(f"[DEBUG] get_daily_readings_for_tag_monthly - Finalizando función, retornando dataframe con {len(readings_df) if readings_df is not None else 0} registros")
     return readings_df
 
 def get_daily_readings_with_sensor_params_monthly(asset_id, device_id, sensor_id, gateway_id, month, token=None):
@@ -1607,3 +1890,91 @@ def get_daily_readings_with_sensor_params_monthly(asset_id, device_id, sensor_id
     except Exception as e:
         logger.error(f"Error al obtener lecturas: {str(e)}")
         return None
+
+def migrate_all_readings_files_to_new_format(base_path="data/analyzed_data"):
+    """
+    Migra todos los archivos CSV de lecturas diarias del formato antiguo (doble guion bajo)
+    al nuevo formato (un solo guion bajo) según PROJECT_CONTEXT.md.
+    
+    Args:
+        base_path (str): Ruta base donde buscar los archivos CSV
+        
+    Returns:
+        dict: Resultados de la migración con conteo de archivos migrados, errores, etc.
+    """
+    logger.info(f"Iniciando migración de archivos al nuevo formato según PROJECT_CONTEXT.md")
+    
+    # Contadores para el informe final
+    total_files = 0
+    migrated_files = 0
+    already_exists = 0
+    error_files = 0
+    
+    # Buscar todos los directorios de proyecto
+    project_dirs = [d for d in glob.glob(os.path.join(base_path, "*")) if os.path.isdir(d)]
+    logger.info(f"Encontrados {len(project_dirs)} directorios de proyecto")
+    
+    for project_dir in project_dirs:
+        project_id = os.path.basename(project_dir)
+        logger.info(f"Procesando directorio de proyecto: {project_id}")
+        
+        # Buscar archivos CSV con formato antiguo (doble guion bajo)
+        csv_files = glob.glob(os.path.join(project_dir, "daily_readings_*__*.csv"))
+        total_files += len(csv_files)
+        
+        logger.info(f"Encontrados {len(csv_files)} archivos CSV con formato antiguo en {project_id}")
+        
+        for old_file_path in csv_files:
+            old_filename = os.path.basename(old_file_path)
+            logger.debug(f"Procesando archivo: {old_filename}")
+            
+            # Extraer el ID del asset y el tag
+            try:
+                # El formato es daily_readings_ASSETID__TAG.csv
+                # Dividir por "__" para obtener ASSETID y TAG
+                filename_parts = old_filename.replace("daily_readings_", "").split("__")
+                if len(filename_parts) != 2:
+                    logger.warning(f"No se pudo analizar el nombre del archivo: {old_filename}, no tiene el formato esperado")
+                    error_files += 1
+                    continue
+                
+                asset_id = filename_parts[0]
+                tag_with_extension = filename_parts[1]
+                tag_name = tag_with_extension.replace(".csv", "")
+                
+                # Generar el nuevo nombre de archivo (un solo guion bajo)
+                new_filename = f"daily_readings_{asset_id}_{tag_name}.csv"
+                new_file_path = os.path.join(project_dir, new_filename)
+                
+                # Verificar si el archivo con nuevo formato ya existe
+                if os.path.exists(new_file_path):
+                    logger.debug(f"El archivo con nuevo formato ya existe: {new_filename}")
+                    already_exists += 1
+                    continue
+                
+                # Copiar el archivo antiguo al nuevo formato
+                try:
+                    import shutil
+                    shutil.copy2(old_file_path, new_file_path)
+                    logger.info(f"Archivo migrado: {old_filename} -> {new_filename}")
+                    migrated_files += 1
+                except Exception as e:
+                    logger.error(f"Error al copiar archivo {old_filename}: {str(e)}")
+                    error_files += 1
+            except Exception as e:
+                logger.error(f"Error al procesar archivo {old_filename}: {str(e)}")
+                error_files += 1
+    
+    # Generar informe final
+    logger.info(f"Migración completada. Resumen:")
+    logger.info(f"  - Total de archivos con formato antiguo: {total_files}")
+    logger.info(f"  - Archivos migrados: {migrated_files}")
+    logger.info(f"  - Archivos que ya existían en nuevo formato: {already_exists}")
+    logger.info(f"  - Errores: {error_files}")
+    
+    return {
+        "total_files": total_files,
+        "migrated_files": migrated_files,
+        "already_exists": already_exists,
+        "error_files": error_files
+    }

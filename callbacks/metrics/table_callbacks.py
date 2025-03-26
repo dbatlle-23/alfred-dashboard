@@ -169,16 +169,33 @@ def register_table_callbacks(app):
                 if 'consumption_type' in asset_group.columns:
                     # Use the most common consumption type for this asset
                     consumption_type = asset_group['consumption_type'].mode().iloc[0] if not asset_group['consumption_type'].empty else ""
+                    print(f"[DEBUG TABLA] Asset {asset_id}: tipo de consumo original de la columna 'consumption_type': '{consumption_type}'")
                     # Get readable name from mapping
                     readable_consumption_type = CONSUMPTION_TAGS_MAPPING.get(consumption_type, consumption_type)
+                    print(f"[DEBUG TABLA] Asset {asset_id}: tipo de consumo mapeado (readable): '{readable_consumption_type}'")
+                    # Verificar si el mapeo cambió el valor
+                    if readable_consumption_type != consumption_type:
+                        print(f"[DEBUG TABLA] Asset {asset_id}: El mapeo cambió el valor de '{consumption_type}' a '{readable_consumption_type}'")
+                    # Imprimir valores únicos de consumption_type para este asset
+                    unique_types = asset_group['consumption_type'].unique()
+                    print(f"[DEBUG TABLA] Asset {asset_id}: Valores únicos de 'consumption_type': {unique_types}")
                     asset_consumption_types[asset_id] = readable_consumption_type
                 elif 'tag' in asset_group.columns:
                     # Use the most common tag for this asset
                     tag = asset_group['tag'].mode().iloc[0] if not asset_group['tag'].empty else ""
+                    print(f"[DEBUG TABLA] Asset {asset_id}: tag original de la columna 'tag': '{tag}'")
                     # Get readable name from mapping
                     readable_tag = CONSUMPTION_TAGS_MAPPING.get(tag, tag)
+                    print(f"[DEBUG TABLA] Asset {asset_id}: tag mapeado (readable): '{readable_tag}'")
+                    # Verificar si el mapeo cambió el valor
+                    if readable_tag != tag:
+                        print(f"[DEBUG TABLA] Asset {asset_id}: El mapeo cambió el valor de '{tag}' a '{readable_tag}'")
+                    # Imprimir valores únicos de tag para este asset
+                    unique_tags = asset_group['tag'].unique()
+                    print(f"[DEBUG TABLA] Asset {asset_id}: Valores únicos de 'tag': {unique_tags}")
                     asset_consumption_types[asset_id] = readable_tag
                 else:
+                    print(f"[DEBUG TABLA] Asset {asset_id}: No se encontró columna 'consumption_type' ni 'tag'")
                     asset_consumption_types[asset_id] = ""
                 
                 # Process each month for this asset
