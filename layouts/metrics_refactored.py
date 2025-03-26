@@ -196,12 +196,42 @@ def create_layout():
             
             # Mensaje de carga
             html.Div([
-                dbc.Spinner(size="lg"),
-                html.H4("Cargando datos...", className="text-center mt-3")
-            ], id="metrics-data-loading-message", style={"display": "none"}),
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Card([
+                            dbc.CardBody([
+                                html.Div([
+                                    dbc.Spinner(size="lg", color="primary", spinner_class_name="mb-3"),
+                                    html.H3("Procesando datos de consumo", className="text-center mb-3"),
+                                    html.P("Este proceso puede tardar unos momentos dependiendo del volumen de datos.", className="text-center text-muted mb-4"),
+                                    html.Div([
+                                        dbc.Progress(className="mb-3", animated=True, striped=True, value=100)
+                                    ]),
+                                    html.P("Por favor, espere mientras procesamos su solicitud.", className="text-center text-muted")
+                                ], className="d-flex flex-column align-items-center")
+                            ])
+                        ], className="shadow")
+                    ], xl=6, lg=8, md=10, className="mx-auto")
+                ])
+            ], id="metrics-data-loading-message", style={"display": "none"}, className="p-5"),
             
             # Resultado de actualización de lecturas
             html.Div(id="metrics-update-readings-result", className="mt-3"),
+            
+            # Notificación de procesamiento
+            dbc.Alert(
+                id="processing-notification",
+                children=[
+                    html.Div([
+                        dbc.Spinner(type="grow", size="sm", color="primary", spinner_class_name="me-2"),
+                        html.Span("Procesando su solicitud...", className="ms-2")
+                    ], className="d-flex align-items-center")
+                ],
+                color="info",
+                dismissable=False,
+                is_open=False,
+                className="mb-3 d-flex justify-content-center py-2"
+            ),
             
             # Contenedor de visualización
             html.Div([
@@ -366,6 +396,40 @@ def create_layout():
                             duration=6000,
                             icon="danger",
                             style={"position": "fixed", "top": 66, "right": 10, "width": 350, "zIndex": 1000},
+                        ),
+                        
+                        # Toast para notificación de carga de visualización de consumos
+                        dbc.Toast(
+                            id="visualize-loading-notification",
+                            header="Procesando",
+                            is_open=False,
+                            dismissable=False,
+                            duration=None,
+                            icon="info",
+                            style={"position": "fixed", "top": 66, "right": 10, "width": 350, "zIndex": 1000},
+                            children=[
+                                html.Div([
+                                    html.P("Cargando y procesando datos de consumo...", className="mb-2"),
+                                    dbc.Spinner(size="sm", color="primary", spinner_class_name="ms-auto")
+                                ], className="d-flex align-items-center")
+                            ]
+                        ),
+                        
+                        # Toast para notificación de actualización de lecturas
+                        dbc.Toast(
+                            id="update-loading-notification",
+                            header="Procesando",
+                            is_open=False,
+                            dismissable=False,
+                            duration=None,
+                            icon="info",
+                            style={"position": "fixed", "top": 66, "right": 10, "width": 350, "zIndex": 1000},
+                            children=[
+                                html.Div([
+                                    html.P("Actualizando lecturas de consumo...", className="mb-2"),
+                                    dbc.Spinner(size="sm", color="primary", spinner_class_name="ms-auto")
+                                ], className="d-flex align-items-center")
+                            ]
                         ),
                     ])
                 ], className="mb-4"),
