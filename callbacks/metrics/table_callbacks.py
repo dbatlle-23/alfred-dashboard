@@ -79,28 +79,39 @@ def register_table_callbacks(app):
     )
     def update_monthly_readings_table(json_data, client_id, project_id, asset_id, consumption_tags, start_date, end_date, token_data):
         """Update monthly readings table."""
+        from utils.logging import get_logger
+        logger = get_logger(__name__)
+        
         if not json_data:
-            print("No JSON data available")
+            logger.warning("No JSON data available for monthly readings table")
             return "", None
         
         try:
+            logger.info("Starting update of monthly readings table")
+            
             # Parse JSON data
             data = json.loads(json_data)
             df = pd.DataFrame(data)
             
-            # Verificar si el DataFrame está vacío o no tiene datos
+            logger.debug(f"Parsed DataFrame with shape: {df.shape if not df.empty else 'Empty DataFrame'}")
+            
+            # Check if DataFrame is empty
             if df.empty:
-                print("El DataFrame está vacío, no hay datos para mostrar")
+                logger.warning("DataFrame is empty, no data to display")
+                from dash import html
                 return html.Div("No hay datos disponibles para mostrar.", className="alert alert-warning"), None
             
-            # Verificar si la columna 'date' existe
+            # Check if 'date' column exists
             if 'date' not in df.columns:
-                print(f"[ERROR] La columna 'date' no existe en el DataFrame. Columnas disponibles: {df.columns.tolist()}")
+                logger.error(f"'date' column does not exist in DataFrame. Available columns: {df.columns.tolist()}")
+                from dash import html
                 return html.Div([
                     html.H5("Error al procesar datos"),
                     html.P("La columna 'date' no existe en los datos. Verifique los archivos CSV de origen."),
                     html.P(f"Columnas disponibles: {', '.join(df.columns.tolist())}")
                 ], className="alert alert-danger"), None
+            
+            logger.debug(f"Processing data with filter - client: {client_id}, project: {project_id}, asset: {asset_id}, tags: {consumption_tags}")
             
             # Filter data
             df = process_metrics_data(
@@ -113,13 +124,30 @@ def register_table_callbacks(app):
                 end_date=end_date
             )
             
+            logger.debug(f"DataFrame after filtering has {len(df)} rows")
+            if df.empty:
+                logger.warning("DataFrame after filtering is empty")
+                from dash import html
+                return html.Div("No hay datos disponibles para los filtros seleccionados.", className="alert alert-warning"), None
+            
+            logger.debug("Getting sample of filtered DataFrame")
+            if logger.isEnabledFor(10):  # DEBUG level
+                logger.debug(f"Sample data:\n{df.head(3)}")
+            
+            # Log consumption type information for debugging
+            if 'consumption_type' in df.columns:
+                logger.debug(f"Unique consumption_types: {df['consumption_type'].unique().tolist()}")
+            elif 'tag' in df.columns:
+                logger.debug(f"Unique tags: {df['tag'].unique().tolist()}")
+            else:
+                logger.warning("No consumption_type or tag column found in data")
+            
             # Get JWT token
             token = token_data.get('token') if token_data else None
             
             # Get all assets for the project
             all_project_assets = []
             assets_metadata = {}
-            asset_consumption_types = {}
             
             try:
                 # Get assets metadata from API
@@ -139,11 +167,9 @@ def register_table_callbacks(app):
                             "apartment": asset.get("apartment", "")
                         }
                 
-                print(f"Retrieved metadata for {len(assets_metadata)} assets")
+                logger.debug(f"Retrieved metadata for {len(assets_metadata)} assets")
             except Exception as e:
-                print(f"Error retrieving asset metadata: {str(e)}")
-                import traceback
-                print(traceback.format_exc())
+                logger.error(f"Error retrieving asset metadata: {str(e)}", exc_info=True)
             
             # Import consumption tags mapping
             from constants.metrics import CONSUMPTION_TAGS_MAPPING
@@ -155,74 +181,98 @@ def register_table_callbacks(app):
             # Add year_month column
             df['year_month'] = df['date'].dt.strftime('%Y-%m')
             
-            # Dictionary to store monthly data by asset
+            # Dictionary to store monthly data by asset and consumption type
             monthly_data = {}
             
-            # Process each asset
-            for asset_id, asset_group in df.groupby('asset_id'):
-                print(f"Processing asset_id: {asset_id}, group size: {len(asset_group)}")
+            # Determine consumption type column
+            consumption_type_column = 'consumption_type' if 'consumption_type' in df.columns else 'tag'
+            
+            # Process data by asset AND consumption type
+            logger.debug(f"Using consumption type column: {consumption_type_column}")
+            
+            if consumption_type_column in df.columns:
+                # Group by both asset_id and consumption_type
+                asset_consumption_groups = df.groupby(['asset_id', consumption_type_column])
+                logger.debug(f"Number of asset-consumption groups: {len(asset_consumption_groups)}")
                 
-                # Initialize a dictionary to store monthly readings
-                asset_monthly_readings = {}
+                # Print some sample groups for debugging
+                group_count = 0
+                for (asset_id, consumption_type), group in asset_consumption_groups:
+                    if group_count < 3:  # Limit to first 3 groups to avoid log clutter
+                        logger.debug(f"Sample group {group_count+1}:")
+                        logger.debug(f"  Asset ID: {asset_id}, Consumption Type: {consumption_type}")
+                        logger.debug(f"  Group shape: {group.shape}")
+                        logger.debug(f"  Group year_month values: {group['year_month'].unique().tolist()}")
+                    group_count += 1
                 
-                # Get consumption type for this asset
-                if 'consumption_type' in asset_group.columns:
-                    # Use the most common consumption type for this asset
-                    consumption_type = asset_group['consumption_type'].mode().iloc[0] if not asset_group['consumption_type'].empty else ""
-                    print(f"[DEBUG TABLA] Asset {asset_id}: tipo de consumo original de la columna 'consumption_type': '{consumption_type}'")
-                    # Get readable name from mapping
+                for (asset_id, consumption_type), group in asset_consumption_groups:
+                    logger.debug(f"Processing asset_id: {asset_id}, consumption_type: {consumption_type}, group size: {len(group)}")
+                    
+                    # Initialize a dictionary to store monthly readings for this asset-consumption type pair
+                    asset_consumption_monthly_readings = {}
+                    
+                    # Get readable consumption type name
                     readable_consumption_type = CONSUMPTION_TAGS_MAPPING.get(consumption_type, consumption_type)
-                    print(f"[DEBUG TABLA] Asset {asset_id}: tipo de consumo mapeado (readable): '{readable_consumption_type}'")
-                    # Verificar si el mapeo cambió el valor
-                    if readable_consumption_type != consumption_type:
-                        print(f"[DEBUG TABLA] Asset {asset_id}: El mapeo cambió el valor de '{consumption_type}' a '{readable_consumption_type}'")
-                    # Imprimir valores únicos de consumption_type para este asset
-                    unique_types = asset_group['consumption_type'].unique()
-                    print(f"[DEBUG TABLA] Asset {asset_id}: Valores únicos de 'consumption_type': {unique_types}")
-                    asset_consumption_types[asset_id] = readable_consumption_type
-                elif 'tag' in asset_group.columns:
-                    # Use the most common tag for this asset
-                    tag = asset_group['tag'].mode().iloc[0] if not asset_group['tag'].empty else ""
-                    print(f"[DEBUG TABLA] Asset {asset_id}: tag original de la columna 'tag': '{tag}'")
-                    # Get readable name from mapping
-                    readable_tag = CONSUMPTION_TAGS_MAPPING.get(tag, tag)
-                    print(f"[DEBUG TABLA] Asset {asset_id}: tag mapeado (readable): '{readable_tag}'")
-                    # Verificar si el mapeo cambió el valor
-                    if readable_tag != tag:
-                        print(f"[DEBUG TABLA] Asset {asset_id}: El mapeo cambió el valor de '{tag}' a '{readable_tag}'")
-                    # Imprimir valores únicos de tag para este asset
-                    unique_tags = asset_group['tag'].unique()
-                    print(f"[DEBUG TABLA] Asset {asset_id}: Valores únicos de 'tag': {unique_tags}")
-                    asset_consumption_types[asset_id] = readable_tag
-                else:
-                    print(f"[DEBUG TABLA] Asset {asset_id}: No se encontró columna 'consumption_type' ni 'tag'")
-                    asset_consumption_types[asset_id] = ""
-                
-                # Process each month for this asset
-                for month, month_group in asset_group.groupby('year_month'):
-                    try:
-                        # Sort by date to ensure correct order
-                        month_group = month_group.sort_values('date')
-                        
-                        # Get first and last reading of the month
-                        first_reading = month_group['consumption'].iloc[0]
-                        last_reading = month_group['consumption'].iloc[-1]
-                        
-                        # Calculate monthly consumption (last reading - first reading)
-                        monthly_consumption = last_reading - first_reading
-                        
-                        # Store the last reading as the monthly reading
-                        # This represents the accumulated reading at the end of the month
-                        asset_monthly_readings[month] = last_reading
-                        
-                        print(f"Month {month}, Asset {asset_id}: First reading = {first_reading}, Last reading = {last_reading}, Monthly consumption = {monthly_consumption}")
-                    except Exception as e:
-                        print(f"Error processing month {month} for asset {asset_id}: {str(e)}")
-                        import traceback
-                        print(traceback.format_exc())
-                
-                if asset_monthly_readings:
-                    monthly_data[asset_id] = pd.Series(asset_monthly_readings)
+                    
+                    # Process each month for this asset and consumption type
+                    for month, month_group in group.groupby('year_month'):
+                        try:
+                            # Sort by date to ensure correct order
+                            month_group = month_group.sort_values('date')
+                            
+                            # Get first and last reading of the month
+                            first_reading = month_group['consumption'].iloc[0]
+                            last_reading = month_group['consumption'].iloc[-1]
+                            
+                            # Calculate monthly consumption (last reading - first reading)
+                            monthly_consumption = last_reading - first_reading
+                            
+                            # Store the last reading as the monthly reading
+                            # This represents the accumulated reading at the end of the month
+                            asset_consumption_monthly_readings[month] = last_reading
+                            
+                            logger.debug(f"Month {month}, Asset {asset_id}, Type {readable_consumption_type}: First reading = {first_reading}, Last reading = {last_reading}, Monthly consumption = {monthly_consumption}")
+                        except Exception as e:
+                            logger.error(f"Error processing month {month} for asset {asset_id}, consumption type {readable_consumption_type}: {str(e)}")
+                            import traceback
+                            logger.debug(traceback.format_exc())
+                    
+                    if asset_consumption_monthly_readings:
+                        # Use composite key for asset and consumption type
+                        monthly_data[(asset_id, readable_consumption_type)] = pd.Series(asset_consumption_monthly_readings)
+            else:
+                logger.warning("No consumption type column found in the data. Available columns: {df.columns.tolist()}")
+                # Default process by asset only if no consumption type column exists
+                for asset_id, asset_group in df.groupby('asset_id'):
+                    logger.debug(f"Processing asset_id: {asset_id}, group size: {len(asset_group)}")
+                    
+                    # Initialize a dictionary to store monthly readings
+                    asset_monthly_readings = {}
+                    
+                    # Process each month for this asset
+                    for month, month_group in asset_group.groupby('year_month'):
+                        try:
+                            # Sort by date to ensure correct order
+                            month_group = month_group.sort_values('date')
+                            
+                            # Get first and last reading of the month
+                            first_reading = month_group['consumption'].iloc[0]
+                            last_reading = month_group['consumption'].iloc[-1]
+                            
+                            # Calculate monthly consumption (last reading - first reading)
+                            monthly_consumption = last_reading - first_reading
+                            
+                            # Store the last reading as the monthly reading
+                            asset_monthly_readings[month] = last_reading
+                            
+                            logger.debug(f"Month {month}, Asset {asset_id}: First reading = {first_reading}, Last reading = {last_reading}, Monthly consumption = {monthly_consumption}")
+                        except Exception as e:
+                            logger.error(f"Error processing month {month} for asset {asset_id}: {str(e)}")
+                            import traceback
+                            logger.debug(traceback.format_exc())
+                    
+                    if asset_monthly_readings:
+                        monthly_data[(asset_id, "Unknown")] = pd.Series(asset_monthly_readings)
             
             # Get all unique months from the data
             all_months = set()
@@ -230,30 +280,56 @@ def register_table_callbacks(app):
                 all_months.update(asset_data.index)
             sorted_months = sorted(all_months)
             
-            # Create a new DataFrame from the monthly data
+            logger.debug(f"Monthly data keys count: {len(monthly_data)}")
+            logger.debug(f"Unique months: {sorted_months}")
+            
+            # Create a new DataFrame from the monthly data with ONE ROW PER ASSET
+            # This is the key change - we'll combine consumption types for each asset
             if monthly_data:
-                print(f"Creating pivot table from {len(monthly_data)} assets")
-                # Convert the dictionary to a DataFrame
-                pivot = pd.DataFrame(monthly_data).T
+                logger.debug(f"Creating pivot table with one row per asset, combining consumption types")
                 
-                # Sort columns chronologically
-                sorted_columns = sorted(pivot.columns)
-                pivot = pivot[sorted_columns]
+                # Get all unique assets
+                all_assets = set(asset_id for (asset_id, _) in monthly_data.keys())
                 
-                # Reset index and rename
-                pivot = pivot.reset_index()
-                pivot = pivot.rename(columns={'index': 'Asset'})
+                # Get all unique consumption types
+                all_consumption_types = set(consumption_type for (_, consumption_type) in monthly_data.keys())
                 
-                # Add asset metadata columns
-                pivot['block_number'] = pivot['Asset'].map(lambda x: assets_metadata.get(x, {}).get('block_number', ''))
-                pivot['staircase'] = pivot['Asset'].map(lambda x: assets_metadata.get(x, {}).get('staircase', ''))
-                pivot['apartment'] = pivot['Asset'].map(lambda x: assets_metadata.get(x, {}).get('apartment', ''))
+                # Create rows for the pivot table - one row per asset
+                rows = []
+                for asset_id in all_assets:
+                    # Initialize row with asset metadata
+                    row = {
+                        'Asset': asset_id,
+                        'block_number': assets_metadata.get(asset_id, {}).get('block_number', ''),
+                        'staircase': assets_metadata.get(asset_id, {}).get('staircase', ''),
+                        'apartment': assets_metadata.get(asset_id, {}).get('apartment', '')
+                    }
+                    
+                    # For each month, add columns for each consumption type
+                    for month in sorted_months:
+                        for consumption_type in all_consumption_types:
+                            # Create a column name that includes both month and consumption type
+                            column_name = f"{month} ({consumption_type})"
+                            
+                            # Try to get the reading for this asset, month and consumption type
+                            if (asset_id, consumption_type) in monthly_data and month in monthly_data[(asset_id, consumption_type)]:
+                                row[column_name] = monthly_data[(asset_id, consumption_type)][month]
+                            else:
+                                row[column_name] = "Sin Datos"
+                    
+                    rows.append(row)
                 
-                # Add consumption type column
-                pivot['consumption_type'] = pivot['Asset'].map(lambda x: asset_consumption_types.get(x, ''))
+                logger.debug(f"Created {len(rows)} rows for pivot table")
+                if len(rows) > 0:
+                    logger.debug(f"Sample row: {rows[0]}")
+                
+                # Create pivot table from rows
+                pivot = pd.DataFrame(rows)
+                logger.debug(f"Created pivot table with shape: {pivot.shape}")
+                logger.debug(f"Pivot table columns: {pivot.columns.tolist()}")
                 
                 # Get list of assets that have data
-                assets_with_data = pivot['Asset'].tolist()
+                assets_with_data = all_assets
                 
                 # Add assets without data
                 missing_assets = []
@@ -261,38 +337,61 @@ def register_table_callbacks(app):
                     if isinstance(asset, dict) and "id" in asset:
                         asset_id = asset["id"]
                         if asset_id not in assets_with_data:
-                            # Create a row for this asset with "Sin Datos" for all months
+                            # Create a row for this asset with "Sin Datos" for all months/consumption types
                             row = {
                                 'Asset': asset_id,
                                 'block_number': assets_metadata.get(asset_id, {}).get('block_number', ''),
                                 'staircase': assets_metadata.get(asset_id, {}).get('staircase', ''),
-                                'apartment': assets_metadata.get(asset_id, {}).get('apartment', ''),
-                                'consumption_type': ''  # No consumption type for assets without data
+                                'apartment': assets_metadata.get(asset_id, {}).get('apartment', '')
                             }
                             
-                            # Add "Sin Datos" for each month column
-                            for month in sorted_columns:
-                                row[month] = "Sin Datos"
+                            # For each month, add columns for each consumption type
+                            for month in sorted_months:
+                                for consumption_type in all_consumption_types:
+                                    column_name = f"{month} ({consumption_type})"
+                                    row[column_name] = "Sin Datos"
                             
                             missing_assets.append(row)
                 
                 # Add missing assets to the pivot table
                 if missing_assets:
+                    logger.debug(f"Adding {len(missing_assets)} assets without data")
                     missing_df = pd.DataFrame(missing_assets)
                     pivot = pd.concat([pivot, missing_df], ignore_index=True)
-                    print(f"Added {len(missing_assets)} assets without data to the table")
+                    logger.debug(f"Added {len(missing_assets)} assets without data to the table")
+                    logger.debug(f"Pivot table shape after adding missing assets: {pivot.shape}")
                 
                 # Reorder columns to put metadata after Asset column
-                cols = ['Asset', 'consumption_type', 'block_number', 'staircase', 'apartment'] + sorted_columns
-                pivot = pivot[cols]
+                metadata_cols = ['Asset', 'block_number', 'staircase', 'apartment']
+                data_cols = [col for col in pivot.columns if col not in metadata_cols]
+                # Sort data columns to keep them organized by month and consumption type
+                data_cols.sort()
+                cols = metadata_cols + data_cols
+                # Only keep columns that exist in the pivot table
+                existing_cols = [col for col in cols if col in pivot.columns]
+                pivot = pivot[existing_cols]
                 
-                print(f"Final pivot table shape: {pivot.shape}")
+                # Sort by Asset for better readability
+                pivot = pivot.sort_values(['Asset']).reset_index(drop=True)
+                
+                logger.debug(f"Final pivot table shape: {pivot.shape}")
+                logger.debug(f"Final pivot table columns: {pivot.columns.tolist()}")
+                
+                # Check if the pivot table is valid
+                if pivot.empty:
+                    logger.error("Final pivot table is empty")
+                    from dash import html
+                    return html.Div("No fue posible crear la tabla de lecturas mensuales.", className="alert alert-warning"), None
                 
                 # Create table component
-                return create_monthly_readings_table(pivot, "Lecturas Mensuales"), pivot.to_dict()
+                from dash import html
+                table_component = create_monthly_readings_table(pivot, "Lecturas Mensuales")
+                
+                logger.debug(f"Table component created, returning results")
+                return table_component, pivot.to_dict()
             else:
                 # If no assets have data, create a table with all assets but no data
-                print("No monthly data found. Creating table with all assets but no data.")
+                logger.debug("No monthly data found. Creating table with all assets but no data.")
                 
                 # Create rows for all assets
                 rows = []
@@ -303,8 +402,7 @@ def register_table_callbacks(app):
                             'Asset': asset_id,
                             'block_number': assets_metadata.get(asset_id, {}).get('block_number', ''),
                             'staircase': assets_metadata.get(asset_id, {}).get('staircase', ''),
-                            'apartment': assets_metadata.get(asset_id, {}).get('apartment', ''),
-                            'consumption_type': ''  # No consumption type for assets without data
+                            'apartment': assets_metadata.get(asset_id, {}).get('apartment', '')
                         }
                         
                         # If we have date range information, create month columns
@@ -321,26 +419,30 @@ def register_table_callbacks(app):
                         rows.append(row)
                 
                 if rows:
+                    logger.debug(f"Created {len(rows)} rows for empty assets")
                     empty_pivot = pd.DataFrame(rows)
                     
                     # Get all columns except Asset and metadata
-                    data_columns = [col for col in empty_pivot.columns if col not in ['Asset', 'consumption_type', 'block_number', 'staircase', 'apartment']]
+                    data_columns = [col for col in empty_pivot.columns if col not in ['Asset', 'block_number', 'staircase', 'apartment']]
                     
                     # Reorder columns
-                    cols = ['Asset', 'consumption_type', 'block_number', 'staircase', 'apartment'] + sorted(data_columns)
+                    cols = ['Asset', 'block_number', 'staircase', 'apartment'] + sorted(data_columns)
                     empty_pivot = empty_pivot[cols]
                     
-                    print(f"Created table with {len(rows)} assets without data")
+                    logger.debug(f"Created table with {len(rows)} assets without data")
+                    from dash import html
                     return create_monthly_readings_table(empty_pivot, "Lecturas Mensuales"), None
                 else:
-                    print("No assets found for the project")
-                    return "", None
+                    logger.debug("No assets found for the project")
+                    from dash import html
+                    return html.Div("No se encontraron activos para el proyecto.", className="alert alert-warning"), None
             
         except Exception as e:
-            print(f"Error updating monthly readings table: {str(e)}")
+            logger.error(f"Error updating monthly readings table: {str(e)}")
             import traceback
-            print(traceback.format_exc())
-            return "", None
+            logger.debug(traceback.format_exc())
+            from dash import html
+            return html.Div(f"Error al procesar datos: {str(e)}", className="alert alert-danger"), None
 
     @app.callback(
         Output("metrics-monthly-summary-table", "children"),
@@ -353,46 +455,38 @@ def register_table_callbacks(app):
     )
     def update_monthly_summary_table(json_data, client_id, project_id, consumption_tags, start_date, end_date):
         """Update the monthly summary table."""
-        print("=====================================================")
-        print("DEBUGGING MONTHLY SUMMARY TABLE CALLBACK - FUNCTION CALLED")
-        print("=====================================================")
-        print(f"[INFO METRICS] update_monthly_summary_table - Starting")
-        print(f"[INFO METRICS] update_monthly_summary_table - client_id: {client_id}")
-        print(f"[INFO METRICS] update_monthly_summary_table - project_id: {project_id}")
-        print(f"[INFO METRICS] update_monthly_summary_table - consumption_tags: {consumption_tags}")
-        print(f"[INFO METRICS] update_monthly_summary_table - start_date: {start_date}")
-        print(f"[INFO METRICS] update_monthly_summary_table - end_date: {end_date}")
-        print(f"[INFO METRICS] update_monthly_summary_table - json_data length: {len(json_data) if json_data else 0}")
-        print(f"[INFO METRICS] update_monthly_summary_table - json_data empty?: {json_data == '[]' if json_data else True}")
+        from utils.logging import get_logger
+        logger = get_logger(__name__)
+        
+        logger.info("Starting update of monthly summary table")
+        logger.debug(f"Parameters - client: {client_id}, project: {project_id}, tags: {consumption_tags}, date range: {start_date} to {end_date}")
         
         try:
-            # Si no hay datos, mostrar mensaje en lugar de crear datos de ejemplo
+            # If no data, show message instead of creating example data
             if not json_data or json_data == "[]":
-                print(f"[INFO METRICS] update_monthly_summary_table - No data available")
+                logger.warning("No data available for monthly summary table")
                 from components.metrics.tables import create_monthly_summary_table
                 return create_monthly_summary_table(None, "No hay datos disponibles")
             
             # Convert JSON to DataFrame
             df = pd.DataFrame(json.loads(json_data))
-            print(f"[INFO METRICS] update_monthly_summary_table - Loaded DataFrame with {len(df)} rows")
-            print(f"[INFO METRICS] update_monthly_summary_table - DataFrame columns: {df.columns.tolist()}")
-            print(f"[INFO METRICS] update_monthly_summary_table - DataFrame sample: {df.head().to_dict() if not df.empty else 'Empty DataFrame'}")
+            logger.debug(f"Loaded DataFrame with {len(df)} rows")
             
-            # Verificar si el DataFrame está vacío
+            # Check if DataFrame is empty
             if df.empty:
-                print(f"[INFO METRICS] update_monthly_summary_table - DataFrame is empty")
+                logger.warning("DataFrame is empty")
                 from components.metrics.tables import create_monthly_summary_table
                 return create_monthly_summary_table(None, "No hay datos disponibles")
             
-            # Procesar datos según filtros
+            # Process data according to filters
             try:
                 from utils.metrics.data_processing import process_metrics_data
                 
-                # Convertir fechas a datetime si son strings
+                # Convert dates to datetime if they are strings
                 if 'date' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['date']):
                     df['date'] = pd.to_datetime(df['date'], errors='coerce')
                 
-                # Filtrar datos
+                # Filter data
                 filtered_df = process_metrics_data(
                     df, 
                     client_id=client_id, 
@@ -402,29 +496,26 @@ def register_table_callbacks(app):
                     end_date=end_date
                 )
                 
-                print(f"[INFO METRICS] update_monthly_summary_table - Filtered DataFrame has {len(filtered_df)} rows")
-                print(f"[INFO METRICS] update_monthly_summary_table - Filtered DataFrame columns: {filtered_df.columns.tolist() if not filtered_df.empty else 'Empty DataFrame'}")
+                logger.debug(f"Filtered DataFrame has {len(filtered_df)} rows")
                 
-                # Verificar si el DataFrame filtrado está vacío
+                # Check if filtered DataFrame is empty
                 if filtered_df.empty:
-                    print(f"[INFO METRICS] update_monthly_summary_table - Filtered DataFrame is empty")
+                    logger.warning("Filtered DataFrame is empty")
                     from components.metrics.tables import create_monthly_summary_table
                     return create_monthly_summary_table(None, "No hay datos disponibles para los filtros seleccionados")
                 
-                # Utilizar la función generate_monthly_consumption_summary para calcular el resumen mensual
+                # Use generate_monthly_consumption_summary to calculate the monthly summary
                 try:
                     from utils.metrics.data_processing import generate_monthly_consumption_summary
                     
-                    # Generar el resumen mensual utilizando la función mejorada
+                    # Generate monthly summary using the improved function
                     monthly_summary = generate_monthly_consumption_summary(filtered_df, start_date, end_date)
                     
-                    print(f"[INFO METRICS] update_monthly_summary_table - Generated monthly summary with {len(monthly_summary)} rows")
-                    print(f"[INFO METRICS] update_monthly_summary_table - Monthly summary columns: {monthly_summary.columns.tolist() if not monthly_summary.empty else 'Empty DataFrame'}")
-                    print(f"[INFO METRICS] update_monthly_summary_table - Monthly summary sample: {monthly_summary.head().to_dict() if not monthly_summary.empty else 'Empty DataFrame'}")
+                    logger.debug(f"Generated monthly summary with {len(monthly_summary)} rows")
                     
-                    # Verificar si el resumen mensual está vacío
+                    # Check if monthly summary is empty
                     if monthly_summary.empty:
-                        print(f"[INFO METRICS] update_monthly_summary_table - Monthly summary is empty")
+                        logger.warning("Monthly summary is empty")
                         from components.metrics.tables import create_monthly_summary_table
                         return create_monthly_summary_table(None, "No se pudo generar el resumen mensual")
                     
@@ -433,29 +524,23 @@ def register_table_callbacks(app):
                     return create_monthly_summary_table(monthly_summary)
                     
                 except Exception as e:
-                    print(f"[ERROR METRICS] update_monthly_summary_table - Error generating monthly summary: {str(e)}")
-                    import traceback
-                    print(traceback.format_exc())
+                    logger.error(f"Error generating monthly summary: {str(e)}", exc_info=True)
                     
-                    # En caso de error, mostrar mensaje
+                    # In case of error, show message
                     from components.metrics.tables import create_monthly_summary_table
                     return create_monthly_summary_table(None, f"Error al generar el resumen mensual: {str(e)}")
                 
             except Exception as e:
-                print(f"[ERROR METRICS] update_monthly_summary_table - Error processing data: {str(e)}")
-                import traceback
-                print(traceback.format_exc())
+                logger.error(f"Error processing data: {str(e)}", exc_info=True)
                 
-                # En caso de error, mostrar mensaje
+                # In case of error, show message
                 from components.metrics.tables import create_monthly_summary_table
                 return create_monthly_summary_table(None, f"Error al procesar los datos: {str(e)}")
             
         except Exception as e:
-            print(f"[ERROR METRICS] update_monthly_summary_table: {str(e)}")
-            import traceback
-            print(traceback.format_exc())
+            logger.error(f"Error in monthly summary table update: {str(e)}", exc_info=True)
             
-            # En caso de error, mostrar mensaje
+            # In case of error, show message
             from components.metrics.tables import create_monthly_summary_table
             return create_monthly_summary_table(None, f"Error: {str(e)}")
 
@@ -823,6 +908,9 @@ def register_table_callbacks(app):
     )
     def show_asset_detail(active_cell, virtual_data, virtual_indices, complete_data, project_id, consumption_tags, token_data, page_current, page_size):
         """Show asset detail when a cell is clicked."""
+        from utils.logging import get_logger
+        logger = get_logger(__name__)
+        
         if not active_cell or not virtual_data or not complete_data:
             return None, None, None
         
@@ -830,22 +918,18 @@ def register_table_callbacks(app):
         row_index = active_cell["row"]
         column_id = active_cell["column_id"]
         
-        # Logs para depuración de paginación y filtrado
-        print(f"[DEBUG] show_asset_detail - Información de paginación: page_current={page_current}, page_size={page_size}")
-        print(f"[DEBUG] show_asset_detail - Celda activa: row={row_index}, column={column_id}")
-        print(f"[DEBUG] show_asset_detail - ¿Hay índices virtuales? {virtual_indices is not None}")
-        if virtual_indices is not None:
-            print(f"[DEBUG] show_asset_detail - Longitud de índices virtuales: {len(virtual_indices)}")
-            print(f"[DEBUG] show_asset_detail - Primeros 5 índices virtuales (o menos): {virtual_indices[:min(5, len(virtual_indices))]}")
+        # Log basic cell info for debugging
+        logger.debug(f"Asset detail requested for cell at row={row_index}, column={column_id}")
         
         # Ignorar clics en columnas de metadatos
-        if column_id in ['Asset', 'block_number', 'staircase', 'apartment', 'consumption_type']:
+        if column_id in ['Asset', 'block_number', 'staircase', 'apartment']:
             return None, None, None
         
         try:
             # Verificar que tenemos datos virtuales y que el índice es válido
             if not virtual_data or row_index >= len(virtual_data):
-                print(f"[ERROR] show_asset_detail - Índice de fila inválido: {row_index}, longitud de datos virtuales: {len(virtual_data) if virtual_data else 0}")
+                logger.error(f"Invalid row index: {row_index}, virtual data length: {len(virtual_data) if virtual_data else 0}")
+                from dash import html
                 return {"show": True, "error": "Índice de fila inválido"}, "Error", html.Div("Error al obtener datos del asset. Índice de fila inválido.", className="alert alert-danger")
             
             # Obtener la fila seleccionada de los datos virtuales (ya filtrados/paginados)
@@ -853,55 +937,29 @@ def register_table_callbacks(app):
             
             # Verificar que la fila contiene la columna Asset
             if "Asset" not in selected_row:
-                print(f"[ERROR] show_asset_detail - La fila seleccionada no contiene la columna 'Asset': {selected_row.keys()}")
+                logger.error(f"Selected row does not contain 'Asset' column. Available columns: {list(selected_row.keys())}")
+                from dash import html
                 return {"show": True, "error": "Datos de fila inválidos"}, "Error", html.Div("Error al obtener datos del asset. La fila no contiene la columna 'Asset'.", className="alert alert-danger")
             
             # Calcular el índice global considerando la paginación y el filtrado
             global_row_index = row_index
             
-            # Primero verificamos si hay filtrado (virtual_indices no es None y tiene elementos)
+            # Calculate global row index taking into account pagination and filtering
             if virtual_indices is not None and len(virtual_indices) > 0:
-                # Si tenemos índices virtuales (filtrado), necesitamos calcular el índice correcto
-                # considerando tanto el filtrado como la paginación
-                
-                # Si hay paginación, necesitamos ajustar el índice de fila
                 if page_current is not None and page_size is not None and page_current > 0:
-                    # Calcular el offset de la página actual
-                    page_offset = page_current * page_size
-                    
-                    # SOLUCIÓN CORRECTA: Usar el índice ajustado por paginación para acceder a virtual_indices
-                    # Verificar que el índice ajustado no exceda la longitud de virtual_indices
-                    adjusted_row_index = row_index + page_offset
-                    
-                    print(f"[DEBUG] show_asset_detail - Calculando índice ajustado: row_index={row_index}, page_offset={page_offset}, adjusted_row_index={adjusted_row_index}")
+                    # Pagination adjustment
+                    adjusted_row_index = row_index + (page_current * page_size)
                     
                     if adjusted_row_index < len(virtual_indices):
-                        # Obtener el índice original usando el índice ajustado
-                        original_index = virtual_indices[adjusted_row_index]
-                        print(f"[DEBUG] show_asset_detail - Índice original usando índice ajustado: {original_index}")
-                        global_row_index = original_index
-                    else:
-                        print(f"[ERROR] show_asset_detail - Índice ajustado fuera de rango: {adjusted_row_index}, longitud de virtual_indices: {len(virtual_indices)}")
-                        # Como fallback, usar el índice de fila sin ajustar si está dentro del rango
-                        if row_index < len(virtual_indices):
-                            original_index = virtual_indices[row_index]
-                            print(f"[DEBUG] show_asset_detail - Usando índice original sin ajustar como fallback: {original_index}")
-                            global_row_index = original_index
-                else:
-                    # Si no hay paginación o estamos en la primera página, simplemente usar el índice de virtual_indices
-                    if row_index < len(virtual_indices):
-                        original_index = virtual_indices[row_index]
-                        print(f"[DEBUG] show_asset_detail - Índice original (sin paginación o primera página): {original_index}")
-                        global_row_index = original_index
-                    else:
-                        print(f"[ERROR] show_asset_detail - Índice de fila fuera de rango en virtual_indices: {row_index}, longitud: {len(virtual_indices)}")
+                        global_row_index = virtual_indices[adjusted_row_index]
+                    elif row_index < len(virtual_indices):
+                        global_row_index = virtual_indices[row_index]
+                elif row_index < len(virtual_indices):
+                    global_row_index = virtual_indices[row_index]
             elif page_current is not None and page_size is not None:
-                # Si no hay filtrado pero hay paginación, calcular el índice global
-                # La página actual (page_current) comienza en 0, por lo que la página 1 es realmente la segunda página
                 global_row_index = (page_current * page_size) + row_index
-                print(f"[DEBUG] show_asset_detail - Índice global calculado (paginación sin filtrado): {global_row_index}")
             
-            print(f"[DEBUG] show_asset_detail - Índice global final: {global_row_index}")
+            logger.debug(f"Calculated global row index: {global_row_index}")
             
             # Obtener el asset_id y los datos de la fila global
             global_asset_id = None
@@ -909,37 +967,24 @@ def register_table_callbacks(app):
             
             if isinstance(complete_data, dict) and 'Asset' in complete_data and isinstance(complete_data['Asset'], dict):
                 global_asset_id = complete_data['Asset'].get(str(global_row_index))
-                print(f"[DEBUG] show_asset_detail - Asset ID usando índice global ({global_row_index}): {global_asset_id}")
                 
                 # Obtener todos los datos de la fila global
                 for key in complete_data.keys():
                     if isinstance(complete_data[key], dict) and str(global_row_index) in complete_data[key]:
                         global_row_data[key] = complete_data[key][str(global_row_index)]
             
-            # Verificar que hemos obtenido un asset_id válido del índice global
+            # Prepare asset data - use global data if available, otherwise fall back to selected row
             if not global_asset_id:
-                print(f"[ERROR] show_asset_detail - No se pudo obtener el asset_id del índice global {global_row_index}")
-                
-                # Como fallback, usar el asset_id de la fila seleccionada
+                logger.info(f"Using asset ID from selected row as fallback")
                 asset_id = selected_row["Asset"]
-                print(f"[INFO] show_asset_detail - Usando asset_id de la fila seleccionada como fallback: {asset_id}")
-                
-                # Obtener metadatos del asset de la fila seleccionada
                 asset_metadata = {
                     'name': f"Asset {asset_id}",
                     'block_number': selected_row.get('block_number', ''),
                     'staircase': selected_row.get('staircase', ''),
                     'apartment': selected_row.get('apartment', '')
                 }
-                
-                # Imprimir información adicional para depuración
-                print(f"[DEBUG] show_asset_detail - Metadatos del asset (fallback): {asset_metadata}")
-                print(f"[DEBUG] show_asset_detail - Datos de la fila seleccionada: {selected_row}")
             else:
-                # Usar el asset_id y metadatos del índice global
                 asset_id = global_asset_id
-                
-                # Obtener metadatos del asset de los datos globales
                 asset_metadata = {
                     'name': f"Asset {asset_id}",
                     'block_number': global_row_data.get('block_number', ''),
@@ -947,43 +992,74 @@ def register_table_callbacks(app):
                     'apartment': global_row_data.get('apartment', '')
                 }
                 
-                print(f"[INFO] show_asset_detail - Usando asset_id del índice global: {asset_id}")
-                print(f"[DEBUG] show_asset_detail - Metadatos del asset global: {asset_metadata}")
-                
-                # Verificar si los metadatos están vacíos y usar los de la fila seleccionada como fallback
+                # Fall back to selected row metadata if global metadata is empty
                 if not asset_metadata.get('block_number') and not asset_metadata.get('staircase') and not asset_metadata.get('apartment'):
-                    print(f"[DEBUG] show_asset_detail - Metadatos globales vacíos, usando metadatos de la fila seleccionada como fallback")
+                    logger.debug("Global metadata empty, using metadata from selected row")
                     asset_metadata = {
                         'name': f"Asset {asset_id}",
                         'block_number': selected_row.get('block_number', ''),
                         'staircase': selected_row.get('staircase', ''),
                         'apartment': selected_row.get('apartment', '')
                     }
-                    print(f"[DEBUG] show_asset_detail - Metadatos del asset (fallback): {asset_metadata}")
             
-            # Usar el mes seleccionado
-            selected_month = column_id
+            # Parse column ID to extract month and consumption type
+            import re
+            column_match = re.match(r'(\d{4}-\d{2}) \((.*?)\)', column_id)
             
-            # Log para depuración
-            print(f"[INFO] show_asset_detail - Mostrando detalles para asset {asset_id}, mes {selected_month}")
+            if column_match:
+                selected_month = column_match.group(1)  # Month (YYYY-MM)
+                selected_consumption_type = column_match.group(2)  # Consumption type
+                logger.debug(f"Parsed column: month={selected_month}, consumption_type={selected_consumption_type}")
+            else:
+                # Fallback for backward compatibility
+                selected_month = column_id
+                selected_consumption_type = None
+                logger.warning(f"Could not parse column ID format: {column_id}, using as month directly")
             
-            # Obtener token JWT
+            # Get JWT token
             token = token_data.get('token') if token_data else None
             
-            # Cargar datos del CSV para el asset seleccionado
+            # Filter consumption tags if we have a specific consumption type
+            filtered_consumption_tags = consumption_tags
+            if selected_consumption_type and consumption_tags:
+                try:
+                    from constants.metrics import CONSUMPTION_TAGS_MAPPING
+                    
+                    # Find tags that match the selected consumption type
+                    matching_tags = []
+                    for tag in consumption_tags:
+                        tag_name = tag.get('tag_name', tag) if isinstance(tag, dict) else tag
+                        tag_display = CONSUMPTION_TAGS_MAPPING.get(tag_name, tag_name)
+                        
+                        if tag_display == selected_consumption_type:
+                            matching_tags.append(tag)
+                    
+                    if matching_tags:
+                        filtered_consumption_tags = matching_tags
+                        logger.info(f"Filtered to {len(matching_tags)} tags matching '{selected_consumption_type}'")
+                    else:
+                        logger.warning(f"No matching tags found for type '{selected_consumption_type}'")
+                except Exception as e:
+                    logger.error(f"Error filtering tags: {str(e)}")
+                    filtered_consumption_tags = consumption_tags
+            
+            # Load data for the selected asset, month and consumption type
             from utils.data_loader import load_asset_detail_data
             detail_data = load_asset_detail_data(
                 project_id=project_id,
                 asset_id=asset_id,
-                consumption_tags=consumption_tags,
+                consumption_tags=filtered_consumption_tags,
                 month=selected_month,
                 jwt_token=token
             )
             
-            # Título del modal
-            modal_title = f"Detalle del Asset: {asset_id} - {selected_month}"
+            # Prepare modal title
+            if selected_consumption_type:
+                modal_title = f"Detalle del Asset: {asset_id} - {selected_month} - {selected_consumption_type}"
+            else:
+                modal_title = f"Detalle del Asset: {asset_id} - {selected_month}"
             
-            # Crear contenido del modal usando la función del componente
+            # Create modal content
             from components.metrics.asset_detail_modal import create_asset_detail_content
             modal_content = create_asset_detail_content(
                 asset_id=asset_id,
@@ -992,32 +1068,32 @@ def register_table_callbacks(app):
                 asset_metadata=asset_metadata
             )
             
-            # Activar el modal - Asegurarse de que todos los valores son serializables a JSON
-            # Incluir project_id en los datos enviados al modal para que esté disponible al actualizar lecturas
+            logger.info(f"Showing asset detail for asset={asset_id}, month={selected_month}, type={selected_consumption_type or 'all'}")
+            
+            # Return data for modal
             return {
                 "show": True, 
                 "asset_id": str(asset_id), 
                 "month": str(selected_month),
-                "project_id": project_id,  # Añadir project_id para que esté disponible en las actualizaciones
+                "consumption_type": selected_consumption_type,
+                "project_id": project_id,
                 "metadata": asset_metadata,
-                "tags": consumption_tags
+                "tags": filtered_consumption_tags
             }, modal_title, modal_content
         
         except Exception as e:
-            print(f"[ERROR] show_asset_detail - Error al cargar detalles: {str(e)}")
-            import traceback
-            print(traceback.format_exc())
+            logger.error(f"Error loading asset details: {str(e)}", exc_info=True)
             
-            # En caso de error, mostrar mensaje de error
+            # Show error message
+            from dash import html
             error_content = html.Div([
                 html.I(className="fas fa-exclamation-triangle me-2"),
                 f"Error al cargar detalles: {str(e)}"
             ], className="alert alert-danger")
             
-            # Asegurarse de que todos los valores son serializables a JSON
             return {"show": True, "error": str(e)}, "Error", error_content
 
-    # Callback para monitorear cambios en la tabla (solo para depuración)
+    # Callback for monitoring table changes (for debugging purposes)
     @app.callback(
         Output("monthly-readings-table-debug", "data"),
         [Input("monthly-readings-table-interactive", "page_current"),
@@ -1028,47 +1104,24 @@ def register_table_callbacks(app):
         prevent_initial_call=True
     )
     def monitor_table_changes(page_current, page_size, filter_query, virtual_data, virtual_indices):
-        """Monitorear cambios en la tabla para depuración."""
+        """Monitor table changes for debugging purposes."""
+        from utils.logging import get_logger
+        logger = get_logger(__name__)
+        
         ctx = callback_context
         trigger = ctx.triggered[0]['prop_id'].split('.')[1] if ctx.triggered else 'No trigger'
         
-        print(f"[DEBUG] monitor_table_changes - Trigger: {trigger}")
-        print(f"[DEBUG] monitor_table_changes - Página actual: {page_current}")
-        print(f"[DEBUG] monitor_table_changes - Tamaño de página: {page_size}")
-        print(f"[DEBUG] monitor_table_changes - Filtro: {filter_query}")
-        print(f"[DEBUG] monitor_table_changes - Datos virtuales: {len(virtual_data) if virtual_data else 0} filas")
-        print(f"[DEBUG] monitor_table_changes - Índices virtuales: {len(virtual_indices) if virtual_indices else 0} elementos")
-        
-        if virtual_indices and len(virtual_indices) > 0:
-            print(f"[DEBUG] monitor_table_changes - Primeros 5 índices virtuales: {virtual_indices[:min(5, len(virtual_indices))]}")
-            print(f"[DEBUG] monitor_table_changes - Últimos 5 índices virtuales: {virtual_indices[-min(5, len(virtual_indices)):]}")
+        # Only log details at DEBUG level to avoid cluttering logs
+        if logger.isEnabledFor(10):  # DEBUG level
+            logger.debug(f"Table change triggered by: {trigger}")
+            logger.debug(f"Page: {page_current}, Size: {page_size}, Filter: {filter_query}")
+            logger.debug(f"Virtual data: {len(virtual_data) if virtual_data else 0} rows")
+            logger.debug(f"Virtual indices: {len(virtual_indices) if virtual_indices else 0} indices")
             
-            # Verificar si hay paginación y cómo afecta a los índices virtuales
-            if page_current is not None and page_size is not None and page_current > 0:
-                print(f"[DEBUG] monitor_table_changes - Estamos en la página {page_current}")
-                # Calcular el rango de índices que deberían estar en esta página
-                start_idx = page_current * page_size
-                end_idx = start_idx + page_size
-                print(f"[DEBUG] monitor_table_changes - Rango de índices esperados para esta página: {start_idx} - {end_idx}")
-                
-                # Verificar si los índices virtuales corresponden a este rango
-                if len(virtual_indices) <= page_size:
-                    print(f"[DEBUG] monitor_table_changes - Los índices virtuales parecen estar limitados a la página actual")
-                    # Verificar los valores de los índices virtuales
-                    if len(virtual_indices) > 0:
-                        print(f"[DEBUG] monitor_table_changes - Valores de índices virtuales: {virtual_indices}")
-                else:
-                    print(f"[DEBUG] monitor_table_changes - Los índices virtuales contienen más elementos que el tamaño de la página")
-                    # Verificar si los índices virtuales están en el rango esperado
-                    indices_in_range = [idx for idx in virtual_indices if start_idx <= idx < end_idx]
-                    print(f"[DEBUG] monitor_table_changes - Índices virtuales en el rango esperado: {indices_in_range}")
-                    
-                    # Simular cómo se calcularía el índice global para diferentes filas en esta página
-                    for i in range(min(5, page_size)):
-                        adjusted_row_index = i + start_idx
-                        if adjusted_row_index < len(virtual_indices):
-                            original_index = virtual_indices[adjusted_row_index]
-                            print(f"[DEBUG] monitor_table_changes - Simulación: Para fila {i} en página {page_current}, adjusted_row_index={adjusted_row_index}, índice original={original_index}")
+            # Log a sample of indices for detailed debugging if needed
+            if virtual_indices and len(virtual_indices) > 0:
+                logger.debug(f"First 5 indices: {virtual_indices[:min(5, len(virtual_indices))]}")
+                logger.debug(f"Last 5 indices: {virtual_indices[-min(5, len(virtual_indices)):]}")
         
-        # No necesitamos actualizar nada, este callback es solo para depuración
+        # This callback is for monitoring only, no update needed
         return dash.no_update

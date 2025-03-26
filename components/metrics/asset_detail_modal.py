@@ -282,24 +282,18 @@ def register_asset_detail_modal_callbacks(app):
         """Toggle the asset detail modal."""
         ctx = callback_context
         
-        # Logs para depuración
-        logger.debug(f"toggle_asset_detail_modal - Contexto de callback: {ctx.triggered}")
-        logger.debug(f"toggle_asset_detail_modal - Datos de trigger: {trigger_data}")
-        logger.debug(f"toggle_asset_detail_modal - Estado actual del modal: {is_open}")
-        
         if not ctx.triggered:
             return is_open, {}, None
         
         trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
-        logger.debug(f"toggle_asset_detail_modal - ID del trigger: {trigger_id}")
         
         if trigger_id == "show-asset-detail-trigger" and trigger_data:
-            logger.info(f"toggle_asset_detail_modal - Abriendo modal para asset: {trigger_data.get('asset_id', 'N/A')}, mes: {trigger_data.get('month', 'N/A')}")
-            # Devolver True para abrir el modal, los datos del asset para el Store, y None para el estado de actualización
+            logger.info(f"Opening modal for asset: {trigger_data.get('asset_id')}, month: {trigger_data.get('month')}, type: {trigger_data.get('consumption_type', 'N/A')}")
+            # Return True to open the modal, asset data for the Store, and None for update status
             return True, trigger_data, None
         elif trigger_id == "close-asset-detail-modal":
-            logger.info(f"toggle_asset_detail_modal - Cerrando modal")
-            # Devolver False para cerrar el modal, un diccionario vacío para el Store, y None para el estado de actualización
+            logger.debug("Closing asset detail modal")
+            # Return False to close the modal, empty dict for the Store, and None for update status
             return False, {}, None
         
         return is_open, {}, None
@@ -350,13 +344,11 @@ def register_asset_detail_modal_callbacks(app):
         
         # Verificar que tenemos la información necesaria
         if not asset_info or 'asset_id' not in asset_info:
-            logger.warning("[ERROR] update_asset_readings - No se encontró asset_id en la información del asset")
+            logger.warning("Missing asset_id in asset information")
             return dbc.Alert(
                 [
                     html.I(className="fas fa-exclamation-triangle me-2"),
                     "No se pudo obtener información del asset para actualizar lecturas.",
-                    html.Br(),
-                    html.Small(f"Asset info: {asset_info}")
                 ],
                 color="danger",
                 dismissable=True
@@ -366,21 +358,20 @@ def register_asset_detail_modal_callbacks(app):
         asset_id = asset_info.get('asset_id')
         project_id = asset_info.get('project_id')
         month = asset_info.get('month')
+        consumption_type = asset_info.get('consumption_type')
         asset_metadata = asset_info.get('metadata', {})
         tags = asset_info.get('tags', [])
         token = token_data.get('token') if token_data else None
         
-        # Depuración: Registrar la información clave del asset
-        logger.info(f"[INFO] update_asset_readings - Iniciando actualización para asset_id={asset_id}, project_id={project_id}")
-        logger.debug(f"[DEBUG] update_asset_readings - Tags detectados: {tags}")
-        logger.debug(f"[DEBUG] update_asset_readings - Contenido completo de asset_info: {asset_info}")
+        # Log key information
+        logger.info(f"Starting readings update for asset_id={asset_id}, project_id={project_id}, consumption_type={consumption_type or 'all'}")
         
-        # Mostrar mensaje de carga con botón de cancelación
+        # Show loading message with cancel button
         loading_message = html.Div([
             dbc.Alert(
                 [
                     dbc.Spinner(size="sm", color="primary", spinner_class_name="me-2"),
-                    "Actualizando lecturas del asset...",
+                    f"Actualizando lecturas del asset para {consumption_type if consumption_type else 'todos los tipos de consumo'}...",
                 ],
                 color="info",
                 className="mb-2"
