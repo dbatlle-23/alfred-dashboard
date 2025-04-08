@@ -244,6 +244,38 @@ def fetch_data():
         return []
 ```
 
+### 7. Dash Component Guidelines
+
+#### DataTable Components
+
+When using Dash DataTable components, follow these guidelines:
+
+1. **Properly Configure Export Options**: 
+   - Use only valid values for `export_format`: "csv", "xlsx", or "none"
+   - Don't combine multiple formats in a single string (e.g., "xlsx csv" is invalid)
+   - Example of correct usage:
+   ```python
+   dash_table.DataTable(
+       # other properties...
+       export_format="xlsx",  # OR "csv" OR "none"
+   )
+   ```
+
+2. **Performance Considerations**:
+   - Use pagination (`page_size`) for large datasets
+   - Implement filtering and sorting on the server side for very large datasets
+   - Avoid loading the entire dataset client-side when possible
+
+3. **Styling Best Practices**:
+   - Use conditional formatting for important data
+   - Ensure text alignment is appropriate for data types (e.g., right-align numbers)
+   - Use consistent styling across all tables in the application
+
+4. **Accessibility**:
+   - Include descriptive column names
+   - Ensure sufficient color contrast for all users
+   - Test with screen readers if possible
+
 ## Adding New Features
 
 When adding new features to the project, follow these steps:
