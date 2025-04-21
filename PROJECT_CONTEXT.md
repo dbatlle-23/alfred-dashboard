@@ -371,6 +371,33 @@ The application interacts with several key API endpoints:
 - `/api/tags`: Retrieve consumption tags/types
 - `/api/corrections`: Submit and retrieve manual corrections
 
+#### Smart Locks and NFC Code Endpoints
+
+The application also interacts with endpoints for managing smart locks and NFC codes:
+
+- `/gateways/{gateway_id}/devices/{device_id}/update-password/{sensor_id}`: Update NFC code password
+  - Method: POST
+  - Payload format: `{"data": {"password": "YOUR_PASSWORD"}}`
+  - Headers: Requires authentication token
+  - Use case: For updating NFC_CODE sensor values in smart locks
+
+**Implementation Note**: Due to API changes and variations, the application uses a fallback mechanism when interacting with the NFC code endpoints. It attempts several URL patterns in sequence until one succeeds:
+
+1. Original format: `/sensor-passwords/deployment/{asset_id}/device/{device_id}/sensor/{sensor_id}`
+2. Gateway format: `/gateways/{gateway_id}/devices/{device_id}/update-password/{sensor_id}`
+3. RESTful format: `/api/gateways/{gateway_id}/devices/{device_id}/sensors/{sensor_id}/update-password`
+4. Device-only format: `/api/devices/{device_id}/sensors/{sensor_id}/update-password`
+
+This approach allows the application to be compatible with different API versions or environments without requiring code changes. The actual implementation logs which URL pattern succeeds for debugging purposes.
+
+When implementing new features that interact with the API for NFC code operations, follow these guidelines:
+
+1. Always use the flexible approach that tries multiple URL patterns
+2. Use the appropriate HTTP method (POST for updates, GET for retrieval)
+3. Structure the payload as `{"data": {"password": "YOUR_PASSWORD"}}`
+4. Handle different response formats and status codes
+5. Provide detailed logging for troubleshooting
+
 ### Authentication Flow
 
 1. The application authenticates with the API using credentials
@@ -710,3 +737,69 @@ Always update documentation when making significant changes:
 - Add examples for new features
 
 By following these version control practices, we ensure that the project remains maintainable, the history stays clean and informative, and collaboration between team members is smooth and efficient. 
+
+## Carbon Footprint Analysis
+
+El módulo de análisis de huella de carbono es una característica clave para evaluar el impacto ambiental del consumo energético.
+
+### Factores de Emisión
+
+Los cálculos de emisiones de CO2 se basan en factores de emisión definidos en `utils/carbon_footprint/analysis.py`:
+
+```python
+EMISSION_FACTORS = {
+    "electricity": 0.108,          # kg CO2 por kWh de electricidad (mix España 2024)
+    "natural_gas": 0.20,           # kg CO2 por kWh de gas natural
+    "heating_oil": 0.27,           # kg CO2 por kWh de gasóleo de calefacción
+    "thermal_energy_heat": 0.18,   # kg CO2 por kWh de energía térmica de calor
+    "thermal_energy_cooling": 0.15 # kg CO2 por kWh de energía térmica de refrigeración
+}
+```
+
+Estos factores deben actualizarse periódicamente según los datos oficiales más recientes. El factor para electricidad refleja el mix eléctrico español de 2024 (0.108 kg CO2/kWh).
+
+### Procesamiento de Datos
+
+El módulo incluye funcionalidades para:
+
+1. **Procesamiento de Lecturas Acumuladas**: Convierte lecturas acumuladas en consumos diferenciales
+2. **Manejo de Timestamps Futuros**: Incluye un buffer de fechas de hasta 2 años en el futuro
+3. **Ordenamiento por Timestamp**: Garantiza cálculos cronológicamente correctos
+4. **Método Fallback**: Usa la diferencia entre primera y última lectura cuando no se pueden calcular diferencias incrementales
+
+### Cálculo de Diferencias de Consumo
+
+El método principal para calcular consumos a partir de lecturas acumuladas:
+
+```python
+# Calcular diferencias entre lecturas consecutivas (consumo real)
+for i in range(1, len(raw_values)):
+    # Si el valor actual es mayor que el anterior (incremento normal)
+    if raw_values[i] > raw_values[i-1]:
+        diff = raw_values[i] - raw_values[i-1]
+        # Filtrar valores anómalos (diferencias muy grandes)
+        if diff < 1000:  # Umbral para consumo entre lecturas
+            energy_consumption.append(diff)
+```
+
+### Funciones Principales
+
+- `calculate_carbon_emissions`: Calcula emisiones en kg CO2 a partir del consumo energético
+- `calculate_total_emissions`: Suma todas las emisiones para un período
+- `calculate_average_emissions`: Calcula emisiones promedio diarias
+- `detect_emission_anomalies`: Identifica consumos anómalos basados en desviaciones estándar
+- `compare_emission_periods`: Compara emisiones entre dos períodos de tiempo
+- `estimate_annual_emissions`: Proyecta emisiones anuales basadas en datos de un período más corto
+- `calculate_emission_reduction_targets`: Calcula objetivos de reducción para horizontes temporales
+
+### Manejo de Anomalías y Fechas Futuras
+
+El sistema está diseñado para manejar situaciones especiales:
+
+1. **Timestamps Futuros**: El rango de fechas se extiende automáticamente con un buffer para aceptar datos con fechas en el futuro
+2. **Reinicios de Contador**: Se identifican y manejan caídas en valores acumulados
+3. **Datos Faltantes**: Implementa estrategias de fallback para períodos con datos insuficientes
+
+Para más detalles sobre las mejoras recientes, consultar el archivo `CHANGELOG.md`.
+
+## Conclusion 

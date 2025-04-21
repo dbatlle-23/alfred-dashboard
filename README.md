@@ -81,13 +81,19 @@ La aplicación puede configurarse mediante variables de entorno:
 - `components/`: Componentes reutilizables de la interfaz
 - `layouts/`: Layouts para las diferentes páginas
 - `utils/`: Utilidades y servicios
+  - `utils/carbon_footprint/`: Funciones para el análisis de huella de carbono
+  - `utils/water_consumption/`: Funciones para el análisis de consumo de agua
+  - `utils/metrics/`: Procesamiento general de métricas y datos
 - `config/`: Archivos de configuración
 - `logs/`: Logs de la aplicación
+- `RECENT_IMPROVEMENTS.md`: Documentación de las mejoras y actualizaciones recientes
 
 ## Características
 
 - Exploración de tablas de base de datos PostgreSQL
 - Visualización de estructura y datos de tablas
+- Análisis de consumo de agua con detección de anomalías
+- Análisis de huella de carbono con factores de emisión actualizados (2024)
 - Configuración de conexión a base de datos
 - Sistema robusto de manejo de errores
 - Logging avanzado con formato JSON
@@ -211,4 +217,24 @@ Para detener la aplicación en Docker, ejecuta:
 
 ```
 docker-compose down
+```
+
+# Alfred Dashboard NFC Code Management
+
+## Overview
+
+This document describes the NFC Code Management functionality implemented in the Alfred Dashboard application. NFC code sensors are used to manage Near Field Communication (NFC) access methods for smart locks.
+
+## Features
+
+- **View NFC Codes**: Display all NFC codes associated with a smart lock in the lock details modal
+- **Edit NFC Codes**: Modify NFC code values through a dedicated editing interface
+- **Real-time Updates**: Changes to NFC codes are reflected immediately in the UI
+
+## API Endpoints
+
+### Get NFC Code Value
+
+```
+GET /devices/{device_id}/sensors/{sensor_id}/value
 ```
