@@ -56,4 +56,26 @@
     border-radius: 0.25rem;
     background-color: #f8f9fc;
     border: 1px solid #e3e6f0;
-} 
+}
+
+/* View toggle styles */
+.view-toggle-container {
+    border: 1px solid #dee2e6;
+    border-radius: 0.25rem;
+    overflow: hidden;
+}
+
+.view-toggle-button {
+    border: none;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 6px 12px;
+    font-size: 0.9rem;
+}
+
+.view-toggle-button:first-child {
+    border-right: 1px solid #dee2e6;
+}
+
+/* Importar estilos para la matriz NFC */
+@import url("css/nfc_grid.css"); 

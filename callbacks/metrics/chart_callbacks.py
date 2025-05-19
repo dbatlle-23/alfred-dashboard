@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import numpy as np
 import html
 import os
+import time
 
 from utils.api import get_daily_readings_for_year_multiple_tags_project_parallel
 from utils.metrics.data_processing import (
@@ -25,6 +26,8 @@ from components.metrics.charts import (
     create_monthly_averages_chart
 )
 from utils.data_loader import load_all_csv_data
+from constants.metrics import CONSUMPTION_TAGS_MAPPING
+from plotly.subplots import make_subplots
 
 # Función personalizada para serializar objetos a JSON
 def custom_json_serializer(obj):
@@ -46,78 +49,97 @@ def register_chart_callbacks(app):
     
     @app.callback(
         Output("metrics-data-store", "data"),
-        [Input("metrics-analyze-button", "n_clicks")],
+        [Input("metrics-analyze-button", "n_clicks"),
+         Input("metrics-refresh-data-store", "data")],  # Added input for forced refresh
         [State("metrics-client-filter", "value"),
          State("metrics-project-filter", "value"),
          State("metrics-consumption-tags-filter", "value"),
-         State("jwt-token-store", "data")],
+         State("jwt-token-store", "data"),
+         State("metrics-selected-consumption-tags-store", "data")],  # Added state to track previous tags
         prevent_initial_call=True
     )
-    def load_data(n_clicks, client_id, project_id, consumption_tags, token_data):
-        """Load data when the analyze button is clicked."""
-        print("=====================================================")
-        print("DEBUGGING LOAD DATA - FUNCTION CALLED")
-        print("=====================================================")
-        print(f"[DEBUG] load_data - n_clicks: {n_clicks}")
-        print(f"[DEBUG] load_data - client_id: {client_id}")
-        print(f"[DEBUG] load_data - project_id: {project_id}")
-        print(f"[DEBUG] load_data - consumption_tags: {consumption_tags}")
+    def load_data(n_clicks, refresh_data, client_id, project_id, consumption_tags, token_data, prev_tags_data):
+        """Load data when the analyze button is clicked or when refresh is requested."""
+        # Use more concise logging
+        print("== METRICS DATA LOADING STARTED ==")
         
-        if not n_clicks or not client_id or not consumption_tags:
-            print(f"[DEBUG] load_data - No clicks or missing client_id or consumption_tags")
+        ctx = callback_context
+        trigger_id = ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else None
+        
+        print(f"[INFO] load_data - Triggered by: {trigger_id}, Client: {client_id}, Project: {project_id}")
+        
+        force_refresh = False
+        auto_triggered = False
+        if trigger_id == "metrics-refresh-data-store" and refresh_data:
+            # Check if we need to force a refresh (clear cache)
+            force_refresh = refresh_data.get("force_refresh", False)
+            auto_triggered = refresh_data.get("auto_triggered", False)
+            print(f"[INFO] load_data - Forced refresh requested: {force_refresh}, Auto-triggered: {auto_triggered}")
+            
+            if force_refresh:
+                # Import and clear the cache
+                from utils.data_loader import clear_data_cache
+                clear_data_cache()
+                
+                # If auto-triggered, show notification to user
+                if auto_triggered:
+                    print("[INFO] load_data - Auto-triggered refresh due to empty data - cache was automatically cleared")
+        
+        # Check if consumption tags have changed since last call
+        prev_consumption_tags = prev_tags_data.get("consumption_tags") if prev_tags_data else None
+        tags_changed = prev_consumption_tags is not None and sorted(prev_consumption_tags) != sorted(consumption_tags or [])
+        
+        if tags_changed:
+            print(f"[INFO] load_data - Consumption tags changed from {prev_consumption_tags} to {consumption_tags}, clearing cache")
+            # Clear the cache if tags changed
+            from utils.data_loader import clear_data_cache
+            clear_data_cache()
+            force_refresh = True
+        
+        if not ((trigger_id == "metrics-analyze-button" and n_clicks) or 
+                (trigger_id == "metrics-refresh-data-store" and refresh_data)) or not client_id or not consumption_tags:
+            print(f"[INFO] load_data - No valid trigger or missing parameters")
             return dash.no_update
         
         try:
-            print(f"[INFO METRICS] load_data - Cargando datos para cliente {client_id}, proyecto {project_id}, tags {consumption_tags}")
+            print(f"[INFO] load_data - Loading data for client {client_id}, project {project_id}")
             
-            # Obtener el token JWT directamente del store
+            # Validate JWT token
             token = token_data.get('token') if token_data else None
-            
             if not token:
-                print("[ERROR METRICS] load_data - No se encontró token JWT")
+                print("[ERROR] load_data - JWT token not found")
                 return json.dumps([])
             
-            # Cargar datos desde archivos CSV locales
-            print(f"[INFO METRICS] load_data - Cargando datos desde archivos CSV para proyecto {project_id}, tags {consumption_tags}")
-            
-            # Verificar que la ruta de datos existe
+            # Verify data directory exists
             base_path = "data/analyzed_data"
             if not os.path.exists(base_path):
-                print(f"[ERROR METRICS] load_data - La ruta de datos {base_path} no existe")
+                print(f"[INFO] load_data - Creating data path {base_path}")
                 os.makedirs(base_path, exist_ok=True)
-                print(f"[INFO METRICS] load_data - Se creó la ruta de datos {base_path}")
             
-            # Listar los archivos disponibles para depuración
-            if os.path.exists(base_path):
-                print(f"[INFO METRICS] load_data - Archivos disponibles en {base_path}:")
-                for root, dirs, files in os.walk(base_path):
-                    print(f"  Directorio: {root}")
-                    for dir_name in dirs:
-                        print(f"    Subdirectorio: {dir_name}")
-                    for file_name in files:
-                        if file_name.endswith('.csv'):
-                            print(f"    Archivo CSV: {file_name}")
+            # Load data directly without extensive directory scanning
+            print(f"[INFO] load_data - Loading CSV data with tags: {consumption_tags}")
             
-            # Cargar los datos
+            # Measure loading time
+            start_time = time.time()
             df = load_all_csv_data(consumption_tags=consumption_tags, project_id=project_id, jwt_token=token)
+            load_time = time.time() - start_time
             
             if df is None or df.empty:
-                print("[ERROR METRICS] load_data - No se encontraron datos en los archivos CSV")
+                print(f"[WARN] load_data - No data found, creating sample data")
                 
-                # Crear datos de ejemplo para pruebas
-                print("[INFO METRICS] load_data - Creando datos de ejemplo para pruebas")
+                # Create sample data with fewer rows for testing
+                sample_data = []
                 end = pd.Timestamp.now()
-                start = end - pd.DateOffset(months=6)
+                start = end - pd.DateOffset(months=2)  # Reduced from 6 to 2 months
                 date_range = pd.date_range(start=start, end=end, freq='D')
                 
-                # Crear datos de ejemplo
-                sample_data = []
+                # Create fewer sample records
                 for date in date_range:
-                    for asset_id in range(1, 4):  # 3 activos de ejemplo
-                        for consumption_type in consumption_tags:
+                    for asset_id in range(1, 3):  # Reduced from 4 to 3 assets
+                        for consumption_type in consumption_tags[:2]:  # Only use first 2 consumption types
                             sample_data.append({
                                 'date': date.strftime('%Y-%m-%d'),
-                                'consumption': float(np.random.randint(50, 200)),
+                                'consumption': float(np.random.randint(50, 150)),
                                 'asset_id': f"asset_{asset_id}",
                                 'consumption_type': consumption_type,
                                 'client_id': client_id,
@@ -125,113 +147,91 @@ def register_chart_callbacks(app):
                             })
                 
                 df = pd.DataFrame(sample_data)
-                print(f"[INFO METRICS] load_data - Creados {len(df)} registros de ejemplo")
+                print(f"[INFO] load_data - Created {len(df)} sample records")
             else:
-                print(f"[INFO METRICS] load_data - Cargados {len(df)} registros reales desde archivos CSV")
-                print(f"[INFO METRICS] load_data - Columnas disponibles: {df.columns.tolist()}")
-                print(f"[INFO METRICS] load_data - Primeros registros: {df.head().to_dict()}")
+                print(f"[INFO] load_data - Loaded {len(df)} real records in {load_time:.2f} seconds")
             
-            # Asegurar que el DataFrame tiene las columnas necesarias
-            required_columns = ['date', 'consumption', 'asset_id', 'consumption_type']
-            if not all(col in df.columns for col in required_columns):
-                print(f"[ERROR METRICS] load_data - Faltan columnas requeridas. Columnas disponibles: {df.columns.tolist()}")
+            # Simplify DataFrame processing for serialization
+            try:
+                # Use a more efficient approach to create serializable data
+                simplified_data = []
                 
-                # Añadir columnas faltantes
-                for col in required_columns:
+                # Only process the necessary columns to reduce overhead
+                essential_columns = ['date', 'consumption', 'asset_id', 'consumption_type', 'client_id', 'project_id']
+                df = df.reindex(columns=[col for col in essential_columns if col in df.columns])
+                
+                # Add any missing essential columns
+                for col in essential_columns:
                     if col not in df.columns:
                         if col == 'date':
-                            df['date'] = pd.Timestamp.now().strftime('%Y-%m-%d')
+                            df[col] = pd.Timestamp.now().strftime('%Y-%m-%d')
                         elif col == 'consumption':
-                            df['consumption'] = 100.0
+                            df[col] = 100.0
                         elif col == 'asset_id':
-                            df['asset_id'] = 'asset_1'
+                            df[col] = 'asset_1'
                         elif col == 'consumption_type':
-                            df['consumption_type'] = consumption_tags[0] if consumption_tags else 'ENERGY_CONSUMPTION'
-            
-            # Añadir client_id si no existe
-            if 'client_id' not in df.columns:
-                df['client_id'] = client_id
-            
-            # Añadir project_id si no existe
-            if 'project_id' not in df.columns:
-                df['project_id'] = project_id if project_id else "project_1"
-            
-            # Convertir la columna date a datetime si no lo es
-            if 'date' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['date']):
-                df['date'] = pd.to_datetime(df['date'], errors='coerce')
-                # Eliminar filas con fechas inválidas
-                df = df.dropna(subset=['date'])
-            
-            # Convertir la columna consumption a float si no lo es
-            if 'consumption' in df.columns and not pd.api.types.is_float_dtype(df['consumption']):
-                df['consumption'] = pd.to_numeric(df['consumption'], errors='coerce')
-                # Eliminar filas con consumos inválidos
-                df = df.dropna(subset=['consumption'])
-            
-            # Simplificar el DataFrame para evitar problemas de serialización
-            try:
-                # Crear una lista de diccionarios simplificada
-                simplified_data = []
-                for _, row in df.iterrows():
-                    simplified_row = {}
-                    for col in df.columns:
-                        # Manejar diferentes tipos de datos
-                        if pd.api.types.is_datetime64_any_dtype(pd.Series([row[col]])):
-                            # Verificar si el valor es NaT antes de aplicar strftime
-                            if pd.isna(row[col]) or pd.isnull(row[col]):
+                            df[col] = consumption_tags[0] if consumption_tags else 'ENERGY_CONSUMPTION'
+                        elif col == 'client_id':
+                            df[col] = client_id
+                        elif col == 'project_id':
+                            df[col] = project_id if project_id else "project_1"
+                
+                # Ensure date column is datetime
+                if not pd.api.types.is_datetime64_any_dtype(df['date']):
+                    df['date'] = pd.to_datetime(df['date'], errors='coerce')
+                    df = df.dropna(subset=['date'])
+                
+                # Ensure consumption is float
+                if not pd.api.types.is_float_dtype(df['consumption']):
+                    df['consumption'] = pd.to_numeric(df['consumption'], errors='coerce')
+                    df = df.dropna(subset=['consumption'])
+                
+                # Create serializable list with batch processing to improve performance
+                batch_size = 5000
+                total_rows = len(df)
+                
+                for start_idx in range(0, total_rows, batch_size):
+                    end_idx = min(start_idx + batch_size, total_rows)
+                    batch = df.iloc[start_idx:end_idx]
+                    
+                    for _, row in batch.iterrows():
+                        simplified_row = {}
+                        for col in batch.columns:
+                            # Handle different data types efficiently
+                            if pd.api.types.is_datetime64_any_dtype(pd.Series([row[col]])):
+                                simplified_row[col] = None if pd.isna(row[col]) else row[col].strftime('%Y-%m-%d')
+                            elif pd.isna(row[col]):
                                 simplified_row[col] = None
                             else:
-                                simplified_row[col] = row[col].strftime('%Y-%m-%d')
-                        elif hasattr(row[col], 'to_timestamp'):  # Para objetos Period
-                            try:
-                                simplified_row[col] = row[col].to_timestamp().strftime('%Y-%m-%d')
-                            except:
-                                # Si hay error al convertir el período, usar None
-                                simplified_row[col] = None
-                        elif pd.isna(row[col]):
-                            simplified_row[col] = None
-                        else:
-                            simplified_row[col] = row[col]
-                    simplified_data.append(simplified_row)
-                
-                # Convertir a JSON
-                try:
-                    json_data = json.dumps(simplified_data)
-                    
-                    print(f"[INFO METRICS] load_data - Datos serializados a JSON correctamente, {len(simplified_data)} registros")
-                    return json_data
-                except TypeError as e:
-                    # Capturar error de tipos no serializables
-                    print(f"[ERROR METRICS] load_data - Error de tipo al serializar a JSON: {str(e)}")
-                    
-                    # Intentar una segunda pasada con conversión más estricta
-                    try:
-                        # Convertir todos los valores problemáticos a str o None
-                        for i, item in enumerate(simplified_data):
-                            for key, value in list(item.items()):
-                                if not (isinstance(value, (str, int, float, bool, type(None)))):
+                                # Convert directly to basic types
+                                val = row[col]
+                                if not isinstance(val, (str, int, float, bool, type(None))):
                                     try:
-                                        simplified_data[i][key] = str(value)
+                                        simplified_row[col] = str(val)
                                     except:
-                                        simplified_data[i][key] = None
+                                        simplified_row[col] = None
+                                else:
+                                    simplified_row[col] = val
                         
-                        json_data = json.dumps(simplified_data)
-                        print(f"[INFO METRICS] load_data - Datos serializados a JSON en segunda pasada, {len(simplified_data)} registros")
-                        return json_data
-                    except Exception as e2:
-                        print(f"[ERROR METRICS] load_data - Error en segunda pasada al serializar a JSON: {str(e2)}")
-                        import traceback
-                        print(traceback.format_exc())
-                        return json.dumps([])
-                    
+                        simplified_data.append(simplified_row)
+                
+                # Measure serialization time
+                serialize_start = time.time()
+                json_data = json.dumps(simplified_data)
+                serialize_time = time.time() - serialize_start
+                
+                print(f"[INFO] load_data - Serialized {len(simplified_data)} records in {serialize_time:.2f} seconds")
+                print("== METRICS DATA LOADING COMPLETED ==")
+                return json_data
+                
             except Exception as e:
-                print(f"[ERROR METRICS] load_data - Error al serializar a JSON: {str(e)}")
+                print(f"[ERROR] load_data - Error serializing data: {str(e)}")
                 import traceback
                 print(traceback.format_exc())
                 return json.dumps([])
             
         except Exception as e:
-            print(f"[ERROR METRICS] load_data: {str(e)}")
+            print(f"[ERROR] load_data - {str(e)}")
             import traceback
             print(traceback.format_exc())
             return json.dumps([])
@@ -428,204 +428,219 @@ def register_chart_callbacks(app):
         [Input("metrics-data-store", "data"),
          Input("metrics-client-filter", "value"),
          Input("metrics-project-filter", "value"),
-         Input("metrics-consumption-tags-filter", "value"),
+         Input("metrics-asset-filter", "value"),
          Input("metrics-date-range", "start_date"),
-         Input("metrics-date-range", "end_date")]
+         Input("metrics-date-range", "end_date"),
+         Input("metrics-monthly-summary-selected-type-store", "data")],
+        prevent_initial_call=True
     )
-    def update_monthly_totals_chart(json_data, client_id, project_id, consumption_tags, start_date, end_date):
-        """Update the monthly totals chart."""
+    def update_monthly_totals_chart(json_data, client_id, project_id, asset_id, start_date, end_date, summary_type_store_data):
+        """Update monthly totals chart based on the specific type selected for the summary section."""
+        
+        from constants.metrics import CONSUMPTION_TAGS_MAPPING
+        import plotly.graph_objects as go
+        # from plotly.subplots import make_subplots # No longer needed for single type
+
+        # Default empty figure
+        default_figure = go.Figure(layout={"template": "plotly_white", "xaxis_title": "Mes", "yaxis_title": "Consumo"})
+        default_figure.add_annotation(text="Seleccione un tipo de consumo", xref="paper", yref="paper", showarrow=False, font=dict(size=14))
+
+        active_tag = summary_type_store_data.get("active_tag") if summary_type_store_data else None
+
+        if not json_data or json_data == "[]" or not active_tag:
+            return default_figure
+
+        # Map tag to human readable name for filtering
+        human_readable_name = CONSUMPTION_TAGS_MAPPING.get(active_tag)
+        if not human_readable_name:
+             print(f"[WARN update_monthly_totals] Could not map tag {active_tag}")
+             return default_figure
+
+        # Determine unit from active_tag
+        unit = "units"
+        if "WATER" in active_tag: unit = "m³"
+        elif "ENERGY" in active_tag: unit = "kWh"
+        elif "FLOW" in active_tag: unit = "personas"
+
         try:
-            # Intentar usar datos reales primero
-            if json_data and json_data != "[]":
-                # Convertir JSON a DataFrame
-                df = pd.DataFrame(json.loads(json_data))
+            df = pd.DataFrame(json.loads(json_data))
+            
+            # Filter main df by the selected type for this section
+            df_filtered_type = df[df['consumption_type'] == human_readable_name].copy()
+
+            if df_filtered_type.empty:
+                 # print(f"[DEBUG update_monthly_totals] df_filtered_type is empty for {human_readable_name}.")
+                 return default_figure # Return default (which now says select type)
+
+            # Apply other filters
+            current_asset_id = asset_id if asset_id and asset_id != 'all' else None
+            processed_df = process_metrics_data(
+                df_filtered_type,
+                client_id=client_id,
+                project_id=project_id,
+                asset_id=current_asset_id, 
+                consumption_tags=[human_readable_name], # Pass the specific type
+                start_date=start_date,
+                end_date=end_date
+            )
+
+            if processed_df.empty:
+                 # print("[DEBUG update_monthly_totals] processed_df is empty after filtering.")
+                 return default_figure
+
+            # Generate monthly summary for the single selected type
+            # No longer need group_by_type=True or the loop/concat logic
+            monthly_summary = generate_monthly_consumption_summary(processed_df, start_date, end_date)
+
+            if monthly_summary.empty:
+                # print("[DEBUG update_monthly_totals] monthly_summary is empty.")
+                return default_figure
                 
-                # Verificar que el DataFrame no esté vacío
-                if not df.empty:
-                    # Procesar datos según filtros
-                    filtered_df = process_metrics_data(
-                        df, 
-                        client_id=client_id, 
-                        project_id=project_id, 
-                        consumption_tags=consumption_tags, 
-                        start_date=start_date, 
-                        end_date=end_date
-                    )
-                    
-                    # Generar resumen mensual
-                    monthly_summary = generate_monthly_consumption_summary(filtered_df, start_date, end_date)
-                    
-                    # Verificar que el resumen mensual no esté vacío
-                    if not monthly_summary.empty and 'month' in monthly_summary.columns and 'total_consumption' in monthly_summary.columns:
-                        # Crear el gráfico con los datos reales
-                        fig = go.Figure()
-                        
-                        fig.add_trace(
-                            go.Bar(
-                                x=monthly_summary['month'],
-                                y=monthly_summary['total_consumption'],
-                                marker_color='royalblue',
-                                name='Consumo Total'
-                            )
-                        )
-                        
-                        # Configuración básica
-                        fig.update_layout(
-                            title="Total de Consumo por Mes",
-                            xaxis_title="Mes",
-                            yaxis_title="Consumo Total",
-                            height=400,
-                            plot_bgcolor='white',
-                            paper_bgcolor='white'
-                        )
-                        
-                        return fig
+            # --- Create Figure (Simpler now) ---
+            fig = go.Figure()
+            
+            # Ensure summary is sorted for consistent plotting
+            monthly_summary = monthly_summary.sort_values(['date'])
+
+            fig.add_trace(go.Bar(
+                x=monthly_summary['month'], 
+                y=monthly_summary['total_consumption'],
+                name=f"{human_readable_name} ({unit})",
+                marker_color='royalblue' # Use a standard color 
+            ))
+
+            # --- Configure Layout --- 
+            fig.update_layout(
+                title=f"Consumo Total Mensual: {human_readable_name}", # Updated title
+                xaxis_title="Mes",
+                yaxis_title=f"Consumo ({unit})",
+                # barmode='group', # Not needed for single trace
+                # legend_title="Tipo de Consumo", # Not needed for single trace
+                showlegend=False, # Hide legend for single trace
+                template="plotly_white",
+                hovermode="x unified"
+            )
+            
+            fig.update_layout(yaxis_rangemode='tozero')
+
+            return fig
+
         except Exception as e:
-            print(f"[ERROR METRICS] update_monthly_totals_chart: {str(e)}")
+            print(f"[ERROR update_monthly_totals_chart]: {str(e)}")
             import traceback
             print(traceback.format_exc())
-        
-        # Si hay algún problema o no hay datos, crear datos de ejemplo
-        print("[INFO METRICS] update_monthly_totals_chart - Usando datos de ejemplo")
-        end = pd.Timestamp.now()
-        start = end - pd.DateOffset(months=6)
-        date_range = pd.date_range(start=start, end=end, freq='MS')
-        
-        # Crear datos de ejemplo
-        sample_data = {
-            'month': date_range,
-            'total_consumption': [100 * (i+1) for i in range(len(date_range))],
-        }
-        
-        monthly_summary = pd.DataFrame(sample_data)
-        
-        # Crear el gráfico con datos de ejemplo
-        fig = go.Figure()
-        
-        fig.add_trace(
-            go.Bar(
-                x=monthly_summary['month'],
-                y=monthly_summary['total_consumption'],
-                marker_color='royalblue',
-                name='Consumo Total (Ejemplo)'
-            )
-        )
-        
-        # Configuración básica
-        fig.update_layout(
-            title="Total de Consumo por Mes (Datos de Ejemplo)",
-            xaxis_title="Mes",
-            yaxis_title="Consumo Total",
-            height=400,
-            plot_bgcolor='white',
-            paper_bgcolor='white'
-        )
-        
-        return fig
-
+            # Return a figure indicating error
+            error_figure = go.Figure(layout={"template": "plotly_white"})
+            error_figure.add_annotation(text=f"Error al generar gráfico: {str(e)}", xref="paper", yref="paper", showarrow=False, font=dict(size=14, color="red"))
+            return error_figure
+    
     @app.callback(
         Output("metrics-monthly-averages-chart", "figure"),
         [Input("metrics-data-store", "data"),
          Input("metrics-client-filter", "value"),
          Input("metrics-project-filter", "value"),
-         Input("metrics-consumption-tags-filter", "value"),
+         Input("metrics-asset-filter", "value"),
          Input("metrics-date-range", "start_date"),
-         Input("metrics-date-range", "end_date")]
+         Input("metrics-date-range", "end_date"),
+         Input("metrics-monthly-summary-selected-type-store", "data")],
+        prevent_initial_call=True
     )
-    def update_monthly_averages_chart(json_data, client_id, project_id, consumption_tags, start_date, end_date):
-        """Update the monthly averages chart."""
+    def update_monthly_averages_chart(json_data, client_id, project_id, asset_id, start_date, end_date, summary_type_store_data):
+        """Update monthly averages chart based on the specific type selected for the summary section."""
+        
+        from constants.metrics import CONSUMPTION_TAGS_MAPPING
+        import plotly.graph_objects as go
+        # from plotly.subplots import make_subplots # No longer needed for single type
+
+        # Default empty figure
+        default_figure = go.Figure(layout={"template": "plotly_white", "xaxis_title": "Mes", "yaxis_title": "Consumo Promedio"})
+        default_figure.add_annotation(text="Seleccione un tipo de consumo", xref="paper", yref="paper", showarrow=False, font=dict(size=14))
+
+        active_tag = summary_type_store_data.get("active_tag") if summary_type_store_data else None
+
+        if not json_data or json_data == "[]" or not active_tag:
+            return default_figure
+
+        # Map tag to human readable name for filtering
+        human_readable_name = CONSUMPTION_TAGS_MAPPING.get(active_tag)
+        if not human_readable_name:
+             print(f"[WARN update_monthly_averages] Could not map tag {active_tag}")
+             return default_figure
+
+        # Determine unit from active_tag
+        unit = "units"
+        if "WATER" in active_tag: unit = "m³"
+        elif "ENERGY" in active_tag: unit = "kWh"
+        elif "FLOW" in active_tag: unit = "personas"
+
         try:
-            # Intentar usar datos reales primero
-            if json_data and json_data != "[]":
-                # Convertir JSON a DataFrame
-                df = pd.DataFrame(json.loads(json_data))
+            df = pd.DataFrame(json.loads(json_data))
+            
+            # Filter main df by the selected type for this section
+            df_filtered_type = df[df['consumption_type'] == human_readable_name].copy()
+
+            if df_filtered_type.empty:
+                 return default_figure
+
+            # Apply other filters
+            current_asset_id = asset_id if asset_id and asset_id != 'all' else None
+            processed_df = process_metrics_data(
+                df_filtered_type,
+                client_id=client_id,
+                project_id=project_id,
+                asset_id=current_asset_id,
+                consumption_tags=[human_readable_name],
+                start_date=start_date,
+                end_date=end_date
+            )
+
+            if processed_df.empty:
+                 return default_figure
+
+            # Generate monthly summary for the single selected type
+            monthly_summary = generate_monthly_consumption_summary(processed_df, start_date, end_date)
+
+            # Check if summary is valid and contains the necessary average column 
+            average_col_name = 'average_consumption' # Or 'mean_consumption', adjust if needed
+            if monthly_summary.empty or average_col_name not in monthly_summary.columns:
+                print(f"[DEBUG update_monthly_averages] monthly_summary invalid or missing '{average_col_name}' column.")
+                return default_figure
                 
-                # Verificar que el DataFrame no esté vacío
-                if not df.empty:
-                    # Procesar datos según filtros
-                    filtered_df = process_metrics_data(
-                        df, 
-                        client_id=client_id, 
-                        project_id=project_id, 
-                        consumption_tags=consumption_tags, 
-                        start_date=start_date, 
-                        end_date=end_date
-                    )
-                    
-                    # Generar resumen mensual
-                    monthly_summary = generate_monthly_consumption_summary(filtered_df, start_date, end_date)
-                    
-                    # Verificar que el resumen mensual no esté vacío
-                    if not monthly_summary.empty and 'month' in monthly_summary.columns and 'average_consumption' in monthly_summary.columns:
-                        # Crear el gráfico con los datos reales
-                        fig = go.Figure()
-                        
-                        fig.add_trace(
-                            go.Scatter(
-                                x=monthly_summary['month'],
-                                y=monthly_summary['average_consumption'],
-                                mode='lines+markers',
-                                marker=dict(color='forestgreen'),
-                                line=dict(color='forestgreen'),
-                                name='Consumo Promedio'
-                            )
-                        )
-                        
-                        # Configuración básica
-                        fig.update_layout(
-                            title="Promedio de Consumo por Mes",
-                            xaxis_title="Mes",
-                            yaxis_title="Consumo Promedio",
-                            height=400,
-                            plot_bgcolor='white',
-                            paper_bgcolor='white'
-                        )
-                        
-                        return fig
+            # --- Create Figure (Simpler now) ---
+            fig = go.Figure()
+            monthly_summary = monthly_summary.sort_values(['date'])
+            
+            fig.add_trace(go.Bar( # Changed to Bar chart for consistency with totals
+                x=monthly_summary['month'], 
+                y=monthly_summary[average_col_name], 
+                name=f"{human_readable_name} ({unit})",
+                marker_color='forestgreen' # Use a different color 
+            ))
+
+            # --- Configure Layout (Adjust titles) ---
+            fig.update_layout(
+                title=f"Consumo Promedio Mensual: {human_readable_name}", # Changed title
+                xaxis_title="Mes",
+                yaxis_title=f"Consumo Promedio ({unit})", # Changed y-axis title
+                # barmode='group', # Not needed
+                # legend_title="Tipo de Consumo", # Not needed
+                showlegend=False,
+                template="plotly_white",
+                hovermode="x unified"
+            )
+
+            fig.update_layout(yaxis_rangemode='tozero')
+
+            return fig
+
         except Exception as e:
-            print(f"[ERROR METRICS] update_monthly_averages_chart: {str(e)}")
+            print(f"[ERROR update_monthly_averages_chart]: {str(e)}")
             import traceback
             print(traceback.format_exc())
-        
-        # Si hay algún problema o no hay datos, crear datos de ejemplo
-        print("[INFO METRICS] update_monthly_averages_chart - Usando datos de ejemplo")
-        end = pd.Timestamp.now()
-        start = end - pd.DateOffset(months=6)
-        date_range = pd.date_range(start=start, end=end, freq='MS')
-        
-        # Crear datos de ejemplo
-        sample_data = {
-            'month': date_range,
-            'average_consumption': [50 * (i+1) for i in range(len(date_range))],
-        }
-        
-        monthly_summary = pd.DataFrame(sample_data)
-        
-        # Crear el gráfico con datos de ejemplo
-        fig = go.Figure()
-        
-        fig.add_trace(
-            go.Scatter(
-                x=monthly_summary['month'],
-                y=monthly_summary['average_consumption'],
-                mode='lines+markers',
-                marker=dict(color='forestgreen'),
-                line=dict(color='forestgreen'),
-                name='Consumo Promedio (Ejemplo)'
-            )
-        )
-        
-        # Configuración básica
-        fig.update_layout(
-            title="Promedio de Consumo por Mes (Datos de Ejemplo)",
-            xaxis_title="Mes",
-            yaxis_title="Consumo Promedio",
-            height=400,
-            plot_bgcolor='white',
-            paper_bgcolor='white'
-        )
-        
-        return fig
+            # Return a figure indicating error
+            error_figure = go.Figure(layout={"template": "plotly_white"})
+            error_figure.add_annotation(text=f"Error al generar gráfico: {str(e)}", xref="paper", yref="paper", showarrow=False, font=dict(size=14, color="red"))
+            return error_figure
 
     # Callbacks para exportar datos
     @app.callback(
@@ -832,3 +847,15 @@ def register_chart_callbacks(app):
             return False, "", "", True, "La exportación a PNG estará disponible próximamente. Por favor, utilice otro formato.", "Funcionalidad no disponible"
         
         return False, "", "", False, "", ""
+
+    # Add auto-refresh notification callback
+    @app.callback(
+        Output("auto-refresh-notification", "is_open"),
+        [Input("metrics-refresh-data-store", "data")],
+        prevent_initial_call=True
+    )
+    def show_auto_refresh_notification(refresh_data):
+        """Show a notification when automatic refresh happens."""
+        if refresh_data and refresh_data.get("auto_triggered"):
+            return True
+        return dash.no_update

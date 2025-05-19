@@ -2,6 +2,9 @@ from dash import Output, Input, State, callback_context
 import dash
 import json
 import pandas as pd
+import time
+import dash_bootstrap_components as dbc
+from constants.metrics import CONSUMPTION_TAGS_MAPPING
 
 from utils.api import get_clientes, get_projects, get_assets, get_project_assets, extract_list_from_response
 
@@ -95,7 +98,8 @@ def register_filter_callbacks(app):
     
     @app.callback(
         [Output("metrics-analyze-button", "disabled"),
-         Output("metrics-update-readings-button", "disabled")],
+         Output("metrics-update-readings-button", "disabled"),
+         Output("metrics-refresh-button", "disabled")],
         [Input("metrics-client-filter", "value"),
          Input("metrics-project-filter", "value"),
          Input("metrics-consumption-tags-filter", "value")]
@@ -104,12 +108,13 @@ def register_filter_callbacks(app):
         """Update buttons state based on selections."""
         # El botón de visualizar consumos se habilita cuando hay un cliente seleccionado y al menos un tipo de consumo
         if not client_id or not consumption_tags:
-            return True, True
+            return True, True, True
         
         # El botón de actualizar lecturas se habilita solo cuando hay un proyecto específico seleccionado
         update_disabled = not project_id or project_id == "all"
         
-        return False, update_disabled
+        # El botón de refresh sigue la misma lógica que el de visualizar
+        return False, update_disabled, False
     
     @app.callback(
         [Output("metrics-project-filter", "options"),
@@ -245,12 +250,12 @@ def register_filter_callbacks(app):
                 try:
                     # Intentar obtener assets para el proyecto seleccionado
                     assets = get_project_assets(project_id, jwt_token=token)
-                    
                     if assets:
+                        # Crear las opciones para el dropdown
                         options = [{"label": "Todos", "value": "all"}]
                         options.extend([
-                            {"label": asset.get("name", f"Asset {asset['id']}"), "value": asset["id"]}
-                            for asset in assets if isinstance(asset, dict) and "id" in asset
+                            {"label": a.get("name", f"Asset {a['id']}"), "value": a['id']} 
+                            for a in assets if isinstance(a, dict) and "id" in a
                         ])
                         
                         print(f"[INFO METRICS] update_asset_options - Se cargaron {len(options)-1} assets para el proyecto {project_id}")
@@ -259,11 +264,171 @@ def register_filter_callbacks(app):
                         print(f"[WARNING METRICS] update_asset_options - No se encontraron assets para el proyecto {project_id}")
                 except Exception as e:
                     print(f"[ERROR METRICS] Error al cargar assets para el proyecto {project_id}: {str(e)}")
-                
-                # Si todo falla, devolver opción por defecto
-                return [{"label": "Todos", "value": "all"}], "all"
+            
+            # Fallback: retornar siempre la opción "Todos" si algo falla
+            return [{"label": "Todos", "value": "all"}], "all"
+        
         except Exception as e:
-            print(f"[ERROR METRICS] Error al actualizar opciones de asset: {str(e)}")
+            print(f"[ERROR METRICS] update_asset_options global catch: {str(e)}")
             import traceback
             print(traceback.format_exc())
             return [{"label": "Todos", "value": "all"}], "all"
+
+    @app.callback(
+        Output("metrics-refresh-data-store", "data"),
+        [Input("metrics-refresh-button", "n_clicks")],
+        prevent_initial_call=True
+    )
+    def handle_refresh_button(n_clicks):
+        """Handle refresh button click."""
+        if n_clicks:
+            # Trigger data refresh by updating the store with a timestamp
+            return {"timestamp": time.time()}
+        return dash.no_update
+
+    @app.callback(
+        Output("metrics-refresh-data-store", "data", allow_duplicate=True),
+        [Input("metrics-data-store", "data")],
+        [State("metrics-refresh-data-store", "data")],  # Add state to check if already auto-triggered
+        prevent_initial_call=True
+    )
+    def auto_refresh_on_empty_data(json_data, current_refresh_data):
+        """Trigger auto-refresh if data is initially empty or invalid."""
+        # Evita el refresh si ya se activó manualmente o automáticamente
+        if current_refresh_data and current_refresh_data.get("auto_triggered"):
+            return dash.no_update
+            
+        data = json.loads(json_data) if json_data else None
+        # Verifica si los datos están vacíos o si hay una estructura de error común
+        if not data or (isinstance(data, dict) and data.get("error")):
+            print("[INFO METRICS] auto_refresh_on_empty_data - Datos vacíos o con error, iniciando refresco automático.")
+            return {"timestamp": time.time(), "auto_triggered": True} 
+        
+        return dash.no_update
+
+    # Callback to manage the KPI selector (Dropdown) in the title area
+    @app.callback(
+        [Output("metrics-kpi-title-selector-container", "children"),
+         Output("metrics-kpi-selected-type-store", "data")],
+        [Input("metrics-consumption-tags-filter", "value")]
+    )
+    def update_kpi_selector(selected_tags):
+        """
+        Update the KPI card title area: Show H5 title if single type,
+        or H5 title + Dropdown if multiple types are selected.
+        Store the currently active type for KPI display.
+        """
+        from dash import dcc, html
+        import dash_bootstrap_components as dbc
+        from constants.metrics import CONSUMPTION_TAGS_MAPPING
+
+        default_title = html.H5("Indicadores Principales", className="mb-0")
+
+        if selected_tags and len(selected_tags) > 1:
+            # Multiple tags selected: Show Title + Dropdown
+            options = [
+                {"label": CONSUMPTION_TAGS_MAPPING.get(tag, tag), "value": tag}
+                for tag in selected_tags
+            ]
+            # Default to the first selected tag
+            active_tag = selected_tags[0] 
+            
+            kpi_selector = dcc.Dropdown(
+                id="metrics-kpi-dropdown-selector",
+                options=options,
+                value=active_tag,
+                clearable=False,
+                style={'width': '250px', 'min-width': '200px'}
+            )
+            
+            # Combine Title and Dropdown using Row/Col for better alignment
+            title_with_selector = dbc.Row([
+                dbc.Col(html.H5("Indicadores:", className="mb-0 me-2"), width="auto", align="center"), 
+                dbc.Col(kpi_selector, width="auto")
+            ], align="center", className="g-2")
+
+            # Return the combined layout and the active tag for the store
+            return title_with_selector, {"active_tag": active_tag}
+        
+        elif selected_tags and len(selected_tags) == 1:
+            # Single tag selected: Show specific title, store the single tag
+            active_tag = selected_tags[0]
+            type_name = CONSUMPTION_TAGS_MAPPING.get(active_tag, active_tag)
+            title = html.H5(f"Indicadores Principales: {type_name}", className="mb-0")
+            # Return the specific title and the active tag for the store
+            return title, {"active_tag": active_tag}
+        
+        else:
+            # No tags selected or invalid selection: Show default title, store None
+            return default_title, None
+
+    # Callback to update the store when the Dropdown value changes
+    @app.callback(
+        Output("metrics-kpi-selected-type-store", "data", allow_duplicate=True),
+        [Input("metrics-kpi-dropdown-selector", "value")],
+        prevent_initial_call=True
+    )
+    def update_kpi_store_from_dropdown(active_tag):
+        """Update the store when the user selects a different option in the dropdown."""
+        if active_tag:
+            return {"active_tag": active_tag}
+        return dash.no_update
+
+    # --- Callbacks for Monthly Summary Section Selector ---
+
+    @app.callback(
+        [Output("metrics-monthly-summary-selector-container", "children"),
+         Output("metrics-monthly-summary-selected-type-store", "data")],
+        [Input("metrics-consumption-tags-filter", "value")]
+    )
+    def update_monthly_summary_selector(selected_tags):
+        """
+        Show a dropdown selector in the Monthly Summary header only when multiple 
+        consumption types are selected. Store the currently active type for this section.
+        """
+        from dash import dcc, html
+        from constants.metrics import CONSUMPTION_TAGS_MAPPING
+
+        if selected_tags and len(selected_tags) > 1:
+            # Multiple tags selected: Show Dropdown
+            options = [
+                {"label": CONSUMPTION_TAGS_MAPPING.get(tag, tag), "value": tag}
+                for tag in selected_tags
+            ]
+            active_tag = selected_tags[0] # Default to the first selected tag
+            
+            summary_selector = dcc.Dropdown(
+                id="metrics-monthly-summary-dropdown-selector", # New ID
+                options=options,
+                value=active_tag,
+                clearable=False,
+                placeholder="Seleccione tipo...",
+                style={'width': '250px', 'min-width': '200px'} 
+            )
+            # Return the selector and the active tag for the store
+            return summary_selector, {"active_tag": active_tag}
+        
+        elif selected_tags and len(selected_tags) == 1:
+            # Single tag selected: No selector needed, store the single tag
+            active_tag = selected_tags[0]
+            type_name = CONSUMPTION_TAGS_MAPPING.get(active_tag, active_tag)
+            # Optionally, display the selected type name if desired (e.g., in a disabled input or text)
+            # For now, just return None for the container children
+            return None, {"active_tag": active_tag}
+        
+        else:
+            # No tags selected: No selector, store None
+            return None, None
+
+    @app.callback(
+        Output("metrics-monthly-summary-selected-type-store", "data", allow_duplicate=True),
+        [Input("metrics-monthly-summary-dropdown-selector", "value")], 
+        prevent_initial_call=True
+    )
+    def update_summary_store_from_dropdown(active_tag):
+        """Update the monthly summary store when the user selects a different option."""
+        if active_tag:
+            return {"active_tag": active_tag}
+        return dash.no_update
+
+    # --- End Callbacks for Monthly Summary Section Selector ---

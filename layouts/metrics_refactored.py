@@ -60,6 +60,8 @@ def create_layout():
         dcc.Store(id="metrics-data-store"),
         dcc.Store(id="metrics-selected-client-store"),
         dcc.Store(id="metrics-selected-consumption-tags-store"),
+        dcc.Store(id="metrics-kpi-selected-type-store"),
+        dcc.Store(id="metrics-monthly-summary-selected-type-store"),
         dcc.Store(id="error-analysis-data"),
         dcc.Store(id="filtered-errors-data"),
         dcc.Store(id="regenerate-readings-data"),
@@ -131,16 +133,25 @@ def create_layout():
                                     disabled=True
                                 ),
                                 dbc.Button(
+                                    html.I(className="fas fa-sync"), 
+                                    id="metrics-refresh-button",
+                                    color="light",
+                                    className="me-2",
+                                    disabled=True,
+                                    title="Forzar actualización de datos"
+                                ),
+                                dbc.Button(
                                     "Actualizar Lecturas",
                                     id="metrics-update-readings-button",
                                     color="secondary",
                                     disabled=True
-                                )
+                                ),
+                                dcc.Store(id="metrics-refresh-data-store"),
                             ], className="d-flex justify-content-end")
                         ], width=3)
                     ]),
                     
-                    # Segunda fila de filtros
+                    # Segunda fila de filtros (Increased margin-top)
                     dbc.Row([
                         # Filtro de activo
                         dbc.Col([
@@ -241,10 +252,12 @@ def create_layout():
                 # Tarjeta de métricas principales
                 dbc.Card([
                     dbc.CardBody([
+                        # Nuevo contenedor para título/selector
+                        html.Div(id="metrics-kpi-title-selector-container", className="mb-3"), 
                         dbc.Row([
                             # Consumo total del periodo
                             dbc.Col([
-                                html.H5("Consumo Total del Periodo"),
+                                html.H5("Consumo Total del Periodo", className="mb-2"),
                                 html.Div([
                                     html.Span(id="metrics-total-period-consumption", className="h3 me-2"),
                                     html.Span(id="metrics-total-period-consumption-unit", className="text-muted")
@@ -253,7 +266,7 @@ def create_layout():
                             
                             # Promedio mensual
                             dbc.Col([
-                                html.H5("Promedio Mensual"),
+                                html.H5("Promedio Mensual", className="mb-2"),
                                 html.Div([
                                     html.Span(id="metrics-monthly-average", className="h3 me-2"),
                                     html.Span(id="metrics-monthly-average-unit", className="text-muted")
@@ -262,7 +275,7 @@ def create_layout():
                             
                             # Tendencia
                             dbc.Col([
-                                html.H5("Tendencia"),
+                                html.H5("Tendencia", className="mb-2"),
                                 html.Div([
                                     html.Span(id="metrics-trend", className="h3 me-2"),
                                     html.Span(id="metrics-trend-period", className="text-muted")
@@ -273,7 +286,7 @@ def create_layout():
                         dbc.Row([
                             # Último mes
                             dbc.Col([
-                                html.H5("Último Mes"),
+                                html.H5("Último Mes", className="mb-2"),
                                 html.Div([
                                     html.Span(id="metrics-last-month-consumption", className="h3 me-2"),
                                     html.Span(id="metrics-last-month-name", className="text-muted d-block"),
@@ -283,7 +296,7 @@ def create_layout():
                             
                             # Máximo mensual
                             dbc.Col([
-                                html.H5("Máximo Mensual"),
+                                html.H5("Máximo Mensual", className="mb-2"),
                                 html.Div([
                                     html.Span(id="metrics-max-month-consumption", className="h3 me-2"),
                                     html.Span(id="metrics-max-month-name", className="text-muted d-block"),
@@ -293,7 +306,7 @@ def create_layout():
                             
                             # Mínimo mensual
                             dbc.Col([
-                                html.H5("Mínimo Mensual"),
+                                html.H5("Mínimo Mensual", className="mb-2"),
                                 html.Div([
                                     html.Span(id="metrics-min-month-consumption", className="h3 me-2"),
                                     html.Span(id="metrics-min-month-name", className="text-muted d-block"),
@@ -309,6 +322,12 @@ def create_layout():
                     dbc.CardHeader([
                         dbc.Row([
                             dbc.Col(html.H5("Resumen Mensual de Consumos", className="mb-0"), width="auto"),
+                            # Nuevo contenedor para el selector de tipo de consumo de esta sección
+                            dbc.Col(
+                                html.Div(id="metrics-monthly-summary-selector-container"), 
+                                width=True, # Ocupa el espacio restante
+                                className="mx-3" # Removed d-flex justify-content-center
+                            ),
                             dbc.Col(
                                 dbc.ButtonGroup([
                                     dbc.Button(
@@ -344,7 +363,7 @@ def create_layout():
                         dbc.Row([
                             # Gráfico de totales mensuales
                             dbc.Col([
-                                html.H5("Total de Consumo por Mes", className="chart-title"),
+                                html.H5("Total de Consumo por Mes", className="chart-title mb-2"),
                                 dcc.Graph(
                                     id="metrics-monthly-totals-chart",
                                     config={'displayModeBar': True},
@@ -354,7 +373,7 @@ def create_layout():
                             
                             # Gráfico de promedios mensuales
                             dbc.Col([
-                                html.H5("Promedio de Consumo por Mes", className="chart-title"),
+                                html.H5("Promedio de Consumo por Mes", className="chart-title mb-2"),
                                 dcc.Graph(
                                     id="metrics-monthly-averages-chart",
                                     config={'displayModeBar': True},
@@ -366,7 +385,7 @@ def create_layout():
                         # Tabla de resumen mensual
                         dbc.Row([
                             dbc.Col([
-                                html.H5("Tabla de Resumen Mensual", className="mt-4"),
+                                html.H5("Tabla de Resumen Mensual", className="mt-4 mb-2"),
                                 html.Div(id="metrics-monthly-summary-table"),
                                 # Store para los metadatos de cálculo mensual
                                 dcc.Store(id="metrics-monthly-summary-calculation-metadata")
@@ -431,6 +450,26 @@ def create_layout():
                                 ], className="d-flex align-items-center")
                             ]
                         ),
+
+                        # Toast para notificación de refresco automático
+                        dbc.Toast(
+                            id="auto-refresh-notification",
+                            header="Refresco Automático",
+                            is_open=False,
+                            dismissable=True,
+                            duration=6000,
+                            icon="success",
+                            style={"position": "fixed", "top": 130, "right": 10, "width": 350, "zIndex": 1000},
+                            children=[
+                                html.Div([
+                                    html.P([
+                                        html.I(className="fas fa-sync me-2"),
+                                        "La caché de datos se ha limpiado automáticamente."
+                                    ], className="mb-2"),
+                                    html.P("Se están cargando los datos más recientes.", className="mb-0")
+                                ])
+                            ]
+                        ),
                     ])
                 ], className="mb-4"),
                 
@@ -477,18 +516,6 @@ def create_layout():
                         html.Div(id="metrics-monthly-readings-by-consumption-type")
                     ])
                 ], className="mb-4"),
-                
-                # Botón para regeneración masiva
-                dbc.Row([
-                    dbc.Col([
-                        dbc.Button(
-                            "Regenerar Lecturas en Lote",
-                            id="bulk-regenerate-readings-btn",
-                            color="warning",
-                            className="me-2"
-                        )
-                    ], width=12, className="d-flex justify-content-end")
-                ], className="mb-4")
             ], id="metrics-visualization-container", style={"display": "none"}),
             
             # Modales

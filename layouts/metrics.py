@@ -1,4 +1,4 @@
-from dash import html, dcc
+from dash import html, dcc, dash_table
 import dash_bootstrap_components as dbc
 from dash.dependencies import Input, Output, State
 import dash
@@ -6,7 +6,6 @@ import pandas as pd
 from datetime import datetime, timedelta
 import os
 from enum import Enum
-import dash_table
 from io import StringIO
 import json
 import plotly.express as px

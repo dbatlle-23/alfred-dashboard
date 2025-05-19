@@ -20,6 +20,7 @@ BASE_URL = "https://services.alfredsmartdata.com"
 CLIENTS_ENDPOINT = f"{BASE_URL}/clients"
 PROJECTS_ENDPOINT = f"{BASE_URL}/projects"
 ASSETS_ENDPOINT = f"{BASE_URL}/assets"
+DEVICES_ENDPOINT = f"{BASE_URL}/devices"
 
 # Función para obtener los headers de autenticación
 def get_auth_headers(jwt_token=None):
@@ -697,63 +698,157 @@ def get_sensors_with_tags(asset_id, token=None):
         logger.error(f"[ERROR] get_sensors_with_tags - Traceback: {traceback.format_exc()}")
         return []
 
-def ensure_project_folder_exists(project_id):
+def get_asset_water_sensors(asset_id, jwt_token=None):
     """
-    Asegura que exista una carpeta para un proyecto dentro del directorio analyzed_data.
-    Valida el formato del project_id para mantener una estructura de carpetas coherente.
-    """
-    # Verificar si el project_id tiene formato incorrecto (comienza con "asset_")
-    if project_id and isinstance(project_id, str) and project_id.startswith("asset_"):
-        logger.warning(f"Se detectó un formato incorrecto de project_id: {project_id}")
-        # Extraer el ID del asset del project_id incorrecto
-        asset_id = project_id.replace("asset_", "")
-        logger.info(f"Usando 'general' como project_id en lugar de asset_{asset_id}")
-        project_id = "general"  # Usar una carpeta general para todos los assets sin proyecto
-
-    logger.info(f"Asegurando que exista una carpeta para el proyecto {project_id} dentro del directorio analyzed_data.")
-    base_folder = "data/analyzed_data"
-    project_folder = os.path.join(base_folder, project_id)
-    os.makedirs(project_folder, exist_ok=True)
-    return project_folder
-
-def get_asset_ids_from_project(project_id, token=None):
-    """
-    Obtiene los IDs de los assets de un proyecto.
+    Obtiene los sensores de agua disponibles para un activo específico.
     
     Args:
-        project_id (str): ID del proyecto
-        token (str, optional): Token JWT para autenticación
-        
+        asset_id (str): ID del activo.
+        jwt_token (str, optional): Token JWT para autenticación.
+    
     Returns:
-        list: Lista de IDs de assets
+        list: Lista de sensores de agua o lista vacía en caso de error.
     """
-    assets = get_project_assets(project_id, token)
-    if not assets:
+    if not asset_id:
+        logger.debug("Se requiere un asset_id válido para obtener sensores de agua")
         return []
     
-    return [asset.get("id") for asset in assets]
+    try:
+        # Verificar si hay un token JWT válido
+        if not jwt_token:
+            token = auth_service.get_token()
+            if not token:
+                logger.warning("No hay token JWT disponible para consultar sensores de agua")
+                return []
+        else:
+            token = jwt_token
+            
+        logger.info(f"Obteniendo sensores de agua para el activo {asset_id}")
+        
+        # Primero obtenemos todos los sensores disponibles del activo
+        all_sensors = get_sensors_with_tags(asset_id, token)
+        
+        if not all_sensors:
+            logger.warning(f"No se encontraron sensores para el activo {asset_id}")
+            return []
+        
+        # Filtramos para mantener solo los relacionados con agua
+        # Constantes de tags de agua importadas de constants.metrics
+        from constants.metrics import ConsumptionTags, CONSUMPTION_TAGS_MAPPING
+        
+        # Tags relevantes para consumo de agua
+        water_tags = [
+            ConsumptionTags.DOMESTIC_WATER_GENERAL.value,
+            ConsumptionTags.DOMESTIC_HOT_WATER.value,
+            ConsumptionTags.DOMESTIC_COLD_WATER.value
+        ]
+        
+        # Filtrar sensores por tags de agua
+        water_sensors = []
+        for sensor in all_sensors:
+            tag_name = sensor.get('tag_name', '')
+            if tag_name in water_tags:
+                # Añadir información adicional al sensor
+                sensor['display_name'] = CONSUMPTION_TAGS_MAPPING.get(tag_name, tag_name)
+                water_sensors.append(sensor)
+                
+        logger.info(f"Se encontraron {len(water_sensors)} sensores de agua para el activo {asset_id}")
+        
+        return water_sensors
+        
+    except Exception as e:
+        logger.error(f"Error al obtener sensores de agua para el activo {asset_id}: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return []
 
-def process_asset_tags(asset_id, tags, project_folder, token=None):
+def get_asset_all_sensors(asset_id, jwt_token=None):
     """
-    Procesa las lecturas diarias para múltiples tags de un asset durante un año.
-    Verifica si el archivo ya existe antes de procesar.
+    Obtiene todos los sensores disponibles para un activo específico sin filtrar por tipo.
     
     Args:
-        asset_id (str): ID del asset
-        tags (list): Lista de tags
-        project_folder (str): Ruta a la carpeta del proyecto
-        token (str, optional): Token JWT para autenticación
+        asset_id (str): ID del activo.
+        jwt_token (str, optional): Token JWT para autenticación.
+    
+    Returns:
+        list: Lista de todos los sensores o lista vacía en caso de error.
     """
-    for tag_name in tags:
-        # Construir el nombre del archivo esperado
-        file_name = f"daily_readings_{asset_id}__{tag_name}.csv"
-        file_path = os.path.join(project_folder, file_name)
-
-        # Si no existe, procesar las lecturas
+    if not asset_id:
+        logger.debug("Se requiere un asset_id válido para obtener sensores")
+        return []
+    
+    try:
+        # Verificar si hay un token JWT válido
+        if not jwt_token:
+            token = auth_service.get_token()
+            if not token:
+                logger.warning("No hay token JWT disponible para consultar sensores")
+                return []
+        else:
+            token = jwt_token
+            
+        logger.info(f"Obteniendo todos los sensores para el activo {asset_id}")
+        
+        # Construir la URL del endpoint para obtener todos los sensores
+        url = f"{BASE_URL}/assets/{asset_id}/sensors"
+        
+        # Realizar la solicitud a la API
+        headers = get_auth_headers(token)
+        logger.debug(f"Solicitando sensores para el activo {asset_id} - URL: {url}")
+        
+        response = requests.get(url, headers=headers)
+        
+        # Verificar si la respuesta es exitosa
+        if response.status_code == 200:
+            response_data = response.json()
+            sensors = response_data.get("data", [])
+            logger.info(f"Se obtuvieron {len(sensors)} sensores para el activo {asset_id}")
+            
+            # Detailed logging of sensor data structure
+            logger.info(f"==================== GET_ASSET_ALL_SENSORS RESPONSE LOG ====================")
+            logger.info(f"API Response Status: {response.status_code}")
+            logger.info(f"API Response Data Keys: {response_data.keys() if isinstance(response_data, dict) else 'Not a dictionary'}")
+            logger.info(f"Number of sensors returned: {len(sensors)}")
+            
+            # Log the first sensor to understand structure (if available)
+            if sensors and len(sensors) > 0:
+                first_sensor = sensors[0]
+                logger.info(f"First sensor keys: {first_sensor.keys() if isinstance(first_sensor, dict) else 'Not a dictionary'}")
+                logger.info(f"First sensor data: {first_sensor}")
+                
+                # Specifically check for important fields
+                critical_fields = ['device_id', 'sensor_id', 'sensor_uuid', 'gateway_id', 'tag_name']
+                missing_fields = [field for field in critical_fields if field not in first_sensor]
+                logger.info(f"Missing critical fields in sensor data: {missing_fields if missing_fields else 'None, all fields present'}")
+            logger.info(f"==================== END GET_ASSET_ALL_SENSORS RESPONSE LOG ====================")
+            
+            # Añadir información de visualización a cada sensor
+            from constants.metrics import CONSUMPTION_TAGS_MAPPING
+            
+            for sensor in sensors:
+                tag_name = sensor.get('tag_name', '')
+                # Proporcionar un nombre amigable si está disponible en el mapeo, o usar el nombre del sensor
+                sensor['display_name'] = CONSUMPTION_TAGS_MAPPING.get(tag_name, sensor.get('name', tag_name))
+            
+            return sensors
+        else:
+            logger.error(f"Error al obtener sensores del activo {asset_id}: {response.status_code}")
+            logger.error(f"Response text: {response.text}")
+            # Si el endpoint principal falla, intenta con get_sensors_with_tags como fallback
+            logger.info(f"Intentando obtener sensores alternativamente para el activo {asset_id}")
+            return get_sensors_with_tags(asset_id, token)
+            
+    except Exception as e:
+        logger.error(f"Error al obtener sensores para el activo {asset_id}: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        # En caso de error, intentar con el otro método como fallback
         try:
-            get_daily_readings_for_tag(asset_id, tag_name, project_folder, token)
-        except Exception as e:
-            logger.error(f"Error al procesar el asset {asset_id} y tag {tag_name}: {e}")
+            logger.info(f"Intentando obtener sensores con método alternativo para el activo {asset_id}")
+            return get_sensors_with_tags(asset_id, token)
+        except:
+            return []
 
 def get_sensor_value_for_date(asset_id, device_id, sensor_id, gateway_id, date, token=None):
     """
@@ -770,9 +865,6 @@ def get_sensor_value_for_date(asset_id, device_id, sensor_id, gateway_id, date, 
     Returns:
         tuple: (valor, timestamp) o ("Sin datos disponibles", None) si no hay datos
     """
-    # Define la URL para obtener los datos del sensor
-    url = f'{BASE_URL}/data/assets/time-series/{asset_id}'
-
     # Usar el token proporcionado o intentar obtenerlo del servicio de autenticación
     if not token:
         token = auth_service.get_token()
@@ -786,22 +878,31 @@ def get_sensor_value_for_date(asset_id, device_id, sensor_id, gateway_id, date, 
     params = {
         'from': date,
         'until': date,
-        'sensor': '',
         'device_id': device_id,
         'sensor_id': sensor_id,
         'gateway_id': gateway_id
     }
-
-    # Usar get_auth_headers para obtener los headers de autenticación
-    headers = get_auth_headers(token)
+    
+    endpoint = f"data/assets/time-series/{asset_id}"
     
     logger.debug(f"Obteniendo valor para sensor (device_id: {device_id}, sensor_id: {sensor_id}, gateway_id: {gateway_id}) en fecha {date} con token: {token[:10]}...")
     logger.debug(f"Asegúrate de que la fecha esté en formato MM-DD-YYYY: {date}")
+    logger.debug(f"API endpoint: {endpoint}")
+    logger.debug(f"Parámetros: {params}")
 
     try:
-        response = requests.get(url, headers=headers, params=params)
-        if response.status_code == 200:
-            data = response.json().get("data", [])
+        # Usar auth_service.make_api_request en lugar de requests.get directamente
+        response_data = auth_service.make_api_request(token, "GET", endpoint, params=params)
+        
+        # Verificar si hay error en la respuesta
+        if isinstance(response_data, dict) and "error" in response_data:
+            sensor_info = f"asset_id:{asset_id}, device_id:{device_id}, sensor_id:{sensor_id}, gateway_id:{gateway_id}"
+            logger.error(f"Error al obtener datos: {response_data.get('error')} - {sensor_info}")
+            return "Error", None
+        
+        # Procesar datos
+        if isinstance(response_data, dict):
+            data = response_data.get("data", [])
             if data:
                 last_entry = data[-1]
                 value = last_entry.get("v", "Sin datos disponibles")
@@ -814,7 +915,7 @@ def get_sensor_value_for_date(asset_id, device_id, sensor_id, gateway_id, date, 
                 return "Sin datos disponibles", None
         else:
             sensor_info = f"asset_id:{asset_id}, device_id:{device_id}, sensor_id:{sensor_id}, gateway_id:{gateway_id}"
-            logger.error(f"Error al obtener datos: {response.status_code}, {response.text} - {sensor_info}")
+            logger.error(f"Respuesta inesperada: {type(response_data)} - {sensor_info}")
             return "Error", None
     except Exception as e:
         sensor_info = f"asset_id:{asset_id}, device_id:{device_id}, sensor_id:{sensor_id}, gateway_id:{gateway_id}"
@@ -836,7 +937,7 @@ def get_daily_readings_for_tag(asset_id, tag_name, project_folder, token=None):
     # Nombre del archivo donde se guardan las lecturas (con un solo guion bajo entre asset_id y tag_name)
     file_name = f"daily_readings_{asset_id}_{tag_name}.csv"  # Formato según PROJECT_CONTEXT.md
     file_path = os.path.join(project_folder, file_name)
-    
+
     # También verificar si existe archivo con formato antiguo (doble guion bajo)
     old_format_file_name = f"daily_readings_{asset_id}__{tag_name}.csv"
     old_format_file_path = os.path.join(project_folder, old_format_file_name)
@@ -1978,3 +2079,1109 @@ def migrate_all_readings_files_to_new_format(base_path="data/analyzed_data"):
         "already_exists": already_exists,
         "error_files": error_files
     }
+
+def get_sensor_time_series_data(asset_id, start_date, end_date, sensor_uuid=None, device_id=None, sensor_id=None, gateway_id=None, jwt_token=None):
+    """
+    Retrieves time series data for a specific sensor from the API.
+    
+    Args:
+        asset_id (str): The ID of the asset to get sensor data from
+        start_date (str): Start date in format MM-DD-YYYY
+        end_date (str): End date in format MM-DD-YYYY
+        sensor_uuid (str, optional): UUID of the sensor
+        device_id (str, optional): Device ID parameter
+        sensor_id (str, optional): Sensor ID parameter
+        gateway_id (str, optional): Gateway ID parameter
+        jwt_token (str, optional): JWT token for authentication. If not provided, 
+                                  will try to retrieve from the token store.
+    
+    Returns:
+        dict: A dictionary containing the time series data with 'data' array of points and 'meta' information,
+              or an empty dict if an error occurs.
+              The data points are typically in the format {'ts': timestamp, 'v': value}
+    """
+    import os
+    import json
+
+    logger.debug(f"Fetching time series data for asset {asset_id}, sensor {sensor_uuid}")
+    
+    # Detailed log of all input parameters
+    logger.info("==================== GET_SENSOR_TIME_SERIES_DATA CALL LOG ====================")
+    logger.info(f"Input Parameters:")
+    logger.info(f"asset_id: {asset_id}")
+    logger.info(f"start_date: {start_date}")
+    logger.info(f"end_date: {end_date}")
+    logger.info(f"sensor_uuid: {sensor_uuid}")
+    logger.info(f"device_id: {device_id}")
+    logger.info(f"sensor_id: {sensor_id}")
+    logger.info(f"gateway_id: {gateway_id}")
+    logger.info(f"jwt_token available: {bool(jwt_token)}")
+    
+    if not asset_id:
+        logger.warning("No asset ID provided, cannot fetch time series data")
+        logger.info("==================== END GET_SENSOR_TIME_SERIES_DATA CALL LOG ====================")
+        return {}
+    
+    # Get JWT token if not provided
+    token = jwt_token if jwt_token else auth_service.get_token()
+    if not token:
+        logger.warning("No JWT token available, cannot fetch time series data")
+        logger.info("==================== END GET_SENSOR_TIME_SERIES_DATA CALL LOG ====================")
+        return {}
+    
+    # Build query parameters
+    params = {
+        'from': start_date,
+        'until': end_date
+    }
+    
+    # Add sensor parameters if available
+    if sensor_uuid:
+        params['sensor'] = sensor_uuid
+    
+    # Add the device_id, sensor_id, and gateway_id parameters if they are provided
+    # Only use the defaults if the actual values are None
+    if device_id is not None:
+        params['device_id'] = device_id
+        logger.info(f"Using provided device_id: {device_id}")
+    elif sensor_uuid:
+        # Try to fetch the sensor parameters from the API if we only have UUID
+        try:
+            logger.info(f"Attempting to get device_id for sensor UUID {sensor_uuid}")
+            # Additional code could be added here to query for device_id if necessary
+        except Exception as e:
+            logger.warning(f"Error retrieving device_id for sensor UUID: {e}")
+        
+        # If device_id is still None, use default
+        if device_id is None:
+            params['device_id'] = '103'  # Default from curl example
+            logger.warning(f"Using DEFAULT device_id: 103 - Ensure this is correct for your sensor!")
+    
+    if sensor_id is not None:  # Can be 0, so check for None
+        params['sensor_id'] = sensor_id
+        logger.info(f"Using provided sensor_id: {sensor_id}")
+    elif sensor_uuid:
+        params['sensor_id'] = '0'  # Default from curl example
+        logger.warning(f"Using DEFAULT sensor_id: 0 - Ensure this is correct for your sensor!")
+    
+    if gateway_id is not None:
+        params['gateway_id'] = gateway_id
+        logger.info(f"Using provided gateway_id: {gateway_id}")
+    elif sensor_uuid:
+        params['gateway_id'] = '10000000ad879fc2'  # Default from curl example
+        logger.warning(f"Using DEFAULT gateway_id: 10000000ad879fc2 - Ensure this is correct for your sensor!")
+    
+    logger.info(f"Final query parameters: {params}")
+    
+    # Construct the API URL
+    endpoint = f"data/assets/time-series/{asset_id}"
+    url = f"{BASE_URL}/{endpoint}"
+    logger.info(f"API URL: {url}")
+    
+    # Make the API request
+    try:
+        # Make API request using the auth_service
+        logger.info(f"Making API request to endpoint: {endpoint}")
+        response_data = auth_service.make_api_request(token, "GET", endpoint, params=params)
+        
+        # Log response details
+        logger.info(f"API Response Type: {type(response_data)}")
+        
+        if isinstance(response_data, dict):
+            logger.info(f"API Response Keys: {response_data.keys()}")
+            
+            # Check if the response contains an error
+            if "error" in response_data:
+                logger.error(f"Error fetching time series data: {response_data.get('error')}")
+                logger.info("==================== END GET_SENSOR_TIME_SERIES_DATA CALL LOG ====================")
+                return {}
+            
+            # Log summary of data received
+            data_points = response_data.get('data', [])
+            meta_info = response_data.get('meta', {})
+            logger.info(f"Received {len(data_points)} time series data points")
+            logger.info(f"Time series metadata: {meta_info}")
+            
+            # Log a few sample data points
+            if data_points and len(data_points) > 0:
+                logger.info(f"Sample data points (first 3): {data_points[:3]}")
+            
+            logger.info("==================== END GET_SENSOR_TIME_SERIES_DATA CALL LOG ====================")
+            return response_data
+        else:
+            logger.warning(f"Unexpected response type: {type(response_data)}")
+            logger.info("==================== END GET_SENSOR_TIME_SERIES_DATA CALL LOG ====================")
+            return {}
+            
+    except Exception as e:
+        logger.error(f"Exception in get_sensor_time_series_data: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.info("==================== END GET_SENSOR_TIME_SERIES_DATA CALL LOG ====================")
+        return {}
+
+def ensure_project_folder_exists(project_id):
+    """
+    Asegura que exista una carpeta para un proyecto dentro del directorio analyzed_data.
+    Valida el formato del project_id para mantener una estructura de carpetas coherente.
+    """
+    # Verificar si el project_id tiene formato incorrecto (comienza con "asset_")
+    if project_id and isinstance(project_id, str) and project_id.startswith("asset_"):
+        logger.warning(f"Se detectó un formato incorrecto de project_id: {project_id}")
+        # Extraer el ID del asset del project_id incorrecto
+        asset_id = project_id.replace("asset_", "")
+        logger.info(f"Usando 'general' como project_id en lugar de asset_{asset_id}")
+        project_id = "general"  # Usar una carpeta general para todos los assets sin proyecto
+
+    logger.info(f"Asegurando que exista una carpeta para el proyecto {project_id} dentro del directorio analyzed_data.")
+    base_folder = "data/analyzed_data"
+    project_folder = os.path.join(base_folder, project_id)
+    os.makedirs(project_folder, exist_ok=True)
+    return project_folder
+
+def get_asset_ids_from_project(project_id, token=None):
+    """
+    Obtiene los IDs de los assets de un proyecto.
+    
+    Args:
+        project_id (str): ID del proyecto
+        token (str, optional): Token JWT para autenticación
+        
+    Returns:
+        list: Lista de IDs de assets
+    """
+    assets = get_project_assets(project_id, token)
+    if not assets:
+        return []
+    
+    return [asset.get("id") for asset in assets]
+
+def process_asset_tags(asset_id, tags, project_folder, token=None):
+    """
+    Procesa las lecturas diarias para múltiples tags de un asset durante un año.
+    Verifica si el archivo ya existe antes de procesar.
+    
+    Args:
+        asset_id (str): ID del asset
+        tags (list): Lista de tags
+        project_folder (str): Ruta a la carpeta del proyecto
+        token (str, optional): Token JWT para autenticación
+    """
+    for tag_name in tags:
+        # Construir el nombre del archivo esperado
+        file_name = f"daily_readings_{asset_id}__{tag_name}.csv"
+        file_path = os.path.join(project_folder, file_name)
+
+        # Si no existe, procesar las lecturas
+        try:
+            get_daily_readings_for_tag(asset_id, tag_name, project_folder, token)
+        except Exception as e:
+            logger.error(f"Error al procesar el asset {asset_id} y tag {tag_name}: {e}")
+
+def get_devices(project_id=None, jwt_token=None, device_types=None):
+    """
+    Obtiene la lista de dispositivos desde la API
+    
+    Args:
+        project_id: ID del proyecto para filtrar dispositivos (opcional)
+        jwt_token: Token JWT para autenticación (opcional)
+        device_types: Lista de tipos de dispositivos para filtrar (opcional, ej: ['lock', 'qr_lock'])
+        
+    Returns:
+        list: Lista de dispositivos con formato [{device_id, device_type, ...}]
+    """
+    try:
+        # Verificar autenticación
+        if jwt_token:
+            # Usar el token JWT proporcionado
+            logger.debug(f"Verificando autenticación con token JWT: {jwt_token[:10]}...")
+            if not auth_service.is_authenticated(jwt_token):
+                logger.warning("Token JWT inválido para obtener dispositivos")
+                return get_devices_fallback(project_id)
+            
+            # Inicializar lista para almacenar todos los dispositivos
+            all_devices = []
+            
+            # Construir el endpoint con parámetros de consulta incluyendo tamaño de página
+            page_size = 500  # Solicitar hasta 500 dispositivos por página
+            page_number = 1
+            
+            # Construir parámetros de consulta
+            params = []
+            
+            # Añadir ID de proyecto si está presente
+            if project_id:
+                params.append(f"project_id={project_id}")
+            
+            # Añadir filtros de tipo si están presentes
+            if device_types:
+                if isinstance(device_types, list):
+                    # Si es una lista, añadir cada tipo
+                    for device_type in device_types:
+                        params.append(f"type={device_type}")
+                else:
+                    # Si es un único valor, añadirlo directamente
+                    params.append(f"type={device_types}")
+            
+            # Añadir parámetros de paginación
+            params.append(f"page[size]={page_size}")
+            params.append(f"page[number]={page_number}")
+            
+            # Construir el endpoint con todos los parámetros
+            endpoint = "devices?" + "&".join(params)
+            
+            has_next_page = True
+            
+            while has_next_page:
+                logger.debug(f"Obteniendo dispositivos con endpoint: {endpoint}")
+                
+                # Hacer la solicitud a la API con el token JWT
+                logger.debug(f"Realizando solicitud a la API para obtener dispositivos (página {page_number})")
+                response = auth_service.make_api_request(jwt_token, "GET", endpoint)
+                
+                # Verificar si hay un error en la respuesta
+                if isinstance(response, dict) and "error" in response:
+                    logger.error(f"Error al obtener dispositivos: {response.get('error')}")
+                    return get_devices_fallback(project_id) if len(all_devices) == 0 else all_devices
+                
+                # Extraer la lista de dispositivos de la respuesta actual
+                devices_page = extract_list_from_response(response, lambda: [], "devices")
+                
+                if isinstance(devices_page, list):
+                    all_devices.extend(devices_page)
+                    logger.debug(f"Añadidos {len(devices_page)} dispositivos de la página {page_number}")
+                
+                # Usar la metadata para determinar si hay más páginas
+                has_next_page = False
+                
+                # Método 1: Usar metadata si está disponible
+                if isinstance(response, dict) and "meta" in response:
+                    meta = response["meta"]
+                    total_pages = meta.get("total_pages", 0)
+                    results_in_page = meta.get("results", 0)
+                    
+                    logger.debug(f"Metadata detectada: total_pages={total_pages}, results={results_in_page}")
+                    
+                    # Si no hay resultados en esta página o ya estamos en la última página, terminar
+                    if results_in_page == 0 or page_number >= total_pages:
+                        logger.debug(f"No hay más resultados o estamos en la última página ({page_number}/{total_pages}). Terminando paginación.")
+                        break
+                    
+                    # Si hay más páginas, continuar
+                    if page_number < total_pages:
+                        page_number += 1
+                        # Actualizar el parámetro de página en la URL
+                        endpoint = endpoint.replace(f"page[number]={page_number-1}", f"page[number]={page_number}")
+                        has_next_page = True
+                        logger.debug(f"Avanzando a la página {page_number} de {total_pages}")
+                
+                # Método 2 (fallback): Usar links.next si no hay metadata o no se pudo determinar
+                elif not has_next_page and isinstance(response, dict) and "links" in response and "next" in response["links"]:
+                    next_link = response["links"]["next"]
+                    if next_link:
+                        # Extraer el endpoint de la URL completa
+                        import re
+                        match = re.search(r'devices\?(.+)$', next_link)
+                        if match:
+                            endpoint = f"devices?{match.group(1)}"
+                            page_number += 1
+                            has_next_page = True
+                            logger.debug(f"Usando link.next para avanzar a la página {page_number}")
+                        else:
+                            logger.warning(f"No se pudo extraer el endpoint del enlace: {next_link}")
+                
+                # Optimización adicional: si no hay resultados en la página actual, detener la paginación
+                if not has_next_page and isinstance(devices_page, list) and len(devices_page) == 0:
+                    logger.debug(f"La página {page_number} no contiene resultados. Terminando paginación.")
+                    break
+                
+                # Si se llega a un límite razonable de páginas, detener para evitar bucles infinitos (como salvaguarda)
+                if page_number > 10:  # Límite arbitrario para evitar problemas
+                    logger.warning("Se alcanzó el límite de páginas (10). Se detiene la paginación.")
+                    break
+            
+            logger.debug(f"Total de dispositivos obtenidos tras paginación: {len(all_devices)}")
+            return all_devices
+        else:
+            # Si no hay token JWT, usar fallback directamente
+            logger.info("No se proporcionó token JWT para obtener dispositivos")
+            return get_devices_fallback(project_id)
+    except Exception as e:
+        logger.error(f"Error al obtener dispositivos: {str(e)}")
+        # En caso de excepción, devolver datos de ejemplo como fallback
+        return get_devices_fallback(project_id)
+
+def get_devices_fallback(project_id=None):
+    """
+    Devuelve datos de ejemplo de dispositivos como fallback
+    
+    Args:
+        project_id: ID del proyecto para filtrar (opcional)
+        
+    Returns:
+        list: Lista de dispositivos de ejemplo
+    """
+    logger.debug("Usando datos de fallback para dispositivos")
+    
+    # Datos de ejemplo para diferentes proyectos
+    fallback_devices = [
+        {
+            "device_id": "101",
+            "device_type": "SWITCH_PHILIO_PAN05",
+            "enabled": True,
+            "device_name": "ALFRED_24E124757D242623: VS133-868M Counter",
+            "connectivity": "ONLINE",
+            "project_id": "cde98d79-cdd9-4208-ac89-d29542594c45",
+            "asset_id": "QDFT9N9UW647",
+            "available_actions": ["remote_check", "software_update"],
+            "sensors": [
+                {
+                    "sensor_id": "0",
+                    "sensor_type": "LOCK",
+                    "room": "Entrada",
+                    "name": "Puerta Principal",
+                    "sensor_uuid": "0b2c48d6-23a5-4f66-b959-7d0a76dbe733"
+                }
+            ]
+        },
+        {
+            "device_id": "102",
+            "device_type": "SMARTLOCK_NUKI",
+            "enabled": True,
+            "device_name": "ALFRED_11B4876245: Nuki Smart Lock",
+            "connectivity": "ONLINE",
+            "project_id": "cde98d79-cdd9-4208-ac89-d29542594c45",
+            "asset_id": "QDFT9N9UW647",
+            "available_actions": ["remote_check", "lock", "unlock"],
+            "sensors": [
+                {
+                    "sensor_id": "0",
+                    "sensor_type": "LOCK",
+                    "room": "Habitación 1",
+                    "name": "Puerta Habitación",
+                    "sensor_uuid": "1a3b59e7-34a6-5f77-c060-8e1a87ecf844"
+                }
+            ]
+        },
+        {
+            "device_id": "103",
+            "device_type": "MULTISENSOR_AEOTEC",
+            "enabled": True,
+            "device_name": "ALFRED_33C679012: Aeotec Multisensor",
+            "connectivity": "OFFLINE",
+            "project_id": "cde98d79-cdd9-4208-ac89-d29542594c45",
+            "asset_id": "QDFT9N9UW647",
+            "available_actions": ["remote_check"],
+            "sensors": [
+                {
+                    "sensor_id": "0",
+                    "sensor_type": "TEMPERATURE",
+                    "room": "Sala",
+                    "name": "Temperatura Sala",
+                    "sensor_uuid": "2c4d60f8-45b7-6g88-d171-9f2b98fde955"
+                }
+            ]
+        },
+        {
+            "device_id": "104",
+            "device_type": "GATEWAY_ZIPABOX",
+            "enabled": True,
+            "device_name": "ALFRED_44D890123: Zipabox Gateway",
+            "connectivity": "ONLINE",
+            "project_id": "713713a2-d7f4-4a89-b613-da4cd5113f85",
+            "asset_id": "DL39NQJXC2T68",
+            "available_actions": ["remote_check", "software_update", "reboot"],
+            "sensors": [
+                {
+                    "sensor_id": "0",
+                    "sensor_type": "LOCK",
+                    "room": "Entrada",
+                    "name": "Cerradura Entrada",
+                    "sensor_uuid": "3d5e71g9-56c8-7h99-e282-0g3c09gef066"
+                }
+            ]
+        },
+        {
+            "device_id": "105",
+            "device_type": "SMARTLOCK_YALE",
+            "enabled": True,
+            "device_name": "ALFRED_55E901234: Yale Smart Lock",
+            "connectivity": "ONLINE",
+            "project_id": "713713a2-d7f4-4a89-b613-da4cd5113f85",
+            "asset_id": "DL39NQJXC2T68",
+            "available_actions": ["remote_check", "lock", "unlock", "software_update"],
+            "sensors": [
+                {
+                    "sensor_id": "0",
+                    "sensor_type": "LOCK",
+                    "room": "Patio",
+                    "name": "Puerta Patio",
+                    "sensor_uuid": "4e6f82h0-67d9-8i00-f393-1h4d10hfg177"
+                }
+            ]
+        },
+        {
+            "device_id": "106",
+            "device_type": "COMMUNITY_ACCESS_CONTROL",
+            "enabled": True,
+            "device_name": "ALFRED_66F012345: Community Door Controller",
+            "connectivity": "ONLINE",
+            "project_id": "cde98d79-cdd9-4208-ac89-d29542594c45",
+            "asset_id": "QDFT9N9UW647",
+            "available_actions": ["remote_check", "open", "software_update", "access_logs"],
+            "sensors": [
+                {
+                    "sensor_id": "0",
+                    "sensor_type": "ACCESS_CONTROL",
+                    "usage": "CommunityDoor",
+                    "room": "Entrada Principal",
+                    "name": "Puerta Comunidad",
+                    "sensor_uuid": "5f7g93i1-78e0-9j11-g404-2i5e21igj288"
+                }
+            ]
+        },
+        {
+            "device_id": "107",
+            "device_type": "BUILDING_INTERCOM",
+            "enabled": True,
+            "device_name": "ALFRED_77G123456: Smart Intercom",
+            "connectivity": "ONLINE",
+            "project_id": "713713a2-d7f4-4a89-b613-da4cd5113f85",
+            "asset_id": "DL39NQJXC2T68",
+            "available_actions": ["remote_check", "open", "access_logs"],
+            "sensors": [
+                {
+                    "sensor_id": "0",
+                    "sensor_type": "INTERCOM",
+                    "usage": "CommunityDoor",
+                    "room": "Portal",
+                    "name": "Portero Automático",
+                    "sensor_uuid": "6g8h04j2-89f1-0k22-h515-3j6f32jhk399"
+                }
+            ]
+        }
+    ]
+    
+    # Si se proporciona un project_id, filtrar los dispositivos
+    if project_id:
+        filtered_devices = [device for device in fallback_devices if device.get("project_id") == project_id]
+        return filtered_devices
+    
+    return fallback_devices
+
+def get_nfc_code_value(device_id, sensor_id, jwt_token=None, gateway_id=None, asset_id=None):
+    """
+    Obtiene el valor actual de un código NFC para un sensor específico
+    
+    Args:
+        device_id: ID del dispositivo
+        sensor_id: ID del sensor NFC
+        jwt_token: Token JWT para autenticación
+        gateway_id: ID del gateway (opcional, si no se proporciona se usará el device_id)
+        asset_id: ID del asset (usado para logs y para algunas URLs)
+        
+    Returns:
+        str: Valor del código NFC
+    """
+    try:
+        # Verificar autenticación
+        if not jwt_token:
+            logger.error("No hay token JWT disponible para obtener valor NFC")
+            return None
+            
+        if not auth_service.is_authenticated(jwt_token):
+            logger.error("Token JWT inválido para obtener valor NFC")
+            return None
+        
+        # Si no se proporciona gateway_id, usar device_id como fallback
+        if not gateway_id:
+            gateway_id = device_id
+            
+        headers = get_auth_headers(jwt_token)
+        
+        # Intentar varios formatos de URL posibles
+        urls_to_try = []
+        
+        # Solo añadir URLs con asset_id si se proporciona
+        if asset_id:
+            # Formato 1: URL original
+            urls_to_try.append(f"{BASE_URL}/sensor-passwords/deployment/{asset_id}/device/{device_id}/sensor/{sensor_id}")
+        
+        # Añadir el resto de URLs
+        urls_to_try.extend([
+            # Formato 2: Nuevo formato basado en el ejemplo
+            f"{BASE_URL}/gateways/{gateway_id}/devices/{device_id}/sensors/{sensor_id}/password",
+            # Formato 3: Formato más RESTful
+            f"{BASE_URL}/api/gateways/{gateway_id}/devices/{device_id}/sensors/{sensor_id}/password",
+            # Formato 4: Otro posible formato
+            f"{BASE_URL}/api/devices/{device_id}/sensors/{sensor_id}/password"
+        ])
+        
+        # Intentar cada URL hasta que una funcione
+        for url in urls_to_try:
+            try:
+                logger.debug(f"Intentando obtener código NFC con URL: {url}")
+                response = requests.get(url, headers=headers)
+                
+                # Verificar si la operación fue exitosa (2xx)
+                if response.status_code >= 200 and response.status_code < 300:
+                    logger.info(f"Código NFC obtenido exitosamente con URL: {url}")
+                    
+                    # Intentar procesar la respuesta como JSON
+                    try:
+                        result = response.json()
+                        
+                        # Manejar diferentes formatos de respuesta posibles
+                        if isinstance(result, dict):
+                            # Formato 1: {"data": {"password": "valor"}}
+                            if "data" in result and isinstance(result["data"], dict) and "password" in result["data"]:
+                                return result["data"]["password"]
+                            
+                            # Formato 2: {"password": "valor"}
+                            if "password" in result:
+                                return result["password"]
+                            
+                            # Formato 3: {"value": "valor"}
+                            if "value" in result:
+                                return result["value"]
+                            
+                            # Si ningún formato conocido, devolver el primer valor string que encontremos
+                            for key, value in result.items():
+                                if isinstance(value, str):
+                                    logger.warning(f"Usando valor desconocido '{key}': {value}")
+                                    return value
+                            
+                            # Si todo falla, devolver el JSON completo como string
+                            logger.warning(f"No se pudo extraer valor NFC de la respuesta: {result}")
+                            return str(result)
+                        
+                        # Si es un string directo
+                        if isinstance(result, str):
+                            return result
+                        
+                        # Si es una lista, intentar obtener el primer elemento
+                        if isinstance(result, list) and len(result) > 0:
+                            return str(result[0])
+                            
+                    except ValueError:
+                        # Si no es JSON, devolver el texto plano
+                        if response.text:
+                            return response.text.strip()
+                
+                logger.warning(f"Error al intentar URL {url}: {response.status_code}")
+                
+            except Exception as e:
+                logger.warning(f"Excepción al intentar URL {url}: {str(e)}")
+                continue
+        
+        # Si llegamos aquí, ninguna URL funcionó
+        logger.error("Todas las URLs para obtener el código NFC fallaron")
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error al obtener código NFC: {str(e)}", exc_info=True)
+        return None
+
+def update_nfc_code_value(asset_id, device_id, sensor_id, new_value, jwt_token=None, gateway_id=None):
+    """
+    Actualiza el valor de un código NFC
+    
+    Args:
+        asset_id: ID del asset
+        device_id: ID del dispositivo
+        sensor_id: ID del sensor
+        new_value: Nuevo valor del código NFC
+        jwt_token: Token JWT para autenticación
+        gateway_id: ID del gateway (opcional, si no se proporciona se usará el device_id)
+        
+    Returns:
+        Tuple (success, response) donde success es un booleano y response es el detalle
+    """
+    try:
+        # Verificar autenticación
+        if not jwt_token:
+            logger.error("No hay token JWT disponible para actualizar valor NFC")
+            return False, "No hay autenticación disponible"
+            
+        if not auth_service.is_authenticated(jwt_token):
+            logger.error("Token JWT inválido para actualizar valor NFC")
+            return False, "Autenticación inválida"
+        
+        # Si no se proporciona gateway_id, usar device_id como fallback
+        if not gateway_id:
+            gateway_id = device_id
+            
+        # Intentar varios formatos de URL posibles
+        urls_to_try = [
+            # Formato 1: URL original
+            f"{BASE_URL}/sensor-passwords/deployment/{asset_id}/device/{device_id}/sensor/{sensor_id}",
+            # Formato 2: Nuevo formato basado en el ejemplo
+            f"{BASE_URL}/gateways/{gateway_id}/devices/{device_id}/update-password/{sensor_id}",
+            # Formato 3: Formato más RESTful
+            f"{BASE_URL}/api/gateways/{gateway_id}/devices/{device_id}/sensors/{sensor_id}/update-password",
+            # Formato 4: Otro posible formato
+            f"{BASE_URL}/api/devices/{device_id}/sensors/{sensor_id}/update-password"
+        ]
+        
+        headers = get_auth_headers(jwt_token)
+        
+        # Crear el payload según el formato que podría aceptar la API
+        data = {
+            "data": {
+                "password": new_value
+            }
+        }
+        
+        # Intentar cada URL hasta que una funcione
+        for url in urls_to_try:
+            try:
+                logger.debug(f"Intentando actualizar código NFC con URL: {url}")
+                response = requests.post(url, json=data, headers=headers)
+                
+                # Verificar si la operación fue exitosa (2xx)
+                if response.status_code >= 200 and response.status_code < 300:
+                    logger.info(f"Código NFC actualizado exitosamente con URL: {url}")
+                    
+                    # Algunos endpoints pueden devolver 204 No Content
+                    if response.status_code == 204 or not response.text:
+                        return True, "Código NFC actualizado exitosamente"
+                    
+                    # Intentar procesar la respuesta como JSON
+                    try:
+                        result = response.json()
+                        return True, result
+                    except:
+                        # Si no es JSON, devolver el texto plano
+                        return True, response.text
+                
+                logger.warning(f"Error al intentar URL {url}: {response.status_code}")
+                
+            except Exception as e:
+                logger.warning(f"Excepción al intentar URL {url}: {str(e)}")
+                continue
+        
+        # Si llegamos aquí, ninguna URL funcionó
+        logger.error(f"Todas las URLs para actualizar el código NFC fallaron. Último código de estado: {response.status_code}")
+        return False, f"Error al actualizar código NFC: Error {response.status_code}"
+        
+    except Exception as e:
+        logger.error(f"Error al actualizar código NFC: {str(e)}", exc_info=True)
+        return False, f"Error al actualizar código NFC: {str(e)}"
+
+def get_nfc_passwords(asset_id, jwt_token=None):
+    """
+    Obtiene los códigos NFC para un asset específico
+    
+    Args:
+        asset_id: ID del asset
+        jwt_token: Token JWT para autenticación
+        
+    Returns:
+        Dictionary con los datos de códigos NFC o None si hay error
+    """
+    try:
+        from utils.auth import API_BASE_URL
+        
+        # Definir timeout para la solicitud
+        REQUEST_TIMEOUT = 10  # 10 segundos
+        
+        headers = get_auth_headers(jwt_token)
+        
+        if not headers:
+            logger.warning("No se proporcionó token JWT para obtener códigos NFC")
+            return None
+            
+        url = f"{API_BASE_URL}/sensor-passwords/deployment/{asset_id}"
+        logger.debug(f"Consultando códigos NFC para asset {asset_id} en URL: {url}")
+        
+        response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
+        
+        # Verificar que la respuesta sea exitosa
+        if response.status_code != 200:
+            logger.error(f"Error al obtener códigos NFC: código {response.status_code}, respuesta: {response.text[:500]}")
+            return None
+            
+        # Parsear la respuesta como JSON
+        data = response.json()
+        
+        # DEBUG ESPECIAL: Captura completa de la respuesta API para el problema reportado
+        try:
+            # Buscar dispositivo específico RAYONICS_1_F7E7221735CC en la respuesta
+            if isinstance(data, dict) and 'data' in data:
+                devices_to_check = data['data']
+                if isinstance(devices_to_check, list):
+                    for device in devices_to_check:
+                        if isinstance(device, dict) and 'device_name' in device:
+                            if 'F7E7221735CC' in device.get('device_name', ''):
+                                logger.critical(f"====== DATOS RAW API PARA DISPOSITIVO PROBLEMÁTICO ======")
+                                logger.critical(f"Asset ID: {asset_id}")
+                                logger.critical(f"Dispositivo encontrado en respuesta API: {device.get('device_name')}")
+                                logger.critical(f"Sensor passwords en respuesta: {json.dumps(device.get('sensor_passwords', []), indent=2)}")
+                                logger.critical(f"====================================================")
+        except Exception as debug_err:
+            logger.error(f"Error en debug especial: {str(debug_err)}")
+        
+        # Registrar el formato de los datos recibidos
+        logger.info(f"Datos NFC recibidos para asset {asset_id}: Tipo={type(data)}, Estructura={str(data)[:200]}...")
+        
+        # FORMATO 1: Data es un array con objetos que contienen 'sensor_passwords'
+        if isinstance(data, dict) and 'data' in data and isinstance(data['data'], list):
+            devices_list = data['data']
+            logger.debug(f"Formato detectado: data es un array con {len(devices_list)} elementos")
+            
+            devices_with_passwords = []
+            for device_entry in devices_list:
+                if 'sensor_passwords' in device_entry and isinstance(device_entry['sensor_passwords'], list):
+                    logger.debug(f"Procesando entrada con {len(device_entry['sensor_passwords'])} sensores")
+                    
+                    # DEBUG ESPECIAL: vigilancia dispositivo problemático
+                    if 'device_name' in device_entry and 'F7E7221735CC' in device_entry.get('device_name', ''):
+                        logger.info(f"DISPOSITIVO PROBLEMÁTICO: Procesando {device_entry.get('device_name')} con {len(device_entry['sensor_passwords'])} sensores")
+                    
+                    # Construir un nuevo formato de dispositivo
+                    device_info = {
+                        'device_id': device_entry.get('device_id'),  # Usar device_id del dispositivo si existe
+                        'device_name': device_entry.get('device_name', ''),
+                        'device_type': device_entry.get('device_type', ''),
+                        'sensor_passwords': []
+                    }
+                    
+                    # Procesar cada sensor_password
+                    has_nfc_sensors = False
+                    for sensor in device_entry['sensor_passwords']:
+                        # Si el device_id no está en el dispositivo pero sí en el sensor, usarlo
+                        if not device_info['device_id'] and sensor.get('device_id'):
+                            device_info['device_id'] = sensor.get('device_id')
+                        
+                        # DEBUG ESPECIAL: vigilancia dispositivo problemático y sensores
+                        if 'device_name' in device_entry and 'F7E7221735CC' in device_entry.get('device_name', ''):
+                            logger.info(f"DISPOSITIVO PROBLEMÁTICO: Sensor {sensor.get('sensor_id')}, tipo={sensor.get('sensor_type')}, password={sensor.get('password')}")
+                        
+                        # Sólo añadir sensores NFC_CODE
+                        if sensor.get('sensor_type') == 'NFC_CODE':
+                            device_info['sensor_passwords'].append(sensor)
+                            has_nfc_sensors = True
+                    
+                    # Solo añadir el dispositivo si tiene al menos un sensor NFC_CODE
+                    if device_info['device_id'] and has_nfc_sensors:
+                        devices_with_passwords.append(device_info)
+                        logger.debug(f"Añadido dispositivo {device_info['device_id']} con {len(device_info['sensor_passwords'])} sensores NFC")
+                        
+                        # DEBUG ESPECIAL: vigilancia dispositivo problemático
+                        if 'device_name' in device_entry and 'F7E7221735CC' in device_entry.get('device_name', ''):
+                            logger.info(f"DISPOSITIVO PROBLEMÁTICO: Añadido con {len(device_info['sensor_passwords'])} sensores NFC")
+                            for s in device_info['sensor_passwords']:
+                                logger.info(f"  - Sensor final {s.get('sensor_id')}: {s.get('password')}")
+            
+            if devices_with_passwords:
+                result = {
+                    'data': {
+                        'devices': devices_with_passwords
+                    }
+                }
+                logger.info(f"Transformados {len(devices_with_passwords)} dispositivos con sensores NFC")
+                return result
+            else:
+                logger.warning(f"No se encontraron sensores NFC_CODE en los datos del asset {asset_id}")
+                return {'data': {'devices': []}}
+        
+        # CASO 1: Si es una lista directamente
+        if isinstance(data, list):
+            logger.info(f"Transformando lista directa a formato esperado")
+            result = {
+                'data': {
+                    'devices': data
+                }
+            }
+            return result
+            
+        # CASO 2: Si es un diccionario que contiene 'data' como lista
+        elif isinstance(data, dict):
+            if 'data' in data:
+                if isinstance(data['data'], list):
+                    logger.info(f"Transformando 'data' como lista a formato esperado")
+                    result = {
+                        'data': {
+                            'devices': data['data']
+                        }
+                    }
+                    return result
+                # Si 'data' ya tiene la estructura esperada
+                elif isinstance(data['data'], dict) and 'devices' in data['data']:
+                    logger.info(f"'data' ya tiene la estructura esperada")
+                    return data
+                # Si 'data' es un diccionario pero no tiene 'devices'
+                elif isinstance(data['data'], dict):
+                    logger.info(f"'data' es un diccionario sin 'devices', transformando")
+                    result = {
+                        'data': {
+                            'devices': [data['data']] if 'device_id' in data['data'] else []
+                        }
+                    }
+                    return result
+            # Si el diccionario no tiene 'data' pero tiene 'devices'
+            elif 'devices' in data:
+                logger.info(f"Transformando diccionario con 'devices' a formato esperado")
+                result = {
+                    'data': {
+                        'devices': data['devices']
+                    }
+                }
+                return result
+            # Si es un diccionario simple que podría ser un dispositivo
+            elif 'device_id' in data:
+                logger.info(f"Transformando dispositivo único a formato esperado")
+                result = {
+                    'data': {
+                        'devices': [data]
+                    }
+                }
+                return result
+            # Cualquier otro diccionario
+            else:
+                logger.info(f"Estructura de datos no reconocida, envolviendo en formato estándar")
+                result = {
+                    'data': {
+                        'devices': []
+                    }
+                }
+                return result
+                
+        # CASO 3: Cualquier otro tipo de datos
+        logger.warning(f"Tipo de datos no reconocido: {type(data)}")
+        return {
+            'data': {
+                'devices': []
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error al obtener códigos NFC: {str(e)}")
+        return None
+
+def get_asset_devices(asset_id, jwt_token=None, device_types=None):
+    """
+    Obtiene la lista de dispositivos asociados a un asset específico desde la API
+    
+    Args:
+        asset_id: ID del asset para obtener sus dispositivos
+        jwt_token: Token JWT para autenticación (opcional)
+        device_types: Lista de tipos de dispositivos para filtrar (opcional, ej: ['lock', 'qr_lock'])
+        
+    Returns:
+        list: Lista de dispositivos con formato [{device_id, device_type, ...}]
+    """
+    try:
+        # Verificar autenticación
+        if jwt_token:
+            # Usar el token JWT proporcionado
+            logger.debug(f"Verificando autenticación con token JWT: {jwt_token[:10]}...")
+            if not auth_service.is_authenticated(jwt_token):
+                logger.warning("Token JWT inválido para obtener dispositivos de asset")
+                return []
+            
+            # Construir parámetros de consulta
+            params = []
+            
+            # Añadir filtros de tipo si están presentes
+            if device_types:
+                if isinstance(device_types, list):
+                    # Si es una lista, añadir cada tipo
+                    for device_type in device_types:
+                        params.append(f"type={device_type}")
+                else:
+                    # Si es un único valor, añadirlo directamente
+                    params.append(f"type={device_types}")
+            
+            # Añadir parámetros de paginación si es necesario
+            page_size = 50  # Tamaño de página por defecto
+            page_number = 1
+            params.append(f"page[size]={page_size}")
+            params.append(f"page[number]={page_number}")
+            
+            # Construir el endpoint con el asset_id
+            endpoint = f"assets/{asset_id}/devices"
+            if params:
+                endpoint += "?" + "&".join(params)
+            
+            logger.debug(f"Obteniendo dispositivos para el asset {asset_id} con endpoint: {endpoint}")
+            
+            # Inicializar lista para almacenar todos los dispositivos
+            all_devices = []
+            has_next_page = True
+            
+            while has_next_page:
+                # Hacer la solicitud a la API con el token JWT
+                response = auth_service.make_api_request(jwt_token, "GET", endpoint)
+                
+                # Verificar si hay un error en la respuesta
+                if isinstance(response, dict) and "error" in response:
+                    logger.error(f"Error al obtener dispositivos para el asset {asset_id}: {response.get('error')}")
+                    return []
+                
+                # Extraer la lista de dispositivos de la respuesta
+                devices_page = extract_list_from_response(response, lambda: [], "devices")
+                
+                # Asegurarse de que todos los dispositivos tengan el asset_id
+                for device in devices_page:
+                    device["asset_id"] = asset_id
+                
+                # Añadir dispositivos a la lista total
+                all_devices.extend(devices_page)
+                logger.debug(f"Añadidos {len(devices_page)} dispositivos de la página {page_number}")
+                
+                # Determinar si hay más páginas usando la metadata
+                has_next_page = False
+                
+                # Método 1: Usar metadata si está disponible
+                if isinstance(response, dict) and "meta" in response:
+                    meta = response["meta"]
+                    total_pages = meta.get("total_pages", 0)
+                    results_in_page = meta.get("results", 0)
+                    
+                    logger.debug(f"Metadata detectada para asset {asset_id}: total_pages={total_pages}, results={results_in_page}")
+                    
+                    # Si no hay resultados en esta página o ya estamos en la última página, terminar
+                    if results_in_page == 0 or page_number >= total_pages:
+                        logger.debug(f"No hay más resultados o estamos en la última página ({page_number}/{total_pages}). Terminando paginación.")
+                        break
+                    
+                    # Si hay más páginas, continuar
+                    if page_number < total_pages:
+                        page_number += 1
+                        # Actualizar el parámetro de página en la URL
+                        if "page[number]=" in endpoint:
+                            endpoint = endpoint.replace(f"page[number]={page_number-1}", f"page[number]={page_number}")
+                        else:
+                            if "?" in endpoint:
+                                endpoint += f"&page[number]={page_number}"
+                            else:
+                                endpoint += f"?page[number]={page_number}"
+                        has_next_page = True
+                        logger.debug(f"Avanzando a la página {page_number} de {total_pages}")
+                
+                # Método 2 (fallback): Usar links.next si no hay metadata
+                elif isinstance(response, dict) and "links" in response and "next" in response["links"]:
+                    next_link = response["links"]["next"]
+                    if next_link:
+                        # Extraer el endpoint de la URL completa
+                        import re
+                        match = re.search(r'assets/[^/]+/devices\?(.+)$', next_link)
+                        if match:
+                            endpoint = f"assets/{asset_id}/devices?{match.group(1)}"
+                            page_number += 1
+                            has_next_page = True
+                            logger.debug(f"Usando link.next para avanzar a la página {page_number}")
+                        else:
+                            logger.warning(f"No se pudo extraer el endpoint del enlace: {next_link}")
+                
+                # Optimización adicional: si no hay resultados en la página actual, detener la paginación
+                if not has_next_page and len(devices_page) == 0:
+                    logger.debug(f"La página {page_number} no contiene resultados. Terminando paginación.")
+                    break
+                
+                # Límite de seguridad para evitar bucles infinitos
+                if page_number > 5:  # Valor menor que en get_devices ya que los assets suelen tener menos dispositivos
+                    logger.warning(f"Se alcanzó el límite de páginas (5) para el asset {asset_id}. Se detiene la paginación.")
+                    break
+            
+            logger.debug(f"Obtenidos {len(all_devices)} dispositivos para el asset {asset_id}")
+            return all_devices
+        else:
+            # Si no hay token JWT, devolver lista vacía
+            logger.info("No se proporcionó token JWT para obtener dispositivos de asset")
+            return []
+    except Exception as e:
+        logger.error(f"Error al obtener dispositivos del asset {asset_id}: {str(e)}")
+        return []
+
+def fetch_nfc_passwords_for_asset(asset_id, token):
+    """
+    Obtiene las contraseñas NFC para un asset específico y devuelve una estructura estandarizada.
+    
+    Args:
+        asset_id (str): ID del asset del cual obtener las contraseñas NFC
+        token (str): Token JWT para autenticación
+    
+    Returns:
+        tuple: (asset_id, data) donde data es una lista de dispositivos con sus códigos NFC
+    """
+    try:
+        logger.info(f"Obteniendo códigos NFC para asset_id={asset_id}")
+        
+        # Obtener datos NFC directamente a través de la API
+        nfc_data = get_nfc_passwords(asset_id, token)
+        
+        if not nfc_data or not isinstance(nfc_data, dict) or 'data' not in nfc_data:
+            logger.warning(f"No se obtuvieron datos NFC válidos para asset_id={asset_id}")
+            return asset_id, []
+        
+        # Extraer lista de dispositivos de la respuesta
+        devices_data = []
+        data_section = nfc_data['data']
+        
+        # Manejar diferentes formatos de respuesta de la API
+        if isinstance(data_section, dict) and 'devices' in data_section and isinstance(data_section['devices'], list):
+            # Formato estándar: data.devices es una lista de dispositivos
+            devices_data = data_section['devices']
+            logger.debug(f"Formato estándar: {len(devices_data)} dispositivos encontrados")
+            
+        elif isinstance(data_section, list):
+            # Formato alternativo: data es directamente una lista de dispositivos
+            devices_data = data_section
+            logger.debug(f"Formato lista: {len(devices_data)} dispositivos encontrados")
+            
+        elif isinstance(data_section, dict) and 'device_id' in data_section:
+            # Formato de dispositivo único: data es un único dispositivo
+            devices_data = [data_section]
+            logger.debug("Formato de dispositivo único encontrado")
+        
+        # Procesar cada dispositivo para estandarizar la estructura
+        processed_devices = []
+        
+        for device in devices_data:
+            if not isinstance(device, dict) or 'device_id' not in device:
+                continue
+                
+            # Información básica del dispositivo
+            processed_device = {
+                "device_id": device.get("device_id", ""),
+                "device_name": device.get("device_name", device.get("name", "Sin nombre")),
+                "asset_id": asset_id,
+                "sensors": []
+            }
+            
+            # Extraer sensores NFC (sensor_passwords)
+            sensor_passwords = device.get("sensor_passwords", [])
+            if not isinstance(sensor_passwords, list):
+                continue
+                
+            # Procesar cada sensor NFC
+            for sensor in sensor_passwords:
+                if not isinstance(sensor, dict) or 'sensor_id' not in sensor:
+                    continue
+                    
+                # Solo incluir sensores de tipo NFC_CODE
+                if sensor.get('sensor_type') != 'NFC_CODE' and not 'NFC' in str(sensor.get('sensor_type', '')).upper():
+                    continue
+                    
+                # Extraer información del sensor
+                processed_sensor = {
+                    "sensor_id": sensor.get("sensor_id", ""),
+                    "sensor_type": "NFC_CODE",
+                    "name": sensor.get("name", f"NFC {sensor.get('sensor_id', '')}"),
+                    "password": sensor.get("password", "")
+                }
+                
+                processed_device["sensors"].append(processed_sensor)
+            
+            # Añadir el dispositivo procesado a la lista final (solo si tiene sensores NFC)
+            if processed_device["sensors"]:
+                processed_devices.append(processed_device)
+        
+        logger.info(f"Procesados {len(processed_devices)} dispositivos con códigos NFC para asset_id={asset_id}")
+        return asset_id, processed_devices
+            
+    except Exception as e:
+        logger.error(f"Error al obtener códigos NFC para asset_id={asset_id}: {str(e)}")
+        return asset_id, []

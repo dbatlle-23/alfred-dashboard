@@ -242,7 +242,7 @@ def create_asset_detail_content(asset_id, month, detail_data, asset_metadata):
                 page_size=10,
                 sort_action="native",
                 filter_action="native",
-                export_format="xlsx csv",
+                export_format="xlsx",
             )
         ], className="mt-3"))
         

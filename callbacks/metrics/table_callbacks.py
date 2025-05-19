@@ -127,8 +127,26 @@ def register_table_callbacks(app):
             logger.debug(f"DataFrame after filtering has {len(df)} rows")
             if df.empty:
                 logger.warning("DataFrame after filtering is empty")
-                from dash import html
-                return html.Div("No hay datos disponibles para los filtros seleccionados.", className="alert alert-warning"), None
+                
+                # Attempt to clear caches and notify the user
+                try:
+                    from utils.data_loader import clear_all_caches
+                    clear_all_caches()
+                    logger.info("Automatically cleared caches due to no data found with current filters")
+                    
+                    from dash import html
+                    return html.Div([
+                        html.I(className="fas fa-exclamation-circle me-2"),
+                        "No hay datos disponibles para los filtros seleccionados.",
+                        html.Br(),
+                        html.Small("Se ha limpiado la caché automáticamente. Por favor, intente visualizar los datos nuevamente.")
+                    ], className="alert alert-warning"), None
+                except Exception as e:
+                    logger.error(f"Error clearing caches: {str(e)}")
+                    
+                    # Default message if cache clearing fails
+                    from dash import html
+                    return html.Div("No hay datos disponibles para los filtros seleccionados.", className="alert alert-warning"), None
             
             logger.debug("Getting sample of filtered DataFrame")
             if logger.isEnabledFor(10):  # DEBUG level
@@ -449,100 +467,79 @@ def register_table_callbacks(app):
         [Input("metrics-data-store", "data"),
          Input("metrics-client-filter", "value"),
          Input("metrics-project-filter", "value"),
-         Input("metrics-consumption-tags-filter", "value"),
+         Input("metrics-asset-filter", "value"),
          Input("metrics-date-range", "start_date"),
-         Input("metrics-date-range", "end_date")]
+         Input("metrics-date-range", "end_date"),
+         Input("metrics-monthly-summary-selected-type-store", "data")],
+        prevent_initial_call=True
     )
-    def update_monthly_summary_table(json_data, client_id, project_id, consumption_tags, start_date, end_date):
-        """Update the monthly summary table."""
-        from utils.logging import get_logger
+    def update_monthly_summary_table(json_data, client_id, project_id, asset_id, start_date, end_date, summary_type_store_data):
+        """Update monthly summary table based on the specific type selected for the summary section."""
+
+        from constants.metrics import CONSUMPTION_TAGS_MAPPING
+        from utils.logging import get_logger 
         logger = get_logger(__name__)
-        
-        logger.info("Starting update of monthly summary table")
-        logger.debug(f"Parameters - client: {client_id}, project: {project_id}, tags: {consumption_tags}, date range: {start_date} to {end_date}")
-        
+
+        default_table = dbc.Alert("Seleccione un tipo de consumo para ver el resumen mensual.", color="info")
+
+        active_tag = summary_type_store_data.get("active_tag") if summary_type_store_data else None
+
+        if not json_data or json_data == "[]" or not active_tag:
+            return default_table
+
+        # Map tag to human readable name for filtering
+        human_readable_name = CONSUMPTION_TAGS_MAPPING.get(active_tag)
+        if not human_readable_name:
+             logger.warning(f"[update_monthly_summary_table] Could not map tag {active_tag}")
+             return default_table
+
         try:
-            # If no data, show message instead of creating example data
-            if not json_data or json_data == "[]":
-                logger.warning("No data available for monthly summary table")
-                from components.metrics.tables import create_monthly_summary_table
-                return create_monthly_summary_table(None, "No hay datos disponibles")
-            
-            # Convert JSON to DataFrame
             df = pd.DataFrame(json.loads(json_data))
-            logger.debug(f"Loaded DataFrame with {len(df)} rows")
             
-            # Check if DataFrame is empty
-            if df.empty:
-                logger.warning("DataFrame is empty")
-                from components.metrics.tables import create_monthly_summary_table
-                return create_monthly_summary_table(None, "No hay datos disponibles")
+            # --- Filter data for the selected type --- 
+            df_filtered_type = df[df['consumption_type'] == human_readable_name].copy()
+
+            if df_filtered_type.empty:
+                 logger.debug(f"[update_monthly_summary_table] df_filtered_type is empty for {human_readable_name}.")
+                 return default_table
+
+            # Apply other filters
+            current_asset_id = asset_id if asset_id and asset_id != 'all' else None
+            processed_df = process_metrics_data(
+                df_filtered_type,
+                client_id=client_id,
+                project_id=project_id,
+                asset_id=current_asset_id,
+                consumption_tags=[human_readable_name], # Pass the specific type
+                start_date=start_date,
+                end_date=end_date
+            )
+
+            if processed_df.empty:
+                 logger.debug("[update_monthly_summary_table] processed_df is empty.")
+                 return default_table
+
+            # --- Generate monthly summary for the single selected type --- 
+            monthly_summary = generate_monthly_consumption_summary(processed_df, start_date, end_date)
+
+            if monthly_summary.empty:
+                logger.debug("[update_monthly_summary_table] monthly_summary is empty.")
+                return default_table
+
+            # --- Remove Pivot Logic --- 
+            # The monthly_summary DataFrame should now be directly usable by the table component
+            # Ensure it has the expected columns (e.g., month, total_consumption, average_consumption)
+            # logger.debug(f"Monthly summary columns: {monthly_summary.columns.tolist()}")
+            # logger.debug(f"Monthly summary head:\n{monthly_summary.head()}")
             
-            # Process data according to filters
-            try:
-                from utils.metrics.data_processing import process_metrics_data
-                
-                # Convert dates to datetime if they are strings
-                if 'date' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['date']):
-                    df['date'] = pd.to_datetime(df['date'], errors='coerce')
-                
-                # Filter data
-                filtered_df = process_metrics_data(
-                    df, 
-                    client_id=client_id, 
-                    project_id=project_id, 
-                    consumption_tags=consumption_tags, 
-                    start_date=start_date, 
-                    end_date=end_date
-                )
-                
-                logger.debug(f"Filtered DataFrame has {len(filtered_df)} rows")
-                
-                # Check if filtered DataFrame is empty
-                if filtered_df.empty:
-                    logger.warning("Filtered DataFrame is empty")
-                    from components.metrics.tables import create_monthly_summary_table
-                    return create_monthly_summary_table(None, "No hay datos disponibles para los filtros seleccionados")
-                
-                # Use generate_monthly_consumption_summary to calculate the monthly summary
-                try:
-                    from utils.metrics.data_processing import generate_monthly_consumption_summary
-                    
-                    # Generate monthly summary using the improved function
-                    monthly_summary = generate_monthly_consumption_summary(filtered_df, start_date, end_date)
-                    
-                    logger.debug(f"Generated monthly summary with {len(monthly_summary)} rows")
-                    
-                    # Check if monthly summary is empty
-                    if monthly_summary.empty:
-                        logger.warning("Monthly summary is empty")
-                        from components.metrics.tables import create_monthly_summary_table
-                        return create_monthly_summary_table(None, "No se pudo generar el resumen mensual")
-                    
-                    # Create table
-                    from components.metrics.tables import create_monthly_summary_table
-                    return create_monthly_summary_table(monthly_summary)
-                    
-                except Exception as e:
-                    logger.error(f"Error generating monthly summary: {str(e)}", exc_info=True)
-                    
-                    # In case of error, show message
-                    from components.metrics.tables import create_monthly_summary_table
-                    return create_monthly_summary_table(None, f"Error al generar el resumen mensual: {str(e)}")
-                
-            except Exception as e:
-                logger.error(f"Error processing data: {str(e)}", exc_info=True)
-                
-                # In case of error, show message
-                from components.metrics.tables import create_monthly_summary_table
-                return create_monthly_summary_table(None, f"Error al procesar los datos: {str(e)}")
-            
+            # --- Create Table Component --- 
+            # Pass the non-pivoted summary dataframe 
+            # Make sure create_monthly_summary_table can handle this format
+            return create_monthly_summary_table(monthly_summary)
+
         except Exception as e:
-            logger.error(f"Error in monthly summary table update: {str(e)}", exc_info=True)
-            
-            # In case of error, show message
-            from components.metrics.tables import create_monthly_summary_table
-            return create_monthly_summary_table(None, f"Error: {str(e)}")
+            logger.error(f"[ERROR update_monthly_summary_table]: {str(e)}", exc_info=True)
+            return dbc.Alert(f"Ocurrió un error al generar la tabla de resumen mensual: {str(e)}", color="danger")
 
     # Importaciones necesarias para los callbacks de exportación
     from dash import dcc, html

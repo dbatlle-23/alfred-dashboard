@@ -4,6 +4,7 @@ import json
 import pandas as pd
 from datetime import datetime, timedelta
 import locale
+import dash_bootstrap_components as dbc
 
 from utils.metrics.data_processing import process_metrics_data
 
@@ -28,60 +29,84 @@ def register_metrics_callbacks(app):
          Output("metrics-min-month-name", "children"),
          Output("metrics-min-month-consumption-unit", "children")],
         [Input("metrics-data-store", "data"),
+         Input("metrics-kpi-selected-type-store", "data"),
          Input("metrics-client-filter", "value"),
          Input("metrics-project-filter", "value"),
          Input("metrics-asset-filter", "value"),
-         Input("metrics-consumption-tags-filter", "value"),
          Input("metrics-date-range", "start_date"),
-         Input("metrics-date-range", "end_date")]
+         Input("metrics-date-range", "end_date")],
+        [State("jwt-token-store", "data")]
     )
-    def update_metrics(json_data, client_id, project_id, asset_id, consumption_tags, start_date, end_date):
-        """Update metrics based on selected filters."""
-        if not json_data or json_data == "[]":
-            return "0", "", "0", "", "0%", "", "h3", "0", "Sin datos", "", "0", "Sin datos", "", "0", "Sin datos", ""
+    def update_metrics(json_data, kpi_type_store_data, client_id, project_id, asset_id, start_date, end_date, token_data):
+        """Update metrics based on the single selected KPI type."""
+        
+        # Default empty values
+        default_return = "0", "", "0", "", "0%", "", "h3", "0", "Sin datos", "", "0", "Sin datos", "", "0", "Sin datos", ""
+        
+        from constants.metrics import CONSUMPTION_TAGS_MAPPING
+
+        active_tag = kpi_type_store_data.get("active_tag") if kpi_type_store_data else None
+        
+        if not json_data or json_data == "[]" or not active_tag:
+            return default_return
+        
+        # --- NUEVO: Mapear el tag interno al nombre legible ---
+        human_readable_name = CONSUMPTION_TAGS_MAPPING.get(active_tag)
+
+        if not human_readable_name:
+            print(f"[ERROR update_metrics] Could not map active_tag '{active_tag}' to a human-readable name.")
+            return default_return # Si no se puede mapear, algo va mal
+        # --- FIN NUEVO ---
         
         try:
             # Convertir JSON a DataFrame
             df = pd.DataFrame(json.loads(json_data))
             
-            # Procesar datos según filtros
-            filtered_df = process_metrics_data(
-                df, 
-                client_id=client_id, 
-                project_id=project_id, 
-                asset_id=asset_id, 
-                consumption_tags=consumption_tags, 
-                start_date=start_date, 
+            # 1. Filter using the HUMAN-READABLE NAME
+            df_filtered_by_tag = df[df['consumption_type'] == human_readable_name].copy()
+            
+            if df_filtered_by_tag.empty:
+                return default_return
+            
+            # 2. Process this TAG-SPECIFIC data further using other filters
+            processed_df = process_metrics_data(
+                df_filtered_by_tag,
+                client_id=client_id,
+                project_id=project_id,
+                asset_id=asset_id,
+                consumption_tags=[human_readable_name],
+                start_date=start_date,
                 end_date=end_date
             )
             
-            if filtered_df.empty:
-                return "0", "", "0", "", "0%", "", "h3", "0", "Sin datos", "", "0", "Sin datos", "", "0", "Sin datos", ""
+            if processed_df.empty:
+                return default_return
             
-            # Utilizar la misma función que genera el resumen mensual para asegurar consistencia
+            # 3. Determine Unit (Based only on active_tag - this part was correct)
+            unit = ""
+            # Use active_tag (internal name) for reliable unit determination
+            if "WATER" in active_tag: 
+                unit = "m³"
+            elif "ENERGY" in active_tag:
+                unit = "kWh"
+            elif "FLOW" in active_tag:  # Assuming FLOW relates to people count
+                 unit = "personas"
+            else:
+                # Fallback or default unit if needed
+                unit = "units"
+            
+            # 4. Generate Monthly Summary ONLY from the fully processed data for the ACTIVE TAG
             from utils.metrics.data_processing import generate_monthly_consumption_summary
-            monthly_summary = generate_monthly_consumption_summary(filtered_df, start_date, end_date)
+            # Pass processed_df which contains only data for the active tag AND other filters
+            monthly_summary = generate_monthly_consumption_summary(processed_df, start_date, end_date)
             
             if monthly_summary.empty:
-                return "0", "", "0", "", "0%", "", "h3", "0", "Sin datos", "", "0", "Sin datos", "", "0", "Sin datos", ""
+                return default_return
             
-            # Ordenar el resumen mensual por fecha
+            # --- All subsequent calculations ONLY use monthly_summary ---
+            # This summary was derived ONLY from data matching the active_tag
+            
             monthly_summary = monthly_summary.sort_values('date')
-            
-            # Determinar la unidad
-            unit = ""
-            if consumption_tags and len(consumption_tags) == 1:
-                # Si solo hay un tipo de consumo, usar su unidad
-                consumption_type = consumption_tags[0]
-                if "WATER" in consumption_type:
-                    unit = "m³"
-                elif "ENERGY" in consumption_type:
-                    unit = "kWh"
-                elif "FLOW" in consumption_type:
-                    unit = "personas"
-            else:
-                # Si hay múltiples tipos, usar unidades mixtas
-                unit = "unidades"
             
             # 1. Consumo total del periodo
             total_period_consumption = monthly_summary['total_consumption'].sum()
@@ -101,12 +126,11 @@ def register_metrics_callbacks(app):
             max_month_consumption = max_month_row['total_consumption']
             
             # 5. Mínimo mensual (excluyendo valores cero o negativos)
-            # Filtrar para excluir valores cero o negativos
             positive_consumption = monthly_summary[monthly_summary['total_consumption'] > 0]
             if not positive_consumption.empty:
                 min_month_idx = positive_consumption['total_consumption'].idxmin()
                 min_month_row = monthly_summary.loc[min_month_idx]
-            else:
+            else:  # Handle case where all consumption is zero or negative
                 min_month_idx = monthly_summary['total_consumption'].idxmin()
                 min_month_row = monthly_summary.loc[min_month_idx]
             
@@ -117,38 +141,46 @@ def register_metrics_callbacks(app):
             trend_pct = 0
             trend_period = "Sin datos previos"
             
-            # Si hay más de un mes en el resumen, calcular la tendencia
             if len(monthly_summary) > 1:
                 previous_month_row = monthly_summary.iloc[-2]
                 previous_month = previous_month_row['month']
                 previous_consumption = previous_month_row['total_consumption']
                 
-                # Asegurar que los valores sean numéricos
                 try:
-                    if isinstance(last_month_consumption, str):
-                        last_month_consumption = float(last_month_consumption)
-                    if isinstance(previous_consumption, str):
-                        previous_consumption = float(previous_consumption)
-                        
-                    # Calcular tendencia
-                    if previous_consumption != 0:
-                        trend_pct = ((last_month_consumption - previous_consumption) / abs(previous_consumption)) * 100
-                    else:
+                    # Ensure numeric types for calculation
+                    current = float(last_month_consumption)
+                    previous = float(previous_consumption)
+                    
+                    if previous != 0:
+                        # Use abs(previous) in denominator to handle potential negative values correctly
+                        trend_pct = ((current - previous) / abs(previous)) * 100
+                    elif current > 0:  # If previous is 0 and current is positive, trend is infinite positive
+                        trend_pct = float('inf')
+                    else:  # If previous is 0 and current is 0 or negative, trend is 0
                         trend_pct = 0
                 except (ValueError, TypeError) as e:
-                    print(f"Error al calcular tendencia: {str(e)}")
-                    trend_pct = 0
+                    print(f"Error calculating trend percentage: {str(e)}")
+                    trend_pct = 0  # Default to 0 on error
                 
                 trend_period = f"vs. {previous_month}"
             
-            # Determinar clase CSS para la tendencia
-            # En consumo, una tendencia negativa (reducción) es buena
-            trend_class = "h3 text-success" if trend_pct < 0 else "h3 text-danger" if trend_pct > 0 else "h3"
+            # Determinar clase CSS para la tendencia (handle potential infinite trend)
+            if trend_pct == float('inf'):
+                trend_class = "h3 text-danger"  # Infinite increase is bad in consumption
+                trend_formatted = "+∞%"
+            elif trend_pct < 0:
+                trend_class = "h3 text-success"  # Negative trend (reduction) is good
+                trend_formatted = f"{trend_pct:.1f}%"
+            elif trend_pct > 0:
+                trend_class = "h3 text-danger"  # Positive trend is bad
+                trend_formatted = f"+{trend_pct:.1f}%"
+            else:
+                trend_class = "h3"  # No change
+                trend_formatted = "0.0%"
             
             # Formatear valores para mostrar
             total_period_formatted = f"{total_period_consumption:.2f}"
             monthly_average_formatted = f"{monthly_average:.2f}"
-            trend_formatted = f"{trend_pct:.1f}%"
             last_month_formatted = f"{last_month_consumption:.2f}"
             max_month_formatted = f"{max_month_consumption:.2f}"
             min_month_formatted = f"{min_month_consumption:.2f}"
@@ -192,7 +224,7 @@ def register_metrics_callbacks(app):
             print(f"[ERROR METRICS] update_metrics: {str(e)}")
             import traceback
             print(traceback.format_exc())
-            return "0", "", "0", "", "0%", "", "h3", "0", "Sin datos", "", "0", "Sin datos", "", "0", "Sin datos", ""
+            return default_return
     
     @app.callback(
         Output("metrics-filter-indicator", "children"),
@@ -332,25 +364,55 @@ def register_metrics_callbacks(app):
                 months_processed = result.get('months_processed', [])
                 months_display = ", ".join(months_processed) if months_processed else "Ninguno"
                 
-                return html.Div([
-                    html.P(result.get("message", "Lecturas actualizadas con éxito"), className="text-success"),
-                    html.P(f"Total de tareas: {result.get('total_tasks', 0)}", className="text-info"),
-                    html.P(f"Tareas procesadas con éxito: {result.get('success_count', 0)}", className="text-info"),
-                    html.P(f"Tareas con errores: {result.get('error_count', 0)}", className="text-info"),
-                    html.P(f"Meses procesados: {months_display}", className="text-info"),
-                    html.Button("Actualizar datos", id="refresh-data-btn", className="btn btn-primary mt-2")
-                ])
+                return dbc.Card([
+                    dbc.CardHeader(html.H5([html.I(className="fas fa-check-circle me-2 text-success"), "Lecturas actualizadas con éxito"])),
+                    dbc.CardBody([
+                        html.P(result.get("message", "Lecturas actualizadas con éxito"), className="lead"),
+                        dbc.Row([
+                            dbc.Col([
+                                html.Strong("Total de tareas:"),
+                                html.Span(f" {result.get('total_tasks', 0)}", className="ms-2")
+                            ], width=6),
+                            dbc.Col([
+                                html.Strong("Tareas exitosas:"),
+                                html.Span(f" {result.get('success_count', 0)}", className="ms-2 text-success")
+                            ], width=6)
+                        ], className="mb-2"),
+                        dbc.Row([
+                            dbc.Col([
+                                html.Strong("Tareas con errores:"),
+                                html.Span(f" {result.get('error_count', 0)}", className="ms-2 text-danger")
+                            ], width=6),
+                            dbc.Col([
+                                html.Strong("Meses procesados:"),
+                                html.Span(f" {months_display}", className="ms-2")
+                            ], width=6)
+                        ], className="mb-3"),
+                        dbc.Button([
+                            html.I(className="fas fa-sync-alt me-2"),
+                            "Actualizar visualización"
+                        ], id="refresh-data-btn", color="primary", className="mt-2")
+                    ])
+                ], className="mb-4 shadow-sm border-success")
             else:
-                return html.Div([
-                    html.P(f"Error: {result.get('message', 'Error desconocido al actualizar lecturas')}", className="text-danger")
-                ])
+                return dbc.Card([
+                    dbc.CardHeader(html.H5([html.I(className="fas fa-exclamation-circle me-2 text-danger"), "Error al actualizar lecturas"])),
+                    dbc.CardBody([
+                        html.P(result.get("message", "Error desconocido al actualizar lecturas"), className="lead text-danger"),
+                        html.P("Por favor, verifique los parámetros e intente nuevamente.")
+                    ])
+                ], className="mb-4 shadow-sm border-danger")
         except Exception as e:
             print(f"[ERROR] Error al actualizar lecturas: {str(e)}")
             import traceback
             print(traceback.format_exc())
-            return html.Div([
-                html.P(f"Error: {str(e)}", className="text-danger")
-            ])
+            return dbc.Card([
+                dbc.CardHeader(html.H5([html.I(className="fas fa-exclamation-triangle me-2 text-danger"), "Error inesperado"])),
+                dbc.CardBody([
+                    html.P(f"Error: {str(e)}", className="lead text-danger"),
+                    html.P("Por favor, contacte al administrador del sistema.")
+                ])
+            ], className="mb-4 shadow-sm border-danger")
     
     @app.callback(
         Output("metrics-data-store", "data", allow_duplicate=True),

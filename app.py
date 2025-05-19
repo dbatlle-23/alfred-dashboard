@@ -100,6 +100,14 @@ from layouts.spaces import register_callbacks as register_spaces_callbacks
 from layouts.api_test import register_callbacks as register_api_test_callbacks
 # Importar callbacks para configuración de anomalías
 from layouts.anomaly_config import register_callbacks as register_anomaly_config_callbacks
+# Importar callbacks para la página de inicio
+from layouts.home import register_callbacks as register_home_callbacks
+# Importar callbacks para análisis de consumo de agua
+from layouts.water_consumption import register_callbacks as register_water_consumption_callbacks
+# Importar callbacks para análisis de huella de carbono
+from layouts.carbon_footprint import register_callbacks as register_carbon_footprint_callbacks
+# Importar callbacks para gestión de cerraduras inteligentes
+from layouts.smart_locks import register_callbacks as register_smart_locks_callbacks
 
 try:
     logger.info("Registrando callbacks de autenticación")
@@ -120,6 +128,22 @@ try:
     
     # Registrar callbacks para configuración de anomalías
     register_anomaly_config_callbacks(app)
+    
+    # Registrar callbacks para la página de inicio
+    logger.info("Registrando callbacks de la página de inicio")
+    register_home_callbacks(app)
+    
+    # Registrar callbacks para análisis de consumo de agua
+    logger.info("Registrando callbacks para análisis de consumo de agua")
+    register_water_consumption_callbacks(app)
+    
+    # Registrar callbacks para análisis de huella de carbono
+    logger.info("Registrando callbacks para análisis de huella de carbono")
+    register_carbon_footprint_callbacks(app)
+    
+    # Registrar callbacks para gestión de cerraduras inteligentes
+    logger.info("Registrando callbacks para gestión de cerraduras inteligentes")
+    register_smart_locks_callbacks(app)
     
     # Proteger callbacks
     protect_callbacks(app)
@@ -147,6 +171,12 @@ def display_page(pathname, token_data):
     from layouts.api_test import layout as api_test_layout
     # Importar layout para configuración de anomalías
     from layouts.anomaly_config import layout as anomaly_config_layout
+    # Importar layout para análisis de consumo de agua
+    from layouts.water_consumption import layout as water_consumption_layout
+    # Importar layout para análisis de huella de carbono
+    from layouts.carbon_footprint import layout as carbon_footprint_layout
+    # Importar layout para gestión de cerraduras inteligentes
+    from layouts.smart_locks import layout as smart_locks_layout
     
     logger.info(f"Navegando a la ruta: {pathname}")
     
@@ -189,6 +219,14 @@ def display_page(pathname, token_data):
         elif pathname == "/anomaly-config":
             logger.info("Cargando layout de configuración de anomalías")
             content = anomaly_config_layout
+        elif pathname == "/water-consumption":
+            logger.info("Cargando layout de análisis de consumo de agua")
+            content = water_consumption_layout
+        elif pathname == "/carbon-footprint":
+            logger.info("Cargando layout de análisis de huella de carbono")
+            content = carbon_footprint_layout
+        elif pathname == "/smart-locks":
+            content = smart_locks_layout
         else:
             content = home_layout
         
@@ -242,13 +280,14 @@ if __name__ == "__main__":
         debug = os.getenv('DASH_DEBUG', 'false').lower() == 'true' or args.debug
         
         # Información adicional de inicio
-        logger.info(f"Configuración: host={host}, port={port}, debug={debug}")
-        logger.info(f"Python version: {sys.version}")
-        logger.info(f"Dash version: {dash.__version__}")
+        logger.info(f"Ejecutando en: http://{host if host != '0.0.0.0' else 'localhost'}:{port}")
+        logger.info(f"Modo debug: {'activado' if debug else 'desactivado'}")
         
-        # Iniciar el servidor
+        # Iniciar servidor
         app.run_server(host=host, port=port, debug=debug)
+        
     except Exception as e:
         logger.critical(f"Error fatal al iniciar la aplicación: {str(e)}")
-        logger.critical(traceback.format_exc())
+        logger.exception("Detalles del error:")
+        # En caso de error fatal, salir con código de error
         sys.exit(1)

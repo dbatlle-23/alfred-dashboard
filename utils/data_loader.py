@@ -6,6 +6,8 @@ from typing import Dict, List, Optional, Tuple, Union
 import logging
 import numpy as np
 from datetime import datetime, timedelta
+import time
+from functools import lru_cache
 
 # Configurar logging
 logger = logging.getLogger(__name__)
@@ -13,6 +15,11 @@ logger = logging.getLogger(__name__)
 # Variable global para almacenar el estado de debug
 _DEBUG_MODE = None
 _DEBUG_CHECKED = False
+
+# Global cache dictionary and timestamp for in-memory caching
+_CSV_DATA_CACHE = {}
+_CACHE_TIMESTAMP = {}
+_CACHE_EXPIRY = 60 * 5  # Cache expiry in seconds (5 minutes)
 
 # Función para verificar si estamos en modo debug
 def is_debug_mode():
@@ -492,6 +499,24 @@ def load_csv_data(file_path: str) -> Optional[pd.DataFrame]:
         print(f"Error al cargar el archivo {file_path}: {str(e)}")
         return None
 
+# Create a helper function for caching with a custom key
+def get_cache_key(base_path, consumption_tags, project_id):
+    """
+    Generate a cache key based on function parameters.
+    
+    Args:
+        base_path: Base path for CSV files
+        consumption_tags: List of consumption tags to filter by
+        project_id: Project ID to filter by
+        
+    Returns:
+        String cache key
+    """
+    # Sort consumption tags to ensure consistent keys
+    tag_str = ",".join(sorted(consumption_tags)) if consumption_tags else "None"
+    proj_str = project_id if project_id else "None"
+    return f"{base_path}|{tag_str}|{proj_str}"
+    
 def load_all_csv_data(base_path: str = "data/analyzed_data", minimal: bool = False, consumption_tags: Optional[List[str]] = None, project_id: Optional[str] = None, jwt_token: Optional[str] = None) -> pd.DataFrame:
     """
     Carga todos los archivos CSV de consumo en un único DataFrame.
@@ -506,6 +531,23 @@ def load_all_csv_data(base_path: str = "data/analyzed_data", minimal: bool = Fal
     Returns:
         DataFrame combinado con todos los datos
     """
+    # Skip caching for minimal=True since it's used for structure only
+    if not minimal:
+        # Generate a cache key based on the function parameters
+        cache_key = get_cache_key(base_path, consumption_tags, project_id)
+        
+        # Check if we have a valid cache entry
+        current_time = time.time()
+        if cache_key in _CSV_DATA_CACHE and cache_key in _CACHE_TIMESTAMP:
+            # Check if the cache is still valid (not expired)
+            if current_time - _CACHE_TIMESTAMP[cache_key] < _CACHE_EXPIRY:
+                debug_log(f"[INFO] load_all_csv_data - Using cached data for key: {cache_key}")
+                print(f"[INFO METRICS] load_all_csv_data - Using cached data (saved {_CACHE_EXPIRY} seconds ago)")
+                return _CSV_DATA_CACHE[cache_key].copy()
+            else:
+                debug_log(f"[INFO] load_all_csv_data - Cache expired for key: {cache_key}")
+                print(f"[INFO METRICS] load_all_csv_data - Cache expired, reloading data")
+    
     # Log detallado para verificar el valor exacto de project_id
     debug_log(f"[DEBUG CRÍTICO] load_all_csv_data - Valor exacto de project_id recibido: '{project_id}', tipo: {type(project_id)}")
     
@@ -515,55 +557,39 @@ def load_all_csv_data(base_path: str = "data/analyzed_data", minimal: bool = Fal
     if consumption_tags:
         debug_log(f"[DEBUG DETALLADO] load_all_csv_data - Filtrando archivos por tags de consumo: {consumption_tags}")
     
-    # Si hay project_id, obtener los assets del proyecto desde la API
-    project_assets = []
-    if project_id and project_id != "all":
-        try:
-            from utils.api import get_project_assets
-            debug_log(f"[DEBUG DETALLADO] load_all_csv_data - Obteniendo assets para el proyecto {project_id} desde la API")
-            project_assets = get_project_assets(project_id, jwt_token)
-            if project_assets:
-                project_asset_ids = [asset.get('id') for asset in project_assets]
-                debug_log(f"[DEBUG DETALLADO] load_all_csv_data - Se obtuvieron {len(project_asset_ids)} assets para el proyecto {project_id}: {project_asset_ids}")
-            else:
-                debug_log(f"[DEBUG DETALLADO] load_all_csv_data - No se encontraron assets para el proyecto {project_id} en la API")
-        except Exception as e:
-            debug_log(f"[DEBUG DETALLADO] load_all_csv_data - Error al obtener assets del proyecto {project_id}: {str(e)}")
+    # REMOVED API CALL: No longer fetch project assets from API
+    # Instead, we'll rely solely on local filesystem operations
     
     # Buscar todos los directorios de proyecto
     project_dirs = [d for d in glob.glob(os.path.join(base_path, "*")) if os.path.isdir(d)]
     debug_log(f"[DEBUG CRÍTICO] load_all_csv_data - Directorios de proyecto encontrados: {project_dirs}")
-    debug_log(f"[DEBUG DETALLADO] load_all_csv_data - Encontrados {len(project_dirs)} directorios de proyecto")
+    
+    # Log the number of directories found instead of detailed logging for each
+    print(f"[INFO METRICS] load_all_csv_data - Encontrados {len(project_dirs)} directorios de proyecto")
     
     # Filtrar directorios de proyecto si se especificó un project_id
     if project_id and project_id != "all":
         # Log para verificar la condición de filtrado
-        debug_log(f"[DEBUG CRÍTICO] load_all_csv_data - Aplicando filtro de project_id: '{project_id}'")
-        
-        # Mostrar los nombres de los directorios para comparar con project_id
-        dir_basenames = [os.path.basename(d) for d in project_dirs]
-        debug_log(f"[DEBUG CRÍTICO] load_all_csv_data - Nombres de directorios para comparar: {dir_basenames}")
+        print(f"[INFO METRICS] load_all_csv_data - Filtrando por proyecto {project_id}")
         
         # Aplicar el filtro
         filtered_dirs = [d for d in project_dirs if os.path.basename(d) == project_id]
-        debug_log(f"[DEBUG CRÍTICO] load_all_csv_data - Directorios después del filtro: {filtered_dirs}")
         
         project_dirs = filtered_dirs
-        debug_log(f"[DEBUG DETALLADO] load_all_csv_data - Filtrando por proyecto {project_id}, quedan {len(project_dirs)} directorios")
+        print(f"[INFO METRICS] load_all_csv_data - Después del filtro quedan {len(project_dirs)} directorios")
     
     # Si no hay directorios de proyecto, buscar archivos CSV directamente en base_path
     if not project_dirs:
-        debug_log(f"[DEBUG DETALLADO] load_all_csv_data - No se encontraron directorios de proyecto, buscando archivos CSV en {base_path}")
+        print(f"[INFO METRICS] load_all_csv_data - No se encontraron directorios de proyecto, buscando archivos CSV en {base_path}")
         csv_files = glob.glob(os.path.join(base_path, "daily_readings_*.csv"))
-        debug_log(f"[DEBUG DETALLADO] load_all_csv_data - Encontrados {len(csv_files)} archivos CSV en {base_path}")
+        print(f"[INFO METRICS] load_all_csv_data - Encontrados {len(csv_files)} archivos CSV en {base_path}")
+        
+        # Process each CSV file found in the base path
         for file_path in csv_files:
             # Extraer asset_id y tag para filtrar
             asset_id, tag = extract_asset_and_tag(file_path)
             
-            # Filtrar por assets del proyecto si están disponibles
-            if project_assets and asset_id not in [a.get('id') for a in project_assets]:
-                debug_log(f"[DEBUG DETALLADO] load_all_csv_data - Omitiendo archivo {file_path} porque el asset {asset_id} no pertenece al proyecto {project_id}")
-                continue
+            # No filtering by project assets from API - use file structure instead
             
             # Verificar si el archivo corresponde a los tags de consumo seleccionados
             if consumption_tags and not minimal:
@@ -589,7 +615,7 @@ def load_all_csv_data(base_path: str = "data/analyzed_data", minimal: bool = Fal
         # Buscar archivos CSV en cada directorio de proyecto
         for project_dir in project_dirs:
             current_project_id = os.path.basename(project_dir)
-            debug_log(f"[DEBUG DETALLADO] load_all_csv_data - Buscando archivos CSV en directorio de proyecto: {project_dir} (ID: {current_project_id})")
+            print(f"[INFO METRICS] load_all_csv_data - Buscando archivos CSV en directorio: {current_project_id}")
             
             # Si estamos filtrando por un proyecto específico y este no coincide, omitirlo
             if project_id and project_id != "all" and current_project_id != project_id:
@@ -597,7 +623,7 @@ def load_all_csv_data(base_path: str = "data/analyzed_data", minimal: bool = Fal
                 continue
                 
             csv_files = glob.glob(os.path.join(project_dir, "daily_readings_*.csv"))
-            debug_log(f"[DEBUG DETALLADO] load_all_csv_data - Encontrados {len(csv_files)} archivos CSV en {project_dir}")
+            print(f"[INFO METRICS] load_all_csv_data - Encontrados {len(csv_files)} archivos CSV en {project_dir}")
             
             # Si es modo minimal, solo cargar un archivo por proyecto
             if minimal and csv_files:
@@ -615,10 +641,7 @@ def load_all_csv_data(base_path: str = "data/analyzed_data", minimal: bool = Fal
                     # Extraer asset_id y tag para filtrar
                     asset_id, tag = extract_asset_and_tag(file_path)
                     
-                    # Filtrar por assets del proyecto si están disponibles
-                    if project_assets and asset_id not in [a.get('id') for a in project_assets]:
-                        debug_log(f"[DEBUG DETALLADO] load_all_csv_data - Omitiendo archivo {file_path} porque el asset {asset_id} no pertenece al proyecto {project_id}")
-                        continue
+                    # No filtering by project assets from API - use file structure instead
                     
                     # Verificar si el archivo corresponde a los tags de consumo seleccionados
                     if consumption_tags:
@@ -630,13 +653,25 @@ def load_all_csv_data(base_path: str = "data/analyzed_data", minimal: bool = Fal
                     
                     df = load_csv_data(file_path)
                     if df is not None:
+                        # Ensure the DataFrame has project_id
+                        if 'project_id' not in df.columns:
+                            df['project_id'] = current_project_id
                         all_data.append(df)
     
     # Combinar todos los DataFrames
     if all_data:
-        debug_log(f"[DEBUG DETALLADO] load_all_csv_data - Combinando {len(all_data)} DataFrames")
+        print(f"[INFO METRICS] load_all_csv_data - Combinando {len(all_data)} DataFrames")
         combined_df = pd.concat(all_data, ignore_index=True)
-        debug_log(f"[DEBUG DETALLADO] load_all_csv_data - DataFrame combinado tiene {len(combined_df)} filas")
+        print(f"[INFO METRICS] load_all_csv_data - DataFrame combinado tiene {len(combined_df)} filas")
+        
+        # Store the result in cache if not in minimal mode
+        if not minimal:
+            cache_key = get_cache_key(base_path, consumption_tags, project_id)
+            _CSV_DATA_CACHE[cache_key] = combined_df.copy()
+            _CACHE_TIMESTAMP[cache_key] = time.time()
+            debug_log(f"[INFO] load_all_csv_data - Data cached with key: {cache_key}")
+            print(f"[INFO METRICS] load_all_csv_data - Data cached successfully ({len(combined_df)} rows)")
+            
         return combined_df
     else:
         debug_log("[DEBUG DETALLADO] load_all_csv_data - No se encontraron datos válidos en los archivos CSV")
@@ -827,105 +862,109 @@ def filter_data(df: pd.DataFrame,
                 start_date: Optional[str] = None,
                 end_date: Optional[str] = None) -> pd.DataFrame:
     """
-    Filtra los datos según los criterios especificados.
+    Filter DataFrame based on specified criteria.
     
     Args:
-        df: DataFrame con los datos combinados
-        client_id: ID del cliente para filtrar (opcional)
-        project_id: ID del proyecto para filtrar (opcional)
-        asset_id: ID del asset para filtrar (opcional)
-        consumption_type: Tipo de consumo para filtrar (opcional, deprecated). Puede ser un string o una lista de strings.
-        consumption_tags: Lista de tags de consumo para filtrar (opcional)
-        start_date: Fecha de inicio para filtrar (opcional)
-        end_date: Fecha de fin para filtrar (opcional)
+        df: DataFrame to filter
+        client_id: Client ID to filter by
+        project_id: Project ID to filter by
+        asset_id: Asset ID to filter by
+        consumption_type: Consumption type to filter by (deprecated - use consumption_tags)
+        consumption_tags: List of consumption tags to filter by
+        start_date: Start date for filtering (inclusive)
+        end_date: End date for filtering (inclusive)
         
     Returns:
-        DataFrame filtrado
+        Filtered DataFrame
     """
     if df.empty:
-        debug_log("[DEBUG DETALLADO] filter_data - DataFrame vacío, no hay datos para filtrar")
         return df
     
-    debug_log(f"[DEBUG DETALLADO] filter_data - Iniciando filtrado con parámetros: client_id={client_id}, project_id={project_id}, asset_id={asset_id}, consumption_type={consumption_type}, consumption_tags={consumption_tags}, start_date={start_date}, end_date={end_date}")
-    debug_log(f"[DEBUG DETALLADO] filter_data - DataFrame original tiene {len(df)} filas")
-    
+    # Create a copy to avoid modifying the original
     filtered_df = df.copy()
     
-    # Filtrar por client_id
-    if client_id and client_id != "all":
-        debug_log(f"[DEBUG DETALLADO] filter_data - Filtrando por client_id: {client_id}")
-        # Si el DataFrame tiene una columna client_id, filtrar directamente
-        if 'client_id' in filtered_df.columns:
-            filtered_df = filtered_df[filtered_df['client_id'] == client_id]
-            debug_log(f"[DEBUG DETALLADO] filter_data - Después de filtrar por client_id, quedan {len(filtered_df)} filas")
-        else:
-            # Si no tiene client_id y tenemos un project_id específico, no filtrar por client_id
-            # ya que los datos ya fueron cargados desde los archivos CSV del proyecto
-            if project_id and project_id != "all":
-                debug_log(f"[DEBUG DETALLADO] filter_data - No se filtra por client_id porque ya tenemos un project_id específico: {project_id}")
-            else:
-                # Si no tenemos un project_id específico, intentar obtener los proyectos del cliente
-                try:
-                    from utils.api import get_projects
-                    projects = get_projects(client_id=client_id)
-                    if projects:
-                        project_ids = [p['id'] for p in projects]
-                        debug_log(f"[DEBUG DETALLADO] filter_data - Obtenidos {len(project_ids)} proyectos para el cliente {client_id}: {project_ids}")
-                        filtered_df = filtered_df[filtered_df['project_id'].isin(project_ids)]
-                        debug_log(f"[DEBUG DETALLADO] filter_data - Después de filtrar por proyectos del cliente, quedan {len(filtered_df)} filas")
-                    else:
-                        debug_log(f"[DEBUG DETALLADO] filter_data - No se encontraron proyectos para el cliente {client_id}")
-                except Exception as e:
-                    debug_log(f"[DEBUG DETALLADO] filter_data - Error al filtrar por client_id: {str(e)}")
+    # Track the original row count
+    start_count = len(filtered_df)
     
-    # Filtrar por project_id
+    # Ensure required columns exist
+    for col in ['client_id', 'project_id', 'asset_id', 'date']:
+        if col not in filtered_df.columns:
+            if col == 'client_id' and client_id:
+                filtered_df['client_id'] = client_id
+            elif col == 'project_id' and project_id:
+                filtered_df['project_id'] = project_id
+            elif col == 'asset_id':
+                filtered_df['asset_id'] = 'unknown'
+            elif col == 'date':
+                # Try to create date from timestamp if available
+                if 'timestamp' in filtered_df.columns:
+                    try:
+                        filtered_df['date'] = pd.to_datetime(filtered_df['timestamp'], unit='s')
+                    except:
+                        # If conversion fails, create a default date
+                        filtered_df['date'] = pd.Timestamp.now()
+                else:
+                    filtered_df['date'] = pd.Timestamp.now()
+    
+    # Apply client filter if specified
+    if client_id:
+        filtered_df = filtered_df[filtered_df['client_id'] == client_id]
+    
+    # Apply project filter if specified and not "all"
     if project_id and project_id != "all":
-        debug_log(f"[DEBUG DETALLADO] filter_data - Filtrando por project_id: {project_id}")
         filtered_df = filtered_df[filtered_df['project_id'] == project_id]
-        debug_log(f"[DEBUG DETALLADO] filter_data - Después de filtrar por project_id, quedan {len(filtered_df)} filas")
     
-    # Filtrar por asset_id
+    # Apply asset filter if specified and not "all"
     if asset_id and asset_id != "all":
-        debug_log(f"[DEBUG DETALLADO] filter_data - Filtrando por asset_id: {asset_id}")
         filtered_df = filtered_df[filtered_df['asset_id'] == asset_id]
-        debug_log(f"[DEBUG DETALLADO] filter_data - Después de filtrar por asset_id, quedan {len(filtered_df)} filas")
     
-    # Filtrar por consumption_tags (nueva implementación)
-    if consumption_tags and isinstance(consumption_tags, list) and len(consumption_tags) > 0:
-        debug_log(f"[DEBUG DETALLADO] filter_data - Filtrando por consumption_tags: {consumption_tags}")
-        # Mapear los tags a tipos de consumo legibles
-        consumption_types = [TAGS_TO_CONSUMPTION_TYPE.get(tag, tag) for tag in consumption_tags]
-        debug_log(f"[DEBUG DETALLADO] filter_data - Tipos de consumo mapeados: {consumption_types}")
-        # Filtrar por los tipos de consumo mapeados
-        filtered_df = filtered_df[filtered_df['consumption_type'].isin(consumption_types)]
-        debug_log(f"[DEBUG DETALLADO] filter_data - Después de filtrar por consumption_tags, quedan {len(filtered_df)} filas")
-        # Mostrar los tipos de consumo únicos en el DataFrame filtrado
-        unique_consumption_types = filtered_df['consumption_type'].unique()
-        debug_log(f"[DEBUG DETALLADO] filter_data - Tipos de consumo únicos en el DataFrame filtrado: {unique_consumption_types}")
-    # Mantener compatibilidad con el parámetro consumption_type (deprecated)
-    elif consumption_type and consumption_type != "all":
-        debug_log(f"[DEBUG DETALLADO] filter_data - Filtrando por consumption_type (deprecated): {consumption_type}")
-        # Verificar si consumption_type es una lista o un string
-        if isinstance(consumption_type, list):
-            # Si es una lista, usar isin para filtrar
-            filtered_df = filtered_df[filtered_df['consumption_type'].isin(consumption_type)]
+    # Legacy consumption_type parameter support
+    if consumption_type and not consumption_tags:
+        if isinstance(consumption_type, str):
+            consumption_tags = [consumption_type]
         else:
-            # Si es un string, usar == para filtrar
-            filtered_df = filtered_df[filtered_df['consumption_type'] == consumption_type]
-        debug_log(f"[DEBUG DETALLADO] filter_data - Después de filtrar por consumption_type, quedan {len(filtered_df)} filas")
+            consumption_tags = consumption_type
     
-    # Filtrar por rango de fechas
+    # Apply consumption tags filter
+    if consumption_tags:
+        # Create masks for both consumption_type and tag columns
+        type_mask = pd.Series(False, index=filtered_df.index)
+        
+        # Check consumption_type column
+        if 'consumption_type' in filtered_df.columns:
+            for tag in consumption_tags:
+                type_mask |= filtered_df['consumption_type'] == tag
+        
+        # Check tag column
+        if 'tag' in filtered_df.columns and not type_mask.any():
+            for tag in consumption_tags:
+                type_mask |= filtered_df['tag'] == tag
+        
+        # Apply the filter if there are matches
+        if type_mask.any():
+            filtered_df = filtered_df[type_mask]
+    
+    # Convert date strings to datetime if needed
+    if start_date or end_date:
+        # Ensure date column is datetime
+        if not pd.api.types.is_datetime64_any_dtype(filtered_df['date']):
+            filtered_df['date'] = pd.to_datetime(filtered_df['date'], errors='coerce')
+            # Drop rows with invalid dates
+            filtered_df = filtered_df.dropna(subset=['date'])
+    
+    # Apply date filters
     if start_date:
-        debug_log(f"[DEBUG DETALLADO] filter_data - Filtrando por fecha de inicio: {start_date}")
-        filtered_df = filtered_df[filtered_df['date'] >= pd.to_datetime(start_date)]
-        debug_log(f"[DEBUG DETALLADO] filter_data - Después de filtrar por fecha de inicio, quedan {len(filtered_df)} filas")
+        start_date = pd.to_datetime(start_date)
+        filtered_df = filtered_df[filtered_df['date'] >= start_date]
     
     if end_date:
-        debug_log(f"[DEBUG DETALLADO] filter_data - Filtrando por fecha de fin: {end_date}")
-        filtered_df = filtered_df[filtered_df['date'] <= pd.to_datetime(end_date)]
-        debug_log(f"[DEBUG DETALLADO] filter_data - Después de filtrar por fecha de fin, quedan {len(filtered_df)} filas")
+        end_date = pd.to_datetime(end_date)
+        filtered_df = filtered_df[filtered_df['date'] <= end_date]
     
-    debug_log(f"[DEBUG DETALLADO] filter_data - Filtrado completado, DataFrame resultante tiene {len(filtered_df)} filas")
+    # Log the result
+    end_count = len(filtered_df)
+    print(f"[INFO] filter_data - Filtered from {start_count} to {end_count} rows")
+    
     return filtered_df
 
 def aggregate_data_by_project(df: pd.DataFrame, consumption_type: Optional[str] = None) -> pd.DataFrame:
@@ -1347,4 +1386,37 @@ def load_asset_detail_data(project_id, asset_id, consumption_tags, month, jwt_to
         debug_log(f"[ERROR] load_asset_detail_data - Error cargando datos: {str(e)}")
         import traceback
         debug_log(f"[ERROR] load_asset_detail_data - Traceback: {traceback.format_exc()}")
-        return None 
+        return None
+
+# Add a new function to manually clear the cache when needed
+def clear_data_cache():
+    """
+    Clear the CSV data cache.
+    """
+    global _CSV_DATA_CACHE, _CACHE_TIMESTAMP
+    _CSV_DATA_CACHE = {}
+    _CACHE_TIMESTAMP = {}
+    print("[INFO METRICS] clear_data_cache - Data cache cleared")
+    return True
+
+def clear_all_caches():
+    """Clear all data caches in the system."""
+    # Clear the CSV data cache
+    clear_data_cache()
+    
+    # Clear the processed data cache
+    try:
+        from utils.metrics.data_processing import clear_processed_data_cache
+        clear_processed_data_cache()
+    except ImportError:
+        print("[WARN] clear_all_caches - Could not import clear_processed_data_cache function")
+    
+    # Clear any visualization caches
+    try:
+        import plotly.io as pio
+        pio.templates.default = "plotly"  # Reset default template
+    except ImportError:
+        print("[WARN] clear_all_caches - Could not reset plotly templates")
+    
+    print("[INFO] clear_all_caches - All caches cleared successfully")
+    return True 

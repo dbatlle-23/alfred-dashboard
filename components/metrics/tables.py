@@ -556,13 +556,29 @@ def create_daily_readings_table(df, title="Lecturas Diarias"):
             html.P("No hay datos disponibles", className="text-muted")
         ])
     
-    # Format date column
+    # Create a copy to avoid modifying the original
+    df = df.copy()
+    
+    # Format date column - checking for both English and Spanish column names
     if 'date' in df.columns:
-        df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
+        # Handle if the column is already a datetime
+        try:
+            df['date'] = pd.to_datetime(df['date']).dt.strftime('%d/%m/%Y')
+        except:
+            # If already a string, ensure consistent format
+            pass
+    elif 'Fecha' in df.columns:
+        # Check if the Fecha column is already formatted
+        if not isinstance(df['Fecha'].iloc[0], str):
+            try:
+                df['Fecha'] = pd.to_datetime(df['Fecha']).dt.strftime('%d/%m/%Y')
+            except Exception as e:
+                # If conversion fails, keep original values
+                print(f"Error al formatear fechas: {str(e)}")
     
     # Format numeric columns
     for col in df.columns:
-        if col not in ['date', 'asset_id', 'consumption_type']:
+        if col not in ['date', 'Fecha', 'asset_id', 'consumption_type', 'Anomalía']:
             try:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
                 df[col] = df[col].map('{:.2f}'.format)

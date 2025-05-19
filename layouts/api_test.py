@@ -1,4 +1,4 @@
-from dash import html, dcc
+from dash import html, dcc, dash_table
 import dash_bootstrap_components as dbc
 from dash import Input, Output, State, no_update
 import dash
@@ -9,7 +9,6 @@ from utils.auth import AuthService, API_BASE_URL, auth_service
 import time
 from datetime import datetime
 import traceback
-import dash_table
 import pandas as pd
 from utils import api
 

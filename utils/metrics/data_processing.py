@@ -4,173 +4,94 @@ from config.metrics_config import DATA_PROCESSING
 from constants.metrics import CONSUMPTION_TAGS_MAPPING
 from utils.adapters.anomaly_adapter import AnomalyAdapter
 from utils.logging import get_logger
+import time
+from functools import lru_cache
 
 logger = get_logger(__name__)
 
-def process_metrics_data(df, client_id=None, project_id=None, asset_id=None, 
-                       consumption_tags=None, start_date=None, end_date=None):
+# Add a cache for processed data
+_PROCESSED_DATA_CACHE = {}
+
+def process_metrics_data(df, 
+                        client_id=None, 
+                        project_id=None, 
+                        asset_id=None, 
+                        consumption_tags=None, 
+                        start_date=None, 
+                        end_date=None,
+                        use_cache=True):
     """
-    Process and filter metrics data based on given parameters.
+    Process metrics data by applying filters and returning the filtered DataFrame.
     
     Args:
-        df (pd.DataFrame): Input DataFrame
-        client_id (str, optional): Client ID to filter by
-        project_id (str, optional): Project ID to filter by
-        asset_id (str, optional): Asset ID to filter by
-        consumption_tags (list, optional): List of consumption tags to filter by
-        start_date (str, optional): Start date for filtering
-        end_date (str, optional): End date for filtering
+        df: DataFrame with consumption data
+        client_id: ID of the client to filter by
+        project_id: ID of the project to filter by
+        asset_id: ID of the asset to filter by
+        consumption_tags: List of consumption tags to filter by
+        start_date: Start date for filtering
+        end_date: End date for filtering
+        use_cache: Whether to use the cache for this process
         
     Returns:
-        pd.DataFrame: Processed and filtered DataFrame
+        Filtered DataFrame
     """
-    print("=====================================================")
-    print("DEBUGGING PROCESS METRICS DATA - FUNCTION CALLED")
-    print("=====================================================")
-    print(f"[DEBUG] process_metrics_data - Input DataFrame shape: {df.shape if df is not None else 'None'}")
-    print(f"[DEBUG] process_metrics_data - Input DataFrame columns: {df.columns.tolist() if df is not None and not df.empty else 'None'}")
-    print(f"[DEBUG] process_metrics_data - client_id: {client_id}")
-    print(f"[DEBUG] process_metrics_data - project_id: {project_id}")
-    print(f"[DEBUG] process_metrics_data - asset_id: {asset_id}")
-    print(f"[DEBUG] process_metrics_data - consumption_tags: {consumption_tags}")
-    print(f"[DEBUG] process_metrics_data - start_date: {start_date}")
-    print(f"[DEBUG] process_metrics_data - end_date: {end_date}")
+    if df.empty:
+        print("[INFO] process_metrics_data - Empty DataFrame provided")
+        return df
     
-    if df is None or df.empty:
-        print(f"[DEBUG] process_metrics_data - DataFrame is empty or None")
-        return pd.DataFrame()
-
+    # Generate a cache key if caching is enabled
+    if use_cache:
+        # Generate a simple cache key based on filter parameters
+        cache_key = f"{client_id}|{project_id}|{asset_id}|{'-'.join(sorted(consumption_tags)) if consumption_tags else 'None'}|{start_date}|{end_date}"
+        
+        # Check if we have this query result cached
+        if cache_key in _PROCESSED_DATA_CACHE:
+            print(f"[INFO] process_metrics_data - Using cached result for filters")
+            return _PROCESSED_DATA_CACHE[cache_key].copy()
+    
+    # Measure processing time
+    start_time = time.time()
+    
     # Make a copy to avoid modifying the original
-    processed_df = df.copy()
-
-    # Verificar si existe la columna 'date' antes de procesarla
-    if 'date' not in processed_df.columns:
-        print(f"[ERROR] process_metrics_data - La columna 'date' no existe en el DataFrame. Columnas disponibles: {processed_df.columns.tolist()}")
-        
-        # Verificar si podemos crear la columna 'date' a partir de otras columnas
-        if 'timestamp' in processed_df.columns:
-            print(f"[INFO] process_metrics_data - Intentando crear columna 'date' a partir de 'timestamp'")
-            try:
-                processed_df['date'] = pd.to_datetime(processed_df['timestamp'], unit='s')
-                print(f"[INFO] process_metrics_data - Columna 'date' creada correctamente a partir de 'timestamp'")
-            except Exception as e:
-                print(f"[ERROR] process_metrics_data - No se pudo crear columna 'date' a partir de 'timestamp': {str(e)}")
-                import traceback
-                print(traceback.format_exc())
-                # Devolver DataFrame vacío para evitar errores posteriores
-                return pd.DataFrame()
-        else:
-            # Si no podemos crear la columna 'date', devolver DataFrame vacío para evitar errores posteriores
-            print(f"[ERROR] process_metrics_data - No hay columna 'date' ni 'timestamp' para procesar los datos")
-            return pd.DataFrame()
-    else:
-        # Ensure date column is datetime
-        processed_df['date'] = pd.to_datetime(processed_df['date'])
-
-    # Verificar que existan las columnas necesarias para el filtrado
-    required_columns = ['asset_id']
-    if client_id:
-        required_columns.append('client_id')
-    if project_id and project_id != "all":
-        required_columns.append('project_id')
+    df = df.copy()
     
-    missing_columns = [col for col in required_columns if col not in processed_df.columns]
-    if missing_columns:
-        print(f"[ERROR] process_metrics_data - Faltan columnas requeridas para el filtrado: {missing_columns}")
-        # Agregar las columnas faltantes con valores por defecto
-        for col in missing_columns:
-            processed_df[col] = 'unknown'
-        print(f"[INFO] process_metrics_data - Se agregaron columnas faltantes con valores por defecto")
-
+    # If date column is string, convert to datetime
+    if 'date' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['date']):
+        df['date'] = pd.to_datetime(df['date'], errors='coerce')
+    
+    # If consumption column is not float, convert it
+    if 'consumption' in df.columns and not pd.api.types.is_float_dtype(df['consumption']):
+        df['consumption'] = pd.to_numeric(df['consumption'], errors='coerce')
+    
     # Apply filters
-    if client_id and 'client_id' in processed_df.columns:
-        processed_df = processed_df[processed_df['client_id'] == client_id]
-        print(f"[DEBUG] process_metrics_data - After client_id filter: {len(processed_df)} rows")
+    from utils.data_loader import filter_data
+    filtered_df = filter_data(
+        df,
+        client_id=client_id,
+        project_id=project_id,
+        asset_id=asset_id,
+        consumption_tags=consumption_tags,
+        start_date=start_date,
+        end_date=end_date
+    )
     
-    if project_id and project_id != "all" and 'project_id' in processed_df.columns:
-        processed_df = processed_df[processed_df['project_id'] == project_id]
-        print(f"[DEBUG] process_metrics_data - After project_id filter: {len(processed_df)} rows")
+    # Cache the result if caching is enabled
+    if use_cache:
+        _PROCESSED_DATA_CACHE[cache_key] = filtered_df.copy()
     
-    if asset_id and asset_id != "all" and 'asset_id' in processed_df.columns:
-        processed_df = processed_df[processed_df['asset_id'] == asset_id]
-        print(f"[DEBUG] process_metrics_data - After asset_id filter: {len(processed_df)} rows")
+    process_time = time.time() - start_time
+    print(f"[INFO] process_metrics_data - Processed data in {process_time:.2f} seconds, {len(filtered_df)} rows")
     
-    # Filtrado más flexible para consumption_tags
-    if consumption_tags and len(processed_df) > 0:
-        print(f"[DEBUG] process_metrics_data - Applying consumption_tags filter: {consumption_tags}")
-        
-        # Verificar si existen las columnas para el filtrado
-        consumption_columns = ['consumption_type', 'tag']
-        available_columns = [col for col in consumption_columns if col in processed_df.columns]
-        
-        if not available_columns:
-            print(f"[WARNING] process_metrics_data - No se encontraron columnas para filtrar por consumption_tags ({consumption_columns})")
-        else:
-            # Verificar si hay datos antes del filtrado
-            for col in available_columns:
-                print(f"[DEBUG] process_metrics_data - Unique {col} values before filtering: {processed_df[col].unique().tolist()}")
-            
-            # Crear una máscara para el filtrado
-            mask = pd.Series(False, index=processed_df.index)
-            
-            for tag in consumption_tags:
-                # Verificar si el tag está en la columna consumption_type
-                if 'consumption_type' in processed_df.columns:
-                    type_mask = processed_df['consumption_type'] == tag
-                    mask = mask | type_mask
-                    print(f"[DEBUG] process_metrics_data - Matches for tag {tag} in consumption_type: {type_mask.sum()}")
-                
-                # Verificar si el tag está en la columna tag
-                if 'tag' in processed_df.columns:
-                    tag_mask = processed_df['tag'] == tag
-                    mask = mask | tag_mask
-                    print(f"[DEBUG] process_metrics_data - Matches for tag {tag} in tag column: {tag_mask.sum()}")
-                
-                # Búsqueda más flexible: verificar si el tag está contenido en consumption_type o tag
-                if 'consumption_type' in processed_df.columns:
-                    contains_mask = processed_df['consumption_type'].astype(str).str.contains(tag, case=False, na=False)
-                    mask = mask | contains_mask
-                    print(f"[DEBUG] process_metrics_data - Matches for tag {tag} contained in consumption_type: {contains_mask.sum()}")
-                
-                if 'tag' in processed_df.columns:
-                    contains_tag_mask = processed_df['tag'].astype(str).str.contains(tag, case=False, na=False)
-                    mask = mask | contains_tag_mask
-                    print(f"[DEBUG] process_metrics_data - Matches for tag {tag} contained in tag column: {contains_tag_mask.sum()}")
-            
-            # Si no hay coincidencias, no aplicar el filtro
-            if mask.sum() > 0:
-                processed_df = processed_df[mask]
-                print(f"[DEBUG] process_metrics_data - After consumption_tags filter: {len(processed_df)} rows")
-            else:
-                print(f"[DEBUG] process_metrics_data - No matches found for consumption_tags, keeping all rows")
-    
-    # Aplicar filtros de fecha solo si la columna 'date' existe y está en formato datetime
-    if 'date' in processed_df.columns:
-        if start_date:
-            try:
-                start_date = pd.to_datetime(start_date)
-                processed_df = processed_df[processed_df['date'] >= start_date]
-                print(f"[DEBUG] process_metrics_data - After start_date filter: {len(processed_df)} rows")
-            except Exception as e:
-                print(f"[ERROR] process_metrics_data - Error al aplicar filtro de start_date: {str(e)}")
-                
-        if end_date:
-            try:
-                end_date = pd.to_datetime(end_date)
-                processed_df = processed_df[processed_df['date'] <= end_date]
-                print(f"[DEBUG] process_metrics_data - After end_date filter: {len(processed_df)} rows")
-            except Exception as e:
-                print(f"[ERROR] process_metrics_data - Error al aplicar filtro de end_date: {str(e)}")
-    else:
-        print(f"[WARNING] process_metrics_data - No se pudo aplicar filtro de fechas porque la columna 'date' no existe")
-    
-    # Verificar si el DataFrame resultante tiene datos
-    if processed_df.empty:
-        print(f"[WARNING] process_metrics_data - Después de aplicar todos los filtros, el DataFrame está vacío")
-    else:
-        print(f"[INFO] process_metrics_data - DataFrame resultante tiene {len(processed_df)} filas y {len(processed_df.columns)} columnas")
-        
-    return processed_df
+    return filtered_df
+
+# Clear function for processed data cache
+def clear_processed_data_cache():
+    """Clear the processed data cache."""
+    global _PROCESSED_DATA_CACHE
+    _PROCESSED_DATA_CACHE = {}
+    print("[INFO] clear_processed_data_cache - Cache cleared")
+    return True
 
 def aggregate_data_by_project(df):
     """Aggregate data by project."""

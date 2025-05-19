@@ -70,72 +70,259 @@ def create_sidebar():
                 ),
             ], className="mb-4"),
             
-            # Sección de Apps
+            # Sección de Visualizaciones con submenús
             html.Div([
-                html.H5("APPS", className="sidebar-title"),
+                html.H5("VISUALIZACIONES", className="sidebar-title"),
                 html.Hr(className="my-2"),
-                dbc.Nav(
-                    [
+                
+                html.Div([
+                    # Enlace directo a Home
+                    html.Div([
+                        dbc.NavLink(
+                            [html.I(className="fas fa-home me-2"), "Home"],
+                            href="/",
+                            active="exact",
+                            className="sidebar-link"
+                        ),
+                    ]),
+                    
+                    # Enlace directo a Spaces
+                    html.Div([
                         dbc.NavLink(
                             [html.I(className="fas fa-building me-2"), "Spaces"],
                             href="/spaces",
                             active="exact",
                             className="sidebar-link"
                         ),
+                    ]),
+                    
+                    # Enlace a Cerraduras
+                    html.Div([
                         dbc.NavLink(
                             [html.I(className="fas fa-lock me-2"), "Lock"],
                             href="/lock",
                             active="exact",
                             className="sidebar-link"
                         ),
+                    ]),
+                    
+                    # Enlace a Gestión de Cerraduras Inteligentes
+                    html.Div([
                         dbc.NavLink(
-                            [html.I(className="fas fa-chart-bar me-2"), "Metrics"],
-                            href="/metrics",
+                            [html.I(className="fas fa-key me-2"), "Cerraduras Inteligentes"],
+                            href="/smart-locks",
                             active="exact",
                             className="sidebar-link"
                         ),
-                    ],
-                    vertical=True,
-                    pills=True,
-                    className="sidebar-nav"
-                ),
+                    ]),
+                    
+                    # Metrics App con submenú
+                    html.Div([
+                        # Botón principal que actúa como cabecera del menú desplegable
+                        html.Div([
+                            dbc.Button(
+                                [html.I(className="fas fa-chart-bar me-2"), "Metrics ", 
+                                 html.I(className="fas fa-chevron-down ms-auto")],
+                                id="metrics-submenu-button",
+                                color="link",
+                                className="sidebar-link text-start w-100 py-2 d-flex align-items-center justify-content-between"
+                            ),
+                        ]),
+                        
+                        # Contenido desplegable para Metrics
+                        dbc.Collapse(
+                            dbc.Nav(
+                                [
+                                    dbc.NavLink(
+                                        [html.I(className="fas fa-chart-line me-2"), "Análisis General"],
+                                        href="/metrics",
+                                        active="exact",
+                                        className="sidebar-link ms-3 ps-2"
+                                    ),
+                                    dbc.NavLink(
+                                        [html.I(className="fas fa-tint me-2"), "Consumo de Agua"],
+                                        href="/water-consumption",
+                                        active="exact",
+                                        className="sidebar-link ms-3 ps-2"
+                                    ),
+                                    dbc.NavLink(
+                                        [html.I(className="fas fa-leaf me-2"), "Huella de Carbono"],
+                                        href="/carbon-footprint",
+                                        active="exact",
+                                        className="sidebar-link ms-3 ps-2"
+                                    ),
+                                    dbc.NavLink(
+                                        [html.I(className="fas fa-chart-area me-2"), "Análisis de Agua"],
+                                        href="/water-analysis",
+                                        active="exact",
+                                        className="sidebar-link ms-3 ps-2"
+                                    ),
+                                    dbc.NavLink(
+                                        [html.I(className="fas fa-bolt me-2"), "Consumo Eléctrico"],
+                                        href="/electricity-consumption",
+                                        active="exact",
+                                        className="sidebar-link ms-3 ps-2"
+                                    ),
+                                ],
+                                vertical=True,
+                                pills=True,
+                                className="sidebar-nav"
+                            ),
+                            id="metrics-submenu-collapse",
+                        ),
+                    ]),
+                ], className="sidebar-nav"),
             ], className="mb-4"),
             
-            # Sección de Configuración
+            # Sección de Apps
+            html.Div([
+                html.H5("APPS", className="sidebar-title"),
+                html.Hr(className="my-2"),
+                
+                # Menú con submenús para Apps
+                html.Div([
+                    # Spaces App
+                    html.Div([
+                        dbc.NavLink(
+                            [html.I(className="fas fa-building me-2"), "Spaces"],
+                            href="/spaces",
+                            active="exact",
+                            className="sidebar-link"
+                        ),
+                    ]),
+                    
+                    # Lock App
+                    html.Div([
+                        dbc.NavLink(
+                            [html.I(className="fas fa-lock me-2"), "Lock"],
+                            href="/lock",
+                            active="exact",
+                            className="sidebar-link"
+                        ),
+                    ]),
+                    
+                    # Metrics App con submenú
+                    html.Div([
+                        # Botón principal que actúa como cabecera del menú desplegable
+                        html.Div([
+                            dbc.Button(
+                                [html.I(className="fas fa-chart-bar me-2"), "Metrics ", 
+                                 html.I(className="fas fa-chevron-down ms-auto")],
+                                id="metrics-submenu-button",
+                                color="link",
+                                className="sidebar-link text-start w-100 py-2 d-flex align-items-center justify-content-between"
+                            ),
+                        ]),
+                        
+                        # Contenido desplegable para Metrics
+                        dbc.Collapse(
+                            dbc.Nav(
+                                [
+                                    dbc.NavLink(
+                                        [html.I(className="fas fa-chart-line me-2"), "Análisis General"],
+                                        href="/metrics",
+                                        active="exact",
+                                        className="sidebar-link ms-3 ps-2"
+                                    ),
+                                    dbc.NavLink(
+                                        [html.I(className="fas fa-tint me-2"), "Consumo de Agua"],
+                                        href="/water-consumption",
+                                        active="exact",
+                                        className="sidebar-link ms-3 ps-2"
+                                    ),
+                                    dbc.NavLink(
+                                        [html.I(className="fas fa-leaf me-2"), "Huella de Carbono"],
+                                        href="/carbon-footprint",
+                                        active="exact",
+                                        className="sidebar-link ms-3 ps-2"
+                                    ),
+                                    dbc.NavLink(
+                                        [html.I(className="fas fa-chart-area me-2"), "Análisis de Agua"],
+                                        href="/water-analysis",
+                                        active="exact",
+                                        className="sidebar-link ms-3 ps-2"
+                                    ),
+                                    dbc.NavLink(
+                                        [html.I(className="fas fa-bolt me-2"), "Consumo Eléctrico"],
+                                        href="/electricity-consumption",
+                                        active="exact",
+                                        className="sidebar-link ms-3 ps-2"
+                                    ),
+                                ],
+                                vertical=True,
+                                pills=True,
+                                className="sidebar-nav"
+                            ),
+                            id="metrics-submenu-collapse",
+                        ),
+                    ]),
+                ], className="sidebar-nav"),
+            ], className="mb-4"),
+            
+            # Sección de Configuración con submenús
             html.Div([
                 html.H5("CONFIGURACIÓN", className="sidebar-title"),
                 html.Hr(className="my-2"),
-                dbc.Nav(
-                    [
-                        dbc.NavLink(
-                            [html.I(className="fas fa-database me-2"), "Explorador DB"],
-                            href="/db-explorer",
-                            active="exact",
-                            className="sidebar-link"
+                
+                html.Div([
+                    # Base de Datos con submenú
+                    html.Div([
+                        # Botón principal
+                        html.Div([
+                            dbc.Button(
+                                [html.I(className="fas fa-database me-2"), "Base de Datos ", 
+                                 html.I(className="fas fa-chevron-down ms-auto")],
+                                id="db-submenu-button",
+                                color="link",
+                                className="sidebar-link text-start w-100 py-2 d-flex align-items-center justify-content-between"
+                            ),
+                        ]),
+                        
+                        # Contenido desplegable para Base de Datos
+                        dbc.Collapse(
+                            dbc.Nav(
+                                [
+                                    dbc.NavLink(
+                                        [html.I(className="fas fa-table me-2"), "Explorador DB"],
+                                        href="/db-explorer",
+                                        active="exact",
+                                        className="sidebar-link ms-3 ps-2"
+                                    ),
+                                    dbc.NavLink(
+                                        [html.I(className="fas fa-cog me-2"), "Configuración DB"],
+                                        href="/db-config",
+                                        active="exact",
+                                        className="sidebar-link ms-3 ps-2"
+                                    ),
+                                ],
+                                vertical=True,
+                                pills=True,
+                                className="sidebar-nav"
+                            ),
+                            id="db-submenu-collapse",
                         ),
-                        dbc.NavLink(
-                            [html.I(className="fas fa-cog me-2"), "Configuración DB"],
-                            href="/db-config",
-                            active="exact",
-                            className="sidebar-link"
-                        ),
+                    ]),
+                    
+                    # Test API
+                    html.Div([
                         dbc.NavLink(
                             [html.I(className="fas fa-flask me-2"), "Test API"],
                             href="/api-test",
                             active="exact",
                             className="sidebar-link"
                         ),
+                    ]),
+                    
+                    # Configuración de Anomalías
+                    html.Div([
                         dbc.NavLink(
                             [html.I(className="fas fa-exclamation-triangle me-2"), "Config. Anomalías"],
                             href="/anomaly-config",
                             active="exact",
                             className="sidebar-link"
                         ),
-                    ],
-                    vertical=True,
-                    pills=True,
-                    className="sidebar-nav"
-                ),
+                    ]),
+                ], className="sidebar-nav"),
             ], className="mb-4"),
             
             # Sección de Developer
@@ -361,3 +548,24 @@ def register_callbacks(app):
                 print(f"[DEBUG SIDEBAR] Aplicando filtros: {selection}")
             return selection
         return dash.no_update
+    
+    # Callbacks para controlar los submenús desplegables
+    @app.callback(
+        Output("metrics-submenu-collapse", "is_open"),
+        [Input("metrics-submenu-button", "n_clicks")],
+        [State("metrics-submenu-collapse", "is_open")],
+    )
+    def toggle_metrics_submenu(n, is_open):
+        if n:
+            return not is_open
+        return is_open
+    
+    @app.callback(
+        Output("db-submenu-collapse", "is_open"),
+        [Input("db-submenu-button", "n_clicks")],
+        [State("db-submenu-collapse", "is_open")],
+    )
+    def toggle_db_submenu(n, is_open):
+        if n:
+            return not is_open
+        return is_open
