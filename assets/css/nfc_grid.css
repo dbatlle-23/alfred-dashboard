@@ -1,0 +1,160 @@
+/* Estilos para la matriz NFC */
+.nfc-grid-container, .lock-type-grid-container {
+    margin-top: 1rem;
+    background-color: #fff;
+    border-radius: 0.25rem;
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    overflow-x: auto !important; /* Forzar overflow-x para permitir scroll horizontal */
+    width: 100%;
+}
+
+/* Estilos específicos para la tabla de NFC */
+.nfc-grid-container .dash-table-container {
+    min-width: 100%;
+    width: auto !important;
+    max-width: none !important;
+    overflow-x: visible !important;
+}
+
+/* Asegurar que la tabla ocupe todo el ancho disponible */
+.nfc-grid-container .dash-spreadsheet,
+.nfc-grid-container .dash-spreadsheet-container {
+    width: auto !important;
+    max-width: none !important;
+    min-width: 100%;
+}
+
+/* Estilos para las celdas */
+.nfc-grid-container .dash-cell, .lock-type-grid-container .dash-cell {
+    font-family: 'Courier New', monospace;
+    transition: background-color 0.2s;
+    padding: 8px !important;
+    min-width: 120px !important;
+    max-width: 250px !important;
+}
+
+/* Resaltar celdas al pasar el mouse */
+.nfc-grid-container .dash-cell:hover, .lock-type-grid-container .dash-cell:hover {
+    background-color: rgba(0, 123, 255, 0.1);
+}
+
+/* Estilos para las celdas N/A */
+.nfc-grid-container .dash-cell-value.na-cell, .lock-type-grid-container .dash-cell-value.na-cell {
+    color: #888;
+    font-style: italic;
+    background-color: #f5f5f5;
+}
+
+/* Estilos para celdas vacías */
+.nfc-grid-container .dash-cell-value.empty-cell, .lock-type-grid-container .dash-cell-value.empty-cell {
+    color: #dc3545;
+    font-style: italic;
+}
+
+/* Estilos para la cabecera fija */
+.nfc-grid-container .dash-header, .lock-type-grid-container .dash-header {
+    background-color: #f8f9fa;
+    font-weight: bold;
+    border-bottom: 2px solid #dee2e6;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+/* Columnas básicas */
+.nfc-grid-container .column-0,
+.nfc-grid-container .column-1,
+.nfc-grid-container .column-2 {
+    min-width: 150px !important;
+    max-width: 200px !important;
+    font-weight: bold;
+}
+
+/* Ajustes para dispositivos móviles */
+@media (max-width: 768px) {
+    .nfc-grid-container, .lock-type-grid-container {
+        overflow-x: auto;
+    }
+    
+    .nfc-grid-container .dash-table-container, .lock-type-grid-container .dash-table-container {
+        min-width: 500px;
+    }
+}
+
+/* Estilos para la exportación */
+.nfc-grid-container .export, .lock-type-grid-container .export {
+    margin-bottom: 1rem;
+}
+
+/* Spinner durante la carga */
+.nfc-grid-loading, .lock-type-grid-loading {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100px;
+}
+
+/* Estilos para la información del dispositivo */
+.device-info {
+    font-weight: bold;
+}
+
+.device-location {
+    font-style: italic;
+    color: #6c757d;
+}
+
+/* Estilos para el contenedor del filtro de tipo */
+#smart-locks-type-filter-container {
+    padding: 10px;
+    border-radius: 5px;
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+}
+
+#smart-locks-type-filter-info {
+    color: #6c757d;
+    font-size: 0.9rem;
+}
+
+/* Estilos para el nuevo wrapper de la tabla */
+.nfc-table-wrapper {
+    width: 100%;
+    overflow-x: auto !important;
+    padding-bottom: 15px;
+    border: 1px solid #dee2e6;
+    border-radius: 5px;
+    background-color: #fff;
+    box-shadow: inset 0 0 5px rgba(0,0,0,0.1);
+}
+
+/* Indicador visual de scroll horizontal */
+.nfc-table-wrapper::-webkit-scrollbar {
+    height: 8px;
+}
+
+.nfc-table-wrapper::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 10px;
+}
+
+.nfc-table-wrapper::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 10px;
+}
+
+.nfc-table-wrapper::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* Animación de flecha para indicar scroll */
+@keyframes scroll-hint {
+    0% { transform: translateX(0); }
+    50% { transform: translateX(10px); }
+    100% { transform: translateX(0); }
+}
+
+.nfc-grid-container .text-primary {
+    display: inline-block;
+    animation: scroll-hint 2s infinite;
+} 

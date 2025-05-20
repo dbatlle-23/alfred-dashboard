@@ -12,6 +12,7 @@ import re
 import pickle
 import glob
 import shutil
+import time
 
 logger = get_logger(__name__)
 
@@ -2682,7 +2683,7 @@ def get_nfc_code_value(device_id, sensor_id, jwt_token=None, gateway_id=None, as
         logger.error(f"Error al obtener código NFC: {str(e)}", exc_info=True)
         return None
 
-def update_nfc_code_value(asset_id, device_id, sensor_id, new_value, jwt_token=None, gateway_id=None):
+def update_nfc_code_value(asset_id, device_id, sensor_id, new_value, jwt_token=None, gateway_id=None, is_master_card=False):
     """
     Actualiza el valor de un código NFC
     
@@ -2692,7 +2693,8 @@ def update_nfc_code_value(asset_id, device_id, sensor_id, new_value, jwt_token=N
         sensor_id: ID del sensor
         new_value: Nuevo valor del código NFC
         jwt_token: Token JWT para autenticación
-        gateway_id: ID del gateway (opcional, si no se proporciona se usará el device_id)
+        gateway_id: ID del gateway (requerido para el endpoint correcto)
+        is_master_card: Booleano que indica si se está actualizando una tarjeta maestra (slot 7)
         
     Returns:
         Tuple (success, response) donde success es un booleano y response es el detalle
@@ -2707,21 +2709,38 @@ def update_nfc_code_value(asset_id, device_id, sensor_id, new_value, jwt_token=N
             logger.error("Token JWT inválido para actualizar valor NFC")
             return False, "Autenticación inválida"
         
-        # Si no se proporciona gateway_id, usar device_id como fallback
+        # Caso especial para el dispositivo con ID 127
+        if device_id == "127" and not gateway_id:
+            gateway_id = "1000000053eb1d68"
+            logger.info(f"Corregido: Asignando gateway_id específico para dispositivo 127: {gateway_id}")
+        
+        # Verificar si tenemos gateway_id (ahora obligatorio para el endpoint correcto)
         if not gateway_id:
-            gateway_id = device_id
+            logger.error(f"Falta gateway_id para el dispositivo {device_id}. Este parámetro es obligatorio.")
+            return False, f"Error: Falta gateway_id para el dispositivo {device_id}"
             
-        # Intentar varios formatos de URL posibles
-        urls_to_try = [
-            # Formato 1: URL original
-            f"{BASE_URL}/sensor-passwords/deployment/{asset_id}/device/{device_id}/sensor/{sensor_id}",
-            # Formato 2: Nuevo formato basado en el ejemplo
-            f"{BASE_URL}/gateways/{gateway_id}/devices/{device_id}/update-password/{sensor_id}",
-            # Formato 3: Formato más RESTful
-            f"{BASE_URL}/api/gateways/{gateway_id}/devices/{device_id}/sensors/{sensor_id}/update-password",
-            # Formato 4: Otro posible formato
-            f"{BASE_URL}/api/devices/{device_id}/sensors/{sensor_id}/update-password"
-        ]
+        # Normalizar formato de UUID para tarjetas maestras
+        # Convertir AABBCCDD a AA:BB:CC:DD si no tiene separadores
+        if is_master_card and ":" not in new_value and "-" not in new_value and len(new_value) == 8:
+            new_value = ":".join([new_value[i:i+2] for i in range(0, len(new_value), 2)])
+            logger.info(f"Formato de UUID de tarjeta maestra normalizado a: {new_value}")
+            
+        # Definir URLs a intentar - MODIFICADO PARA USAR EL ENDPOINT CORRECTO
+        urls_to_try = []
+        
+        # El endpoint correcto ahora es la primera opción para todos los casos
+        primary_url = f"{BASE_URL}/gateways/{gateway_id}/devices/{device_id}/update-password/{sensor_id}"
+        urls_to_try.append(primary_url)
+        
+        # URLs adicionales como fallback (solo en caso de que el primero falle)
+        if is_master_card:
+            # Registro especial para tarjetas maestras
+            logger.info(f"Actualizando tarjeta maestra (slot {sensor_id}) para dispositivo {device_id}, gateway {gateway_id}, valor: {new_value}")
+            logger.info(f"Usando URL principal: {primary_url}")
+        else:
+            # Para códigos NFC normales, mantener endpoint alternativo si tenemos asset_id
+            if asset_id:
+                urls_to_try.append(f"{BASE_URL}/sensor-passwords/deployment/{asset_id}/device/{device_id}/sensor/{sensor_id}")
         
         headers = get_auth_headers(jwt_token)
         
@@ -2733,36 +2752,92 @@ def update_nfc_code_value(asset_id, device_id, sensor_id, new_value, jwt_token=N
         }
         
         # Intentar cada URL hasta que una funcione
+        max_retries = 3  # Número máximo de reintentos por URL
+        retry_delay = 1  # Segundos entre reintentos (se duplicará en cada intento)
+        
         for url in urls_to_try:
-            try:
-                logger.debug(f"Intentando actualizar código NFC con URL: {url}")
-                response = requests.post(url, json=data, headers=headers)
-                
-                # Verificar si la operación fue exitosa (2xx)
-                if response.status_code >= 200 and response.status_code < 300:
-                    logger.info(f"Código NFC actualizado exitosamente con URL: {url}")
+            retries = 0
+            while retries < max_retries:
+                try:
+                    logger.debug(f"Intentando actualizar código NFC con URL: {url} (intento {retries+1}/{max_retries})")
+                    response = requests.post(url, json=data, headers=headers, timeout=10)  # Añadir timeout de 10 segundos
                     
-                    # Algunos endpoints pueden devolver 204 No Content
-                    if response.status_code == 204 or not response.text:
-                        return True, "Código NFC actualizado exitosamente"
+                    # Verificar si la operación fue exitosa (2xx)
+                    if response.status_code >= 200 and response.status_code < 300:
+                        logger.info(f"Código NFC actualizado exitosamente con URL: {url}")
+                        
+                        # Algunos endpoints pueden devolver 204 No Content
+                        if response.status_code == 204 or not response.text:
+                            return True, "Código NFC actualizado exitosamente"
+                        
+                        # Intentar procesar la respuesta como JSON
+                        try:
+                            result = response.json()
+                            return True, result
+                        except:
+                            # Si no es JSON, devolver el texto plano
+                            return True, response.text
                     
-                    # Intentar procesar la respuesta como JSON
-                    try:
-                        result = response.json()
-                        return True, result
-                    except:
-                        # Si no es JSON, devolver el texto plano
-                        return True, response.text
-                
-                logger.warning(f"Error al intentar URL {url}: {response.status_code}")
-                
-            except Exception as e:
-                logger.warning(f"Excepción al intentar URL {url}: {str(e)}")
-                continue
+                    # Si es un error 503 (Service Unavailable) o 502 (Bad Gateway), reintentar
+                    if response.status_code in [502, 503] and retries < max_retries - 1:
+                        retries += 1
+                        wait_time = retry_delay * (2 ** retries)  # Backoff exponencial
+                        logger.warning(f"Error {response.status_code} al intentar URL {url}. Reintentando en {wait_time} segundos...")
+                        time.sleep(wait_time)
+                        continue
+                    
+                    # Si es error 404 (Not Found) y no es la última URL, probar la siguiente
+                    if response.status_code == 404 and url != urls_to_try[-1]:
+                        logger.warning(f"URL {url} no encontrada (404). Probando siguiente URL alternativa.")
+                        break  # Salir del bucle de reintentos y probar la siguiente URL
+                    
+                    logger.warning(f"Error al intentar URL {url}: {response.status_code}")
+                    
+                    # Si la respuesta contiene texto, registrarlo para diagnóstico
+                    if hasattr(response, 'text') and response.text:
+                        try:
+                            logger.warning(f"Detalle de respuesta: {response.text[:500]}")
+                        except:
+                            pass
+                            
+                    break  # Salir del bucle de reintentos y probar la siguiente URL
+                    
+                except requests.exceptions.Timeout:
+                    logger.warning(f"Timeout al intentar URL {url}")
+                    if retries < max_retries - 1:
+                        retries += 1
+                        wait_time = retry_delay * (2 ** retries)
+                        logger.warning(f"Reintentando en {wait_time} segundos...")
+                        time.sleep(wait_time)
+                        continue
+                    break
+                    
+                except Exception as e:
+                    logger.warning(f"Excepción al intentar URL {url}: {str(e)}")
+                    break
         
         # Si llegamos aquí, ninguna URL funcionó
-        logger.error(f"Todas las URLs para actualizar el código NFC fallaron. Último código de estado: {response.status_code}")
-        return False, f"Error al actualizar código NFC: Error {response.status_code}"
+        last_status_code = getattr(response, 'status_code', None) if 'response' in locals() else None
+        error_message = f"Todas las URLs para actualizar el código NFC fallaron."
+        
+        if last_status_code:
+            logger.error(f"{error_message} Último código de estado: {last_status_code}")
+            
+            # Mensajes de error más descriptivos según el código de estado
+            if last_status_code == 503:
+                return False, "Servicio no disponible temporalmente. Intente más tarde."
+            elif last_status_code == 401 or last_status_code == 403:
+                return False, "No tiene permisos para realizar esta operación."
+            elif last_status_code == 404:
+                # Error 404 más detallado
+                return False, f"El dispositivo o gateway especificado no existe. Verifique device_id={device_id}, gateway_id={gateway_id}"
+            elif last_status_code >= 500:
+                return False, f"Error del servidor ({last_status_code}). Intente más tarde."
+            else:
+                return False, f"Error al actualizar código NFC: Error {last_status_code}"
+        else:
+            logger.error(f"{error_message} No se pudo conectar con el servidor.")
+            return False, "No se pudo conectar con el servidor. Verifique su conexión e intente nuevamente."
         
     except Exception as e:
         logger.error(f"Error al actualizar código NFC: {str(e)}", exc_info=True)
