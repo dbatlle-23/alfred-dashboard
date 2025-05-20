@@ -443,6 +443,93 @@ The application uses a custom API client implementation in `utils/api_client.py`
 - Implements error handling and retries
 - Provides caching for frequently accessed data
 
+## Smart Locks Master Card Management
+
+The Smart Locks module includes a feature for mass assignment of master NFC cards to multiple locks simultaneously. This feature allows administrators to efficiently manage access control across the building.
+
+### Feature Components
+
+The implementation consists of several key components:
+
+1. **Lock Selection Interface**: 
+   - Matrix view with checkbox selection for multiple locks
+   - Locks can be filtered by type and other properties
+   - Selected locks are displayed in a confirmation modal
+
+2. **Master Card Assignment Modal**:
+   - Input field for the master card UUID with real-time validation
+   - Supports multiple UUID formats (AA:BB:CC:DD and AABBCCDD)
+   - Clipboard paste functionality for faster input
+   - Displays the list of selected locks for confirmation
+
+3. **Parallel Processing Implementation**:
+   - Uses ThreadPoolExecutor to handle multiple API requests simultaneously
+   - Each lock update is processed in a separate thread
+   - Results are collected and displayed together
+
+4. **Master Card Slot Management**:
+   - Assigns the UUID to slot 7 (dedicated master card slot) on all selected locks
+   - Provides unassignment functionality to clear master cards from locks
+   - Uses the proper API endpoint with retry mechanisms
+
+### NFC Code Update Implementation
+
+The master card assignment uses an enhanced version of the `update_nfc_code_value` function in `utils/api.py`, which includes:
+
+- Support for the `is_master_card` flag that routes to the appropriate endpoint
+- Fallback mechanism that tries multiple URL patterns if the primary endpoint fails
+- Improved error handling with specific responses for different error types
+- Exponential backoff retry logic for transient failures
+- UUID format normalization (converting AABBCCDD to AA:BB:CC:DD)
+
+```python
+# Example usage for master card assignment:
+success, response = update_nfc_code_value(
+    asset_id=None,  # Not required for this endpoint
+    device_id=device_id, 
+    sensor_id="7",  # Slot 7 for master card
+    new_value=uuid_formatted, 
+    jwt_token=token,
+    gateway_id=gateway_id,
+    is_master_card=True  # Flag for master card operations
+)
+```
+
+### Results Handling
+
+The system provides detailed feedback on the assignment process:
+
+- Individual success/failure status for each lock
+- Visual indicators (green checkmarks or red X marks)
+- Overall summary with success and failure counts
+- Specific error messages for troubleshooting
+
+### User Interface Flow
+
+1. User selects multiple locks in the matrix view
+2. User clicks "Assign Master Card" button
+3. Modal displays with the list of selected locks
+4. User enters master card UUID (with validation)
+5. On confirmation, system processes assignments in parallel
+6. Results are displayed showing success/failure for each lock
+
+### Implementation Details
+
+- Located primarily in `layouts/smart_locks.py`
+- Components in `components/smart_locks/` directory
+- Helper functions in `utils/nfc_helper.py`
+- API integration in `utils/api.py`
+- Styling in `assets/css/nfc_grid.css`
+
+### Future Improvements
+
+Potential enhancements for this feature include:
+
+- Batch operations for different card types (not just master cards)
+- Card revocation and access logs review
+- Different permission levels for different master cards
+- Scheduling temporary access periods for master cards
+
 ## Conclusion
 
 This project follows a modular, component-based architecture with clear separation of concerns. By understanding the structure and patterns described in this document, you should be able to navigate the codebase, add new features, and fix bugs effectively.
