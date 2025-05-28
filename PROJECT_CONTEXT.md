@@ -495,6 +495,12 @@ success, response = update_nfc_code_value(
 )
 ```
 
+### NFC Data Structure and Parsing
+
+When retrieving NFC card data for devices (e.g., via `utils.api.get_nfc_passwords`), the API returns data for an entire asset. Each device within the asset's data includes its NFC card assignments in a flat key-value structure directly within the device's dictionary. Specifically, assigned cards are represented as `sensor_X: "AA:BB:CC:DD"`, where `X` is the slot number and the value is the card's UUID.
+
+Modules interacting with this data, such as the unassignment logic in `layouts/smart_locks.py`, must parse this flat structure by iterating over keys that start with `sensor_` to correctly identify assigned cards and their respective slots for a specific device. This is crucial for functions like `utils.nfc_helper.check_card_exists` to operate on accurate, up-to-date card information. Previously, an incorrect assumption about a nested `sensor_passwords` list led to issues in card detection.
+
 ### Results Handling
 
 The system provides detailed feedback on the assignment process:
