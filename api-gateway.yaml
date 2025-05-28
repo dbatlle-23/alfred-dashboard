@@ -1,0 +1,2731 @@
+openapi: 3.0.3
+info:
+  title: Alfred Smart System
+  description: Public API
+  version: 1.0.0
+
+servers:
+  - url: https://services.alfredsmartdata.com/
+    description: Production server
+  - url: https://services.alfred-staging-01.alfredstaging.com/
+    description: staging server
+  - url: https://services.testing2.alfredstaging.com/
+    description: staging testing2 server
+  - url: https://services.testing4.alfredstaging.com/
+    description: staging testing4 server
+  - url: https://services.testing5.alfredstaging.com/
+    description: staging testing5 server
+  - url: https://services.testing6.alfredstaging.com/
+    description: staging testing6 server
+  - url: https://services.testing8.alfredstaging.com/
+    description: staging testing8 server
+  - url: https://services.preprod.alfredstaging.com/
+    description: Preproduction
+
+tags:
+  - name: contracts
+    description: contracts information
+  - name: assets
+    description: assets information
+  - name: devices
+    description: devices information
+  - name: metrics
+    description: Metrics over devices by data point or accumulated
+  - name: check-in/out
+    description: Check-in and check-out for hotels and vacational rentals
+  - name: access
+    description: Web public access
+  - name: legal documentation
+    description: legal documentation integration
+  - name: ticketing
+    description: tickets integration
+  - name: notifications
+    description: notifications integration
+  - name: documents
+    description: documents integration
+
+
+paths:
+
+  '/contracts/register':
+    post:
+        security:
+          - ApiKeyAuth: []
+        tags:
+          - contracts
+        summary: Register new contract
+        description: "Register new contract for a new user"
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      attributes:
+                        type: object
+                        properties:
+                          user_email:
+                            type: string
+                            example: user@myemail.com
+                          asset_id:
+                            type: string
+                            example: QGNJJQ68AHD9
+                          role:
+                            type: string
+                            example: "ROLE_USER"
+                          contract_id:
+                            type: string
+                            example: "0000678"
+        responses:
+              '201':
+                description: Success
+                content:
+                  application/json:
+                    schema:
+                      type: object
+                      properties:
+                        data:
+                          type: object
+                          properties:
+                             contract_id:
+                              type: string
+                              example: 8973bcb1-38a1-411b-a0a0-50aa6tdec89f
+              '400':
+                description: Bad Request
+                content:
+                  application/json:
+                    schema:
+                      type: object
+                      properties:
+                        errors:
+                          $ref: '#/components/schemas/Errors400'
+
+              '404':
+                description: 'Not found'
+                content:
+                  application/json:
+                    schema:
+                      type: object
+                      properties:
+                        errors:
+                          $ref: '#/components/schemas/Errors404'
+
+              '403':
+                description: 'Forbidden'
+                content:
+                  application/json:
+                    schema:
+                      type: object
+                      properties:
+                        errors:
+                          $ref: '#/components/schemas/Errors403'
+
+
+  '/contracts/cancel':
+    delete:
+        security:
+          - ApiKeyAuth: []
+        tags:
+          - contracts
+        summary: Cancel a contract
+        description: "Cancel a contract for a user"
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      attributes:
+                        type: object
+                        properties:
+                          user_email:
+                            type: string
+                            example: user@myemail.com
+                          asset_id:
+                            type: string
+                            example: QGNJJQ68AHD9
+                          contract_id:
+                              type: string
+                              example: "0000678"
+        responses:
+              '204':
+                description: No Content response
+              '400':
+                description: Bad Request
+                content:
+                  application/json:
+                    schema:
+                      type: object
+                      properties:
+                        errors:
+                          $ref: '#/components/schemas/Errors400'
+              '401':
+                description: 'Not authorized'
+                content:
+                  application/json:
+                    schema:
+                      type: object
+                      properties:
+                        errors:
+                          $ref: '#/components/schemas/Errors401'
+
+              '404':
+                description: 'Not found'
+                content:
+                  application/json:
+                    schema:
+                      type: object
+                      properties:
+                        errors:
+                          $ref: '#/components/schemas/Errors404'
+
+  '/assets/list?page[number]=1&page[size]=5000':
+    get:
+      security:
+        - ApiKeyAuth: []
+      tags:
+        - assets
+      summary: List of assets
+      description: "List of assets paginated, params page[number], page[size] are optional, default 40 assets per page"
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/asset'
+        '401':
+          description: 'Not authorized'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors401'
+
+  '/devices/list':
+    get:
+      security:
+        - ApiKeyAuth: []
+      tags:
+        - devices
+      summary: List of devices
+      description: "List of devices filtered by asset type and/or device type"
+      parameters:
+        - in: query
+          name: gateway_id
+          schema:
+            type: string
+          required: false
+          description: 'Gateway identifier'
+          example: '00000000ea0a4496'
+        - in: query
+          name: asset_id
+          schema:
+            type: string
+          required: false
+          description: 'Asset identifier'
+          example: 'QGNJJQ68AHD9'
+        - $ref: '#/components/parameters/device_name'
+
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/device'
+        '401':
+          description: 'Not authorized'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors401'
+        '400':
+          description: 'Bad request'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors400'
+
+  '/devices/asset/{asset_id}/list':
+    get:
+      security:
+        - ApiKeyAuth: []
+      tags:
+        - devices
+      summary: List of devices by asset, whether linked to shared gateways or not
+      description: "List of devices filtered by asset and device name"
+      parameters:
+        - $ref: '#/components/parameters/asset_id'
+        - $ref: '#/components/parameters/device_name'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/device'
+        '401':
+          description: 'Not authorized'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors401'
+        '400':
+          description: 'Bad request'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors400'
+
+  '/metrics/consumption/raw':
+    get:
+      security:
+        - ApiKeyAuth: []
+      tags:
+        - "metrics"
+      summary: "Raw data from devices by data point"
+      description: "Raw data from devices by data point"
+      parameters:
+        - in: query
+          name: gateway_id
+          schema:
+            type: string
+          required: true
+          description: 'Gateway identifier'
+          example: '00000000ea0a4496'
+        - in: query
+          name: device_id
+          schema:
+            type: string
+          required: true
+          description: 'device identifier'
+          example: '101'
+        - in: query
+          name: sensor_id
+          schema:
+            type: string
+          required: true
+          description: 'channel identifier'
+          example: '1'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  meta:
+                    type: object
+                    properties:
+                      unit:
+                        type: string
+                        example: "kWh"
+                      type:
+                        type: string
+                        example: "raw,accumulated"
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/metric'
+        '401':
+          description: 'Not authorized'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors401'
+        '400':
+          description: 'Bad request'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors400'
+  
+  
+  '/metrics/consumption/time-series/{asset_id}':
+      get:
+        security:
+          - ApiKeyAuth: []
+        tags:
+          - "metrics"
+        summary: "Consumption data from devices by period"
+        description: "Consumption data from devices by period"
+        parameters:
+          - $ref: '#/components/parameters/asset_id'
+          - in: query
+            name: gateway_id
+            schema:
+              type: string
+            required: true
+            description: 'Gateway identifier'
+            example: '00000000ea0a4496'
+          - in: query
+            name: device_id
+            schema:
+              type: string
+            required: true
+            description: 'device identifier'
+            example: '101'
+          - in: query
+            name: sensor_id
+            schema:
+              type: string
+            required: true
+            description: 'channel identifier'
+            example: '1'
+          - in: query
+            name: from
+            schema:
+              type: integer
+            required: true
+            description: 'from timestamp'
+            example: 1600000000
+          - in: query
+            name: to
+            schema:
+              type: integer
+            required: true
+            description: 'to timestamp'
+            example: 1600000000
+        responses:
+          '200':
+            description: Success
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    meta:
+                      type: object
+                      properties:
+                        unit:
+                          type: string
+                          example: "kWh"
+                        total:
+                          type: number
+                          example: 2
+                        from:
+                          type: integer
+                          example: 1630000000
+                        to:
+                          type: integer
+                          example: 1650000000
+                    data:
+                        $ref: '#/components/schemas/metrics'
+          '401':
+            description: 'Not authorized'
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    errors:
+                      $ref: '#/components/schemas/Errors401'
+          '400':
+            description: 'Bad request'
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    errors:
+                      $ref: '#/components/schemas/Errors400'
+
+
+
+
+
+
+  '/hotels/check-in':
+    post:
+      security:
+        - ApiKeyAuth: []
+      tags:
+        - check-in/out
+      summary: Check in for hotels
+      description: "Check-in for hotels and vacational rentals"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: object
+                  properties:
+                    attributes:
+                      type: object
+                      properties:
+                        force_save_mode:
+                          type: boolean
+                          example: true
+                        valid_from:
+                          type: integer
+                          example: 1706687587
+                        valid_until:
+                          type: integer
+                          example: 1706518387
+                        access_keys:
+                          type: object
+                          properties:
+                            nfc:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  code:
+                                    type: string
+                                    example: "0433173A9D5D80"
+                            digital:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  email:
+                                    type: string
+                                    example: "jlabrador@alfredsmart.com"
+                        allocations:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              asset_id:
+                                type: string
+                                example: "DHF839Q7EK4EE"
+      responses:
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/web_app'
+        '400':
+          description: 'Bad request'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors400'
+        '401':
+          description: 'Not authorized'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors401'
+
+        '403':
+          description: 'Forbidden'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors403'
+        '404':
+          description: 'Resource not found'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors404'
+        '422':
+          description: 'Invalid Payload'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors422'
+        '426':
+          description: 'Check in access already exist with same datetime'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors426'
+
+  '/hotels/check-out/late':
+    put:
+      security:
+        - ApiKeyAuth: []
+      tags:
+        - check-in/out
+      summary: Late check out for hotels
+      description: "Late check-out for hotels and vacation rentals"
+      parameters:
+        - in: path
+          name: body
+          description: "late check-out for hotels"
+          required: true
+          schema:
+            type: object
+            properties:
+              data:
+                type: object
+                properties:
+                  attributes:
+                    type: object
+                    properties:
+                      reservation_id:
+                        type: string
+                        example: 3017877018
+                      date_check_out:
+                        type: integer
+                        example: 1600000000
+                      allocations:
+                        type: array
+                        items:
+                          type: object
+                          $ref: '#/components/schemas/allocation_item'
+
+      responses:
+
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                    $ref: '#/components/schemas/late_check_out_applied'
+
+        '401':
+          description: 'Not authorized'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors401'
+
+        '400':
+          description: 'Bad request'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors400'
+
+        '404':
+          description: 'Not found'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors404'
+
+  '/webapp/access/{access_id}/check':
+    get:
+      tags:
+        - access
+      summary: "check used access"
+      parameters:
+        - $ref: '#/components/parameters/access_id'
+      responses:
+        '200':
+          description: 'Access is ready for use'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      community:
+                        $ref: '#/components/schemas/community_web_app'
+
+        '226':
+          description: 'Access is already in use'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response226WebApp'
+
+        '400':
+          description: 'Bad Request'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors'
+        '401':
+          description: 'Unauthorized'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors401'
+
+        '403':
+          description: 'Access is revoked'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors403'
+
+        '410':
+          description: 'Access out of range'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors410WebApp'
+
+        '404':
+          description: 'Access not found'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors404'
+        '422':
+          description: 'Unprocessable Content'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors422'
+
+  '/webapp/access/{access_id}/accepted':
+    post:
+      tags:
+        - access
+      summary: "create access webapp token by identifier"
+      parameters:
+        - $ref: '#/components/parameters/access_id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: object
+                  properties:
+                    device_name:
+                      type: string
+                      example: samsung 123
+                    browser_name:
+                      type: string
+                      example: chrome
+
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      token_web_app:
+                        type: string
+                        example: MT90PiVUR2JqNWFKYyo1d1hwcj0/RnE2ODk3YThjYjEtMzhhMS00MTFiLWEwYTAtNTBhYTVkZGVjODlm
+                      uid:
+                        type: string
+                        example: 897a8cb1-38a1-411b-a0a0-50aa5ddec89f
+
+        '226':
+          description: 'Access is already in use'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response226WebApp'
+
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors'
+
+        '401':
+          description: 'Unauthorized'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors401'
+
+        '403':
+          description: 'Access is revoked'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors403'
+
+        '410':
+          description: 'Access out of range'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors410WebApp'
+
+        '404':
+          description: 'Access not found'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors404'
+        '422':
+          description: 'Unprocessable Content'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors422'
+
+  '/webapp/access/{access_id}':
+    get:
+      tags:
+        - access
+      summary: "get access information by identifier"
+      parameters:
+        - $ref: '#/components/parameters/access_id'
+        - $ref: '#/components/parameters/token_webapp'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/web_app_access'
+
+        '226':
+          description: 'Access is already in use'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response226WebApp'
+
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors'
+
+        '401':
+          description: 'Unauthorized'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors401'
+
+        '403':
+          description: 'Access is revoked'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    type: object
+                    properties:
+                      detail:
+                        type: string
+                        example: "access with id: 549040ee-e7d6-481c-9f08-34d008f2236c is revoked"
+                      data:
+                        $ref: '#/components/schemas/web_app_access'
+
+        '410':
+          description: 'Access out of range'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    type: object
+                    properties:
+                      detail:
+                        type: string
+                        example: "access with id: 549040ee-e7d6-481c-9f08-34d008f2236c valid from 2024-01-31 07:53 has out of range"
+                      data:
+                        $ref: '#/components/schemas/web_app_access'
+
+        '404':
+          description: 'Access not found'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors404'
+        '422':
+          description: 'Unprocessable Content'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors422'
+
+  '/webapp/access/create':
+    post:
+      security:
+        - ApiKeyAuth: [ ]
+      tags:
+        - access
+      summary: Create webapp access
+      description: |
+        Create new webapp access
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  $ref: '#/components/schemas/webapp_access_request'           
+      responses:
+        '201':
+          description: 'Created'
+          content:
+            application/json:
+              schema:
+                type: object
+                $ref: '#/components/schemas/create_webapp_access_response'
+        '401':
+          description: 'Not authorized'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors401'
+        '403':
+          description: 'Forbidden'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors403'
+        '422':
+          description: 'Invalid Payload'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors422'
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error500'
+
+  '/webapp/legal-documentation/accepted':
+    post:
+      tags:
+        - 'legal documentation'
+      summary: "Accepted legal documentation"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: object
+                  properties:
+                    client_id:
+                      type: string
+                      example: "abc-1245"
+      parameters:
+        - $ref: '#/components/parameters/token_webapp'
+      responses:
+        '204':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+
+        '404':
+          description: 'Not found'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors404'
+
+  '/webapp/legal-documentation':
+    get:
+      tags:
+        - 'legal documentation'
+      summary: "get Legal documentation"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      parameters:
+        - $ref: '#/components/parameters/token_webapp'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      is_enabled:
+                        type: boolean
+                        example: true
+                      is_accepted:
+                        type: boolean
+                        example: false
+                      link_terms_of_service:
+                        type: string
+                        example: https://alfredsmartdata.com/alfred.doc
+                      link_privacy_policy:
+                        type: string
+                        example: https://alfredsmartdata.com/alfred.doc,
+                      version:
+                        type: integer
+                        example: 1
+                      client_id:
+                        type: string
+                        example: 'abc-1245'
+                      community:
+                        $ref: '#/components/schemas/community_web_app'
+
+        '404':
+          description: 'Not found'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors404'
+
+
+  '/webapp/access/{access_id}/asset/{asset_id}/devices':
+    get:
+      tags:
+        - access
+      summary: "Get devices list by asset identifier"
+      parameters:
+        - $ref: '#/components/parameters/access_id'
+        - $ref: '#/components/parameters/asset_id'
+        - $ref: '#/components/parameters/token_webapp'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      devices:
+                        type: array
+                        $ref: '#/components/schemas/devices'
+
+        '226':
+          description: 'Access is already in use'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response226WebApp'
+
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors'
+
+        '401':
+          description: 'Unauthorized'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors401'
+
+        '403':
+          description: 'Access is revoked'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors403'
+
+        '410':
+          description: 'Access out of range'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors410WebApp'
+
+        '404':
+          description: 'Access not found'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors404'
+        '422':
+          description: 'Unprocessable Content'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors422'
+
+  '/webapp/access/{access_id}/asset/{asset_id}':
+    put:
+      tags:
+        - access
+      summary: "send data to asset device"
+      parameters:
+        - $ref: '#/components/parameters/access_id'
+        - $ref: '#/components/parameters/asset_id'
+        - $ref: '#/components/parameters/token_webapp'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: object
+                  properties:
+                    access_sensor_id:
+                      type: string
+                      example: MSMjIyMjIzEwMSMjIyMjIzAwMDAwMDAwYmRjMDMwYjM=
+                    value:
+                      type: string
+                      example: 1
+
+
+      responses:
+        '204':
+          description: No Content response
+
+        '226':
+          description: 'Access is already in use'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response226WebApp'
+
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors'
+
+        '401':
+          description: 'Unauthorized'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors401'
+
+        '403':
+          description: 'Access is revoked'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors403'
+
+        '410':
+          description: 'Access out of range'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors410WebApp'
+
+        '404':
+          description: 'Access not found'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors404'
+        '422':
+          description: '422 Unprocessable Content'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors422'
+
+
+  '/webapp/access/{access_id}/accesssensor/{access_sensor_id}':
+    get:
+      tags:
+        - access
+      summary: "Get status information by asset and access sensor id identifier"
+      parameters:
+        - $ref: '#/components/parameters/access_id'
+        - $ref: '#/components/parameters/access_sensor_id'
+        - $ref: '#/components/parameters/token_webapp'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/access_sensor_device'
+
+        '226':
+          description: 'Access is already in use'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response226WebApp'
+
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors'
+
+        '401':
+          description: 'Unauthorized'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors401'
+
+        '403':
+          description: 'Access is revoked'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors403'
+
+        '410':
+          description: 'Access out of range'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors410WebApp'
+
+        '404':
+          description: 'Access not found'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors404'
+        '422':
+          description: '422 Unprocessable Content'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors422'
+
+  '/tickets/create':
+    post:
+      security:
+        - ApiKeyAuth: []
+      tags:
+        - ticketing
+      summary: "create new ticket relative to asset"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: object
+                  properties:
+                    attributes:
+                      type: object
+                      properties:
+                        asset_id:
+                          type: string
+                          example: "QGNJJQ68AHD9"
+                        user_email:
+                          type: string
+                          example: "johndoe@mail.com"
+                        phone_number:
+                          type: string
+                          example: "123123123"
+                        title:
+                          type: string
+                          example: "title"
+                        description:
+                          type: string
+                          example: "description"
+                        category:
+                          $ref: '#/components/schemas/ticket_category'
+                        attachment:
+                          type: string
+                          example: "base64 encoded image"
+      responses:
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        example: "6FBA2126"
+                      type:
+                        type: string
+                        example: "maintenance"
+                      priority:
+                        type: string
+                        example: "normal"
+                      status:
+                        type: string
+                        example: "OPEN"
+                      created_at:
+                        type: integer
+                        example: 1600000000
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors400'
+
+        '401':
+          description: 'Not authorized'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors401'
+
+  '/tickets/{ticket_id}/status':
+    post:
+      security:
+        - ApiKeyAuth: []
+      tags:
+        - ticketing
+      summary: "update ticket status"
+      parameters:
+        - $ref: '#/components/parameters/ticket_id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: object
+                  properties:
+                    attributes:
+                      type: object
+                      properties:
+                        description:
+                          type: string
+                          example: "description"
+                        priority:
+                          $ref: '#/components/schemas/ticket_priority'
+                        status:
+                          type: string
+                          example: "CLOSED"
+      responses:
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                        example: "CLOSED"
+                      updated_at:
+                        type: integer
+                        example: 1600000000
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors400'
+
+        '401':
+          description: 'Not authorized'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors401'
+
+        '404':
+          description: 'Not found'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors404'
+
+  '/tickets':
+    get:
+      security:
+        - ApiKeyAuth: []
+      tags:
+        - "ticketing"
+      summary: "get tickets list"
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        attributes:
+                          type: object
+                          $ref: '#/components/schemas/ticket'
+
+        '401':
+          description: 'Not authorized'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors401'
+
+
+  '/tickets/{ticket_id}':
+    get:
+      security:
+        - ApiKeyAuth: []
+      tags:
+        - "ticketing"
+      summary: "get ticket information by identifier"
+      parameters:
+        - $ref: '#/components/parameters/ticket_id'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      attributes:
+                        type: object
+                        $ref: '#/components/schemas/ticket'
+
+        '401':
+          description: 'Not authorized'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors401'
+
+        '404':
+          description: 'Not found'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors404'
+  
+  '/notifications/config':
+    patch:
+      security:
+        - ApiKeyAuth: []
+      tags:
+        - notifications
+      summary: "update notification configuration"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: object
+                  properties:
+                    attributes:
+                      type: object
+                      properties:
+                        webhook_url:
+                          type: string
+                          example: "https://"
+                        webhook_header:
+                          type: string
+                          example: "header-token"
+                        support_email:
+                          type: string
+                          example: "support@company.com"
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      webhook_url:
+                        type: string
+                        example: "https://"
+                      webhook_header:
+                        type: string
+                        example: "header-token"
+                      support_email:
+                        type: string
+                        example: "support@company.com"
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors400'
+        '401':
+          description: 'Not authorized'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors401'
+
+  '/api/assets/document':
+    post:
+      security:
+        - ApiKeyAuth: [ ]
+      tags:
+        - documents
+      summary: "upload asset documents"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: object
+                  properties:
+                    title:
+                      type: string
+                      example: "factura_noviembre.pdf"
+                      description: Document title.
+                    type:
+                      type: string
+                      example: "facturas"
+                      description: Document type.
+                    external_id:
+                      type: string
+                      example: "2-1165"
+                      description: Document asset id to relate with.
+                    document:
+                      type: string
+                      example: "base64 encoded document"
+                      description: Document in pdf format and base64.
+      responses:
+        '201':
+          description: Success
+
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors400'
+        '401':
+          description: 'Not authorized'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors401'
+        '403':
+          description: 'Forbidden'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    $ref: '#/components/schemas/Errors403'
+
+
+components:
+  securitySchemes:
+    ApiKeyAuth:            # arbitrary name for the security scheme
+      type: apiKey
+      in: header
+      name: Authorization
+
+  parameters:
+
+    access_id:
+      name: access_id
+      in: path
+      description: valid webapp access identifier
+      required: true
+      schema:
+        type: string
+        description: "access identifier previously generated"
+        example: "897a8cb1-38a1-411b-a0a0-50aa5ddec89f"
+
+    token_webapp:
+      name: token-webapp
+      in: header
+      description: token webapp
+      required: false
+      schema:
+        type: string
+        description: "token webapp front"
+        example: "prueba-token-front"
+
+    asset_id:
+      name: asset_id
+      in: path
+      description: valid asset identifier
+      required: true
+      schema:
+        type: string
+        description: "asset's id"
+        example: "QDFT9N9UW647"
+
+    access_sensor_id:
+      name: access_sensor_id
+      in: path
+      description: valid access sensor identifier
+      required: true
+      schema:
+        type: string
+        description: "access sensor id"
+        example: "MSMjIyMjIzEwMSMjIyMjIzAwMDAwMDAwYmRjMDMwYjM="
+
+    ticket_id:
+      name: ticket_id
+      in: path
+      description: valid ticket identifier
+      required: true
+      schema:
+        type: string
+        description: 'ticket identifier'
+        example: '6FBA2126'
+
+    accept:
+      name: Accept
+      in: header
+      description: 'Expected response content type.'
+      required: true
+      schema:
+        type: string
+        enum:
+          - application/json
+    
+    device_name:
+      name: device_name
+      in: query
+      required: false
+      description: 'Device name'
+      example: 'iLock'
+      schema:
+        type: string
+
+  schemas:
+    Response:
+      type: object
+      properties:
+        status:
+          type: string
+        message:
+          type: string
+        data:
+          type: object
+    asset:
+      type: object
+      properties:
+        asset_id:
+          type: string
+          example: QGNJJQ68AHD9
+        alias:
+          type: string
+          example: "Home sweet home"
+        gateway_id:
+          type: string
+          example: "00000000ea0a4496"
+        external_id:
+          type: string
+          example: "external-id-code-here"
+
+    device:
+      type: object
+      properties:
+        id:
+          type: string
+          example: 101
+        type:
+          type: string
+          example: "LOCK"
+        name:
+          type: string
+          example: "iLock"
+        gateway_id:
+          type: string
+          example: "00000000ea0a4496"
+        channels:
+          $ref: '#/components/schemas/channels'
+
+    metric:
+      type: object
+      properties:
+        ts:
+          type: integer
+          example: 1600000000
+        v:
+          type: string
+          example: "120.2"
+
+    metrics:
+      type: array
+      items:
+        $ref: '#/components/schemas/metric'
+      example:
+        - ts: 1634000000
+          v: "110.20"
+        - ts: 1644000000
+          v: "120.21"
+
+    web_app_access:
+      type: object
+      properties:
+        token_web_app:
+          type: string
+          example: MT90PiVUR2JqNWFKYyo1d1hwcj0/RnE2ODk3YThjYjEtMzhhMS00MTFiLWEwYTAtNTBhYTVkZGVjODlm
+        uid:
+          type: string
+          example: 897a8cb1-38a1-411b-a0a0-50aa5ddec89f
+        type:
+          type: string
+          example: HOTEL
+        alias:
+          type: string
+          example: access alias
+        name:
+          type: string
+          example: access name
+        id_number:
+          type: string
+          example: access id number
+        email:
+          type: string
+          example: asset email
+        is_digital:
+          type: boolean
+          example: true
+        is_nfc:
+          type: boolean
+          example: false
+        is_qr:
+          type: boolean
+          example: false
+        url:
+          type: string
+          example: url webapp
+        client_id:
+          type: string
+          example: id client
+        community:
+          type: object
+          properties:
+            id:
+              type: string
+              example: 897a8cb1-38a1-411b-a0a0-50aa5ddec89f
+            name:
+              type: string
+              example: community name
+            google_address:
+              type: string
+              example: community address, street, city, country, zip code
+            street_type:
+              type: string
+              example: street type
+            street_name:
+              type: string
+              example: street name
+            block_number:
+              type: string
+              example: block number
+            postal_code:
+              type: string
+              example: postal code
+            city:
+              type: string
+              example: city
+            province:
+              type: string
+              example: province
+            country:
+              type: string
+              example: country
+            logo:
+              type: string
+              example: https://alfredsmartdata.com/logo.png
+            background_image:
+              type: string
+              example: https://alfredsmartdata.com/background.png
+            coordinates:
+              type: array
+              example: { latitude, longitude }
+        valid_from:
+          type: integer
+          example: 1600000000
+        valid_until:
+          type: integer
+          example: 1600000000
+        status:
+          type: string
+          example: ACTIVE
+        created_at:
+          type: integer
+          example: 1600000000
+        created_by:
+          type: string
+          example: created user
+        created_by_name:
+          type: string
+          example: created user name
+        revoked_at:
+          type: integer
+          example: 1600000000
+        assets:
+          type: array
+          items:
+            type: object
+            properties:
+              asset_id:
+                type: string
+                example: QDFT9N9UW647
+              country:
+                type: string
+                example: Spain
+              province:
+                type: string
+                example: Barcelona
+              city:
+                type: string
+                example: Barcelona
+              postal_code:
+                type: string
+                example: 08014
+              street_type:
+                type: string
+                example: Av
+              street_name:
+                type: string
+                example: Diagonal
+              block_number:
+                type: string
+                example: 645
+              staircase:
+                type: string
+                example: 7
+              flat:
+                type: string
+                example: 2
+              door:
+                type: string
+                example: 3b
+              google_formatted_address:
+                type: string
+                example: Playa de El Palmar
+              coordinates:
+                type: array
+                example: { latitude, longitude }
+              devices:
+                type: array
+                $ref: '#/components/schemas/devices'
+
+    devices:
+      type: array
+      items:
+        type: object
+        properties:
+          type:
+            type: string
+            example: LOCK
+          access_type:
+            type: string
+            example: NFC | DIGITAL | QR
+          label:
+            type: string
+            example: Cerraduras Cerradura Danalock
+          device_id:
+            type: string
+            example: 101
+          sensor_id:
+            type: string
+            example: 2
+          gateway_id:
+            type: string
+            example: 0000000069D239BA
+          access_sensor_id:
+            type: string
+            example: MSMjIyMjIzEwMSMjIyMjIzAwMDAwMDAwNjlEMjM5QkE=
+          qr_code:
+            type: string
+            example: MSMjIyMjIzEwMSMjIyMjIzAwMDAwMDAwNjlEMjM5QkE= (is optional only to QR devices)
+          nfc_pass_code:
+            type: string
+            example: MSMjIyMjIzEwMSMjIyMjIzAwMDAwMDAwNjlEMjM5QkE= (is optional only to NFC devices)
+          emails:
+            type: array
+            example: (is optional only to Digital devices)
+            items:
+              type: string
+              example: jlabrador@alfredsmart.com
+
+    access_sensor_device:
+      type: object
+      properties:
+        id:
+          type: string
+          example: MSMjIyMjIzEwMSMjIyMjIzAwMDAwMDAwNjlEMjM5QkE=
+        asset_id:
+          type: string
+          example: 8QYAP8PDXYBE
+        device_id:
+          type: string
+          example: 101
+        sensor_id:
+          type: string
+          example: 2
+        gateway_id:
+          type: string
+          example: 0000000069D239BA
+        label:
+          type: string
+          example: Cerraduras Cerradura Danalock
+        type:
+          type: string
+          example: LOCK
+        usage:
+          type: string
+          example: Puerta
+        coordinates:
+          type: array
+          example: {latitude, longitude}
+        device_help_title:
+          type: string
+          example: Device help title
+        device_help_description:
+          type: string
+          example: Device help description
+
+    channel:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: "Climate"
+        room:
+          type: string
+          example: "Living room"
+        type:
+          type: string
+          example: "ADMIN_PASSWORD"
+
+    channels:
+      type: array
+      items:
+        $ref: '#/components/schemas/channel'
+
+      example:
+        - id: 1
+          name: "Climate"
+          room: "Living room"
+          type: "meter_kwh3"
+        - id: 2
+          name: "General"
+          room: "kitchen"
+          type: "meter_voltage3"
+        - id: 3
+          name: "Lumen"
+          room: "kitchen"
+          type: "meter_watts3"
+
+    ticket: 
+        type: object
+        properties:
+          id:
+            type: string
+            example: "6FBA2126"
+          type:
+            $ref: '#/components/schemas/ticket_type'
+          priority:
+            $ref: '#/components/schemas/ticket_priority'
+          status:
+            type: string
+            example: "OPEN"
+          created_at:
+            type: integer
+            example: 1600000000  
+          asset_id:
+            type: string
+            example: "QGNJJQ68AHD9"
+          user_email:
+            type: string
+            example: "johndoe@mail.com"
+          title:
+            type: string
+            example: "title"
+          description:
+            type: string
+            example: "description"
+          category:
+            $ref: '#/components/schemas/ticket_category'
+          attachments:
+            type: array
+            items:
+              type: string
+              example: "https://alfredsmartdata.com/media/attachment.png"
+          history:
+            type: array
+            items:
+              $ref: '#/components/schemas/ticket_detail'
+
+    ticket_detail:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "OPEN"
+        created_at:
+          type: integer
+          example: 1600000000
+        description:
+          type: string
+          example: "description"
+        user_email:
+          type: string
+          example: "johndoe@mail.com"
+
+    ticket_category:
+      type: string
+      example: "electric, appointments, gas, kitchen appliance, domestic and building automation, internet, plumbing, other"
+
+    ticket_priority:
+      type: string
+      example: "low, normal, high"
+
+    ticket_type:
+      type: string
+      example: "manual, automatic"
+
+    user_check_in:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "John"
+        surname:
+          type: string
+          example: "Doe"
+        phone:
+          type: string
+          example: "123456789"
+        email:
+          type: string
+          example: "johndoe@myemail.com"
+
+    allocation_item:
+      type: object
+      properties:
+        asset_id:
+          type: string
+          example: "external-id-code-here"
+        nfc_code:
+          type: string
+          example: "0433173A9D5D80"
+
+
+    allocation_item_with_users:
+        type: object
+        properties:
+          asset_id:
+            type: string
+            example: "external-id-code-here"
+          nfc_code:
+            type: string
+            example: "0433173A9D5D80"
+          users:
+            type: array
+            items:
+              $ref: '#/components/schemas/user_check_in'
+
+    web_app:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            token_web_app:
+              type: string
+              example: MT90PiVUR2JqNWFKYyo1d1hwcj0/RnE2ODk3YThjYjEtMzhhMS00MTFiLWEwYTAtNTBhYTVkZGVjODlm
+            uid:
+              type: string
+              example: 897a8cb1-38a1-411b-a0a0-50aa5ddec89f
+            type:
+              type: string
+              example: HOTEL
+            alias:
+              type: string
+              example: asset name
+            community:
+              $ref: '#/components/schemas/community_web_app'
+            valid_from:
+              type: integer
+              example: 1600000000
+            valid_until:
+              type: integer
+              example: 1600000000
+            status:
+              type: string
+              example: ACTIVE
+            created_at:
+              type: integer
+              example: 1600000000
+            revoked_at:
+              type: integer
+              example: 1600000000
+            url:
+              type: string
+              example: "webapp.alfred-staging-01.alfredstaging.com/access/bed2b906-9173-4ba5-9ce7-0ec24526b7a6"
+            client_id:
+              type: string
+              example: "87b5225d-1a53-49d9-8a3e-5739ded39cd8"
+            is_digital:
+              type: boolean
+              example: true
+            is_nfc:
+              type: boolean
+              example: false
+            assets:
+              type: array
+              items:
+                type: object
+                properties:
+                  asset_id:
+                    type: string
+                    example: QDFT9N9UW647
+                  country:
+                    type: string
+                    example: Spain
+                  province:
+                    type: string
+                    example: Barcelona
+                  city:
+                    type: string
+                    example: Barcelona
+                  postal_code:
+                    type: string
+                    example: 08014
+                  street_type:
+                    type: string
+                    example: Av
+                  street_name:
+                    type: string
+                    example: Diagonal
+                  block_number:
+                    type: string
+                    example: 645
+                  staircase:
+                    type: string
+                    example: 7
+                  flat:
+                    type: string
+                    example: 2
+                  door:
+                    type: string
+                    example: 3b
+                  google_formatted_address:
+                    type: string
+                    example: Playa de El Palmar
+                  coordinates:
+                    type: array
+                    example: { latitude, longitude }
+                  devices:
+                    type: array
+                    $ref: '#/components/schemas/device_web_app'
+
+    community_web_app:
+      type: object
+      properties:
+        id:
+          type: string
+          example: 897a8cb1-38a1-411b-a0a0-50aa5ddec89f
+        name:
+          type: string
+          example: community name
+        google_address:
+          type: string
+          example: community address, street, city, country, zip code
+        street_type:
+          type: string
+          example: street type
+        street_name:
+          type: string
+          example: street name
+        block_number:
+          type: string
+          example: block number
+        postal_code:
+          type: string
+          example: postal code
+        city:
+          type: string
+          example: city
+        province:
+          type: string
+          example: province
+        country:
+          type: string
+          example: country
+        logo:
+          type: string
+          example: https://alfredsmartdata.com/logo.png
+        background_image:
+          type: string
+          example: https://alfredsmartdata.com/background.png
+        coordinates:
+          type: array
+          example: { latitude, longitude }
+
+    device_web_app:
+      type: object
+      properties:
+        type:
+          type: string
+          description: Device type
+          example: type_device
+        label:
+          type: string
+          description: Device label
+          example: label_device
+        device_id:
+          type: string
+          description: Device ID
+          example: device-1-id
+        sensor_id:
+          type: string
+          description: Sensor ID
+          example: sensor-1-id
+        gateway_id:
+          type: string
+          description: Gateway ID
+          example: gateway-1-id
+        access_sensor_id:
+          type: string
+          description: Access sensor ID
+          example: access-sensor-1-id
+
+
+    check_out_applied:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "897a8cb1-38a1-411b-a0a0-50aa5ddec89f"
+        type:
+          type: string
+          example: "check-out"
+        details:
+          type: array
+          items:
+            $ref: '#/components/schemas/allocation_item'
+
+    late_check_out_applied:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "897a8cb1-38a1-411b-a0a0-50aa5ddec89f"
+        type:
+          type: string
+          example: "late-check-out"
+        details:
+          type: array
+          items:
+            $ref: '#/components/schemas/allocation_item'
+
+    webapp_access_request:
+      type: object
+      properties:
+        attributes:
+          type: object
+          properties:
+            alias:
+              type: string
+              description: anonymous access alias
+              example: access alias
+            type:
+              type: string
+              description: anonymous access type
+              enum:
+                - 'HOTEL'
+                - 'HOTEL_ROOM'
+                - 'HOME'
+                - 'VACATIONAL_RENTAL'
+                - 'RENT'
+                - 'OFFICE'
+                - 'PARKING_SLOT'
+              example: HOTEL
+            valid_from:
+              type: integer
+              description: Unix timestamp since user can access to asset
+              example: 1600000000
+            valid_until:
+              type: integer
+              description: Unix timestamp until user can access to asset
+              example: 1600000000
+            assets:
+              type: array
+              description: List of assets where you will have access
+              items:
+                type: object
+                properties:
+                  asset_id:
+                    type: string
+                    example: QGNJJQ68AHD9
+                  devices:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          example: 101
+                        type:
+                          type: string
+                          example: "LOCK"
+                        name:
+                          type: string
+                          example: "iLock"
+
+    create_webapp_access_response:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            uuid:
+              type: string
+              description: Access's UUID
+              example: 897a8cb1-38a1-411b-a0a0-50aa5ddec89f
+            type:
+              type: string
+              description: Access's type
+              enum:
+                - 'HOTEL'
+                - 'HOTEL_ROOM'
+                - 'HOME'
+                - 'VACATIONAL_RENTAL'
+                - 'RENT'
+                - 'OFFICE'
+                - 'PARKING_SLOT'
+              example: HOTEL
+            alias:
+              type: string
+              description: Access's alias
+              example: access alias
+            valid_from:
+              type: integer
+              description: Unix timestamp since user can access to asset
+              example: 1600000000
+            valid_until:
+              type: integer
+              description: Unix timestamp until user can access to asset
+              example: 1600000000
+            status:
+              type: string
+              description: Access's status
+              enum:
+                - 'ACTIVE'
+                - 'EXPIRED'
+                - 'REVOKED'
+              example: ACTIVE
+            created_at:
+              type: integer
+              description: Unix timestamp when access was created
+              example: 1600000000
+            url:
+              type: string
+              description: Access's web app url
+              example: digitalaccess.alfredsmartdata.com/access/897a8cb1-38a1-411b-a0a0-50aa5ddec89f
+
+    Success:
+      type: object
+      properties:
+        detail:
+          type: string
+          example: "ok"
+
+    Response226WebApp:
+      type: object
+      properties:
+        detail:
+          type: string
+          example: "access with id: 22025999-d237-4282-963b-d9c392f5f9ab already used"
+        data:
+          type: object
+          properties:
+            device_name:
+              type: string
+              example: "samsung 123"
+            browser_name:
+              type: string
+              example: "chrome"
+            community:
+              $ref: '#/components/schemas/community_web_app'
+
+    Errors:
+      type: array
+      items:
+        $ref: '#/components/schemas/Error_detail'
+
+    Errors404:
+      type: array
+      items:
+        $ref: '#/components/schemas/Error404'
+
+    Errors410:
+      type: array
+      items:
+        $ref: '#/components/schemas/Error410'
+
+    Errors400:
+      type: array
+      items:
+        $ref: '#/components/schemas/Error400'
+
+    Errors403:
+      type: array
+      items:
+        $ref: '#/components/schemas/Error403'
+
+    Errors401:
+      type: array
+      items:
+        $ref: '#/components/schemas/Error401'
+
+    Errors410WebApp:
+      type: array
+      items:
+        $ref: '#/components/schemas/Error410WebApp'
+
+    Errors422:
+      type: array
+      items:
+        $ref: '#/components/schemas/Error422'
+
+    Errors426:
+      type: array
+      items:
+        $ref: '#/components/schemas/Error426'
+
+    Error_detail:
+      type: object
+      properties:
+        detail:
+          type: string
+          example: "error message"
+    Error404:
+      type: object
+      properties:
+        detail:
+          type: string
+          example: "Not found"
+    Error400:
+      type: object
+      properties:
+        detail:
+          type: string
+          example: "something went wrong with the request"
+    Error401:
+      type: object
+      properties:
+        detail:
+          type: string
+          example: "Unauthorized"
+    Error410WebApp:
+      type: object
+      properties:
+        detail:
+          type: string
+          example: "access with id: 549040ee-e7d6-481c-9f08-34d008f2236c valid from 2024-01-31 07:53 has expired at 2024-01-29 08:53"
+        data:
+          type: object
+          properties:
+            valid_from:
+              type: string
+              example: 1706687587
+            valid_until:
+              type: string
+              example: 1706518387
+    Error403:
+      type: object
+      properties:
+        detail:
+          type: string
+          example: "Forbidden"
+    Error410:
+      type: object
+      properties:
+        detail:
+          type: string
+          example: "Resource is no longer available"
+    Error422:
+      type: object
+      properties:
+        detail:
+          type: string
+          example: "Invalid payload : Empty payload"
+    Error426:
+      type: object
+      properties:
+        detail:
+          type: string
+          example: "Check in access already exist with same datetime"
+    Errors500:
+      type: array
+      items:
+        $ref: '#/components/schemas/Error500'
+    Error500:
+      type: object
+      properties:
+        detail:
+          type: string
+          example: "Internal server error"

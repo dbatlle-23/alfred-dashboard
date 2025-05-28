@@ -1,0 +1,9 @@
+{
+  "low_threshold": 0.02884509149707813,
+  "medium_threshold": 0.0379950057170344,
+  "high_threshold": 0.04714491993699068,
+  "sudden_increase": 5.0,
+  "daily_max": 5.0,
+  "monthly_max": 200.0,
+  "method": "config_adjusted"
+}

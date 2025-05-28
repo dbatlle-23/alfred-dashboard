@@ -1,0 +1,504 @@
+openapi: 3.0.3
+info:
+  title: Alfred Smart System
+  description: Internal API
+  version: 1.0.0
+
+servers:
+  - url: https://services.alfredsmartdata.com/
+    description: Production server
+  - url: https://services.testing1.alfredstaging.com/
+    description: staging testing1 server
+  - url: https://services.testing2.alfredstaging.com/
+    description: staging testing2 server
+  - url: https://services.testing3.alfredstaging.com/
+    description: staging testing3 server
+  - url: https://services.testing4.alfredstaging.com/
+    description: staging testing4 server
+  - url: https://services.testing5.alfredstaging.com/
+    description: staging testing5 server
+  - url: https://services.testing6.alfredstaging.com/
+    description: staging testing6 server
+  - url: https://services.testing7.alfredstaging.com/
+    description: staging testing8 server
+  - url: https://services.testing8.alfredstaging.com/
+    description: staging testing8 server
+  - url: https://services.preprod.alfredstaging.com/
+    description: Preproduction
+
+tags:
+  - name: SSO
+    description: Single Sign On relative endpoints
+  - name: users
+    description: users relative endpoints
+  - name: rolesPermissions
+    description: internal roles and permissions
+  - name: assets
+    description: Enterprise deployments
+  - name: hotels
+    description: List of check in hotel room
+  - name:  support tickets csv
+    description: Download Support Tickets CSV by client
+  - name: projects
+    description: Projects relative endpoints
+  - name: commonAreas
+    description: Common Area relative endpoints
+  - name: data
+    description: Endpoints for data retrieval and data ingestion
+  - name: academy
+    description: Endpoints for academy Docs
+  - name: webapp access
+    description: Webapp Endpoints
+  - name: clients
+    description: Endpoints for clients information
+  - name: gateways
+    description: Gateways relative endpoints
+  - name: QRAccess
+    description: QR Access Endpoints
+  - name: events and news
+    description: Events and news relative endpoints
+  - name: documents
+    description: documents integration
+  - name: devices
+    description: Endpoints for devices information
+  - name: sensors
+    description: Endpoints for sensors information
+  - name: devices help
+    description: Endpoints for devices help information
+  - name: utils
+    description: Endpoints for utils functionalities
+  - name: bundles
+    description: bundles integration
+  - name: bundles version
+    description: bundles version integration
+  - name: categories devices
+    description: Alfred categories to devices
+  - name: payments
+    description: Payment Enpoints
+  - name: notifications
+    description: Notifications
+
+paths:
+
+  ############ SSO ############
+
+  '/sso/authorize/{sso_provider_name}':
+    $ref: "./resources/sso/ssoAuthorize.yaml"
+
+  '/sso/access/{sso_provider_name}':
+    $ref: "./resources/sso/ssoAccess.yaml"
+
+  '/sso/redirect':
+    $ref: "./resources/sso/ssoRedirect.yaml"
+
+  '/sso/places/{sso_provider_name}':
+    $ref: "./resources/sso/ssoPlaces.yaml"
+
+  '/sso/providers':
+    $ref: "./resources/sso/ssoProviders.yaml"
+
+  "/sso/providers/{sso_provider_name}":
+    $ref: "./resources/sso/ssoProvider.yaml"
+
+  '/sso/providers/{sso_provider_name}/status':
+    $ref: "./resources/sso/ssoProviderStatus.yaml"
+
+  "/sso/providers/{sso_provider_name}/common-areas":
+    $ref: "./resources/sso/ssoCommonAreas.yaml"
+
+  "/sso/providers/{sso_provider_name}/common-areas/sync-all":
+    $ref: "./resources/sso/ssoCommonAreasSyncAll.yaml"
+
+  '/sso/providers/{sso_provider_name}/common-area-bookings':
+    $ref: "./resources/sso/ssoCommonAreaBookings.yaml"
+
+
+  ############ USERS ############
+
+
+  '/users/login':
+    $ref: "./resources/users/usersLogin.yaml"
+
+  '/users/{user_id}/devices/authorized':
+    $ref: "./resources/users/authorizedUserDevices.yaml"
+
+
+  '/users/{user_id}/asset/{asset_id}/relate':
+    $ref: "./resources/users/singleAssetRelation.yaml"
+
+  '/users/{user_id}/relationships/assets':
+    $ref: "./resources/users/massiveAssetRelation.yaml"
+
+  '/users/app':
+    $ref: "./resources/users/userByUsers.yaml"
+
+
+
+  ############ ROLES PERMISSIONS ############
+
+  '/security/permissions':
+    $ref: "./resources/rolesPermissions/permissions/permissions.yaml"
+
+  '/security/permissions/{permissionsUuid}':
+    $ref: "./resources/rolesPermissions/permissions/pathPermissions.yaml"
+
+  '/security/groups':
+    $ref: "./resources/rolesPermissions/groups/groups.yaml"
+
+  '/security/groups/{groupsUuid}':
+    $ref: "./resources/rolesPermissions/groups/pathGroups.yaml"
+
+  '/security/roles':
+    $ref: "./resources/rolesPermissions/roles/roles.yaml"
+
+  '/security/roles/{rolesUuid}':
+    $ref: "./resources/rolesPermissions/roles/pathRoles.yaml"
+
+  '/security/permissions/groups':
+    $ref: "./resources/rolesPermissions/permissionsGroups.yaml"
+
+  '/security/roles/groups':
+    $ref: "./resources/rolesPermissions/rolesGroups.yaml"
+
+  '/security/roles/users':
+    $ref: "./resources/rolesPermissions/rolesUsers.yaml"
+
+  '/security/users':
+    $ref: "./resources/rolesPermissions/users.yaml"
+
+  ############ ASSETS ############
+
+  '/assets':
+    $ref: "./resources/assets/assets.yaml"
+
+  '/assets/{asset_id}':
+    $ref: "./resources/assets/assetById.yaml"
+
+  '/assets/{asset_id}/devices':
+    $ref: "./resources/assets/assetDevices.yaml"
+
+  '/nn/assets':
+    $ref: "./resources/assets/nnAssets.yaml"
+
+  '/assets/generate-qr-codes/{amount}':
+    $ref: "./resources/assets/generateQrCodes.yaml"
+
+  '/enterprise/assets':
+    $ref: "./resources/assets/enterpriseAssets.yaml"
+
+
+  ############ PROJECTS ############
+
+
+  '/projects':
+    $ref: "./resources/projects/projects.yaml"
+
+  '/projects/{project_id}':
+    $ref: "./resources/projects/projectById.yaml"
+
+  '/projects/{project_id}/cameras':
+    $ref: "./resources/projects/projectCameras.yaml"
+
+  '/projects/{project_id}/sensors':
+    $ref: "./resources/projects/projectSensors.yaml"
+
+  '/projects/{project_id}/assets':
+    $ref: "./resources/projects/projectAssets.yaml"
+
+  '/projects/{project_id}/layout-config':
+    $ref: "./resources/projects/projectLayoutConfig.yaml"
+
+  '/projects/layout-config/area/{area_id}':
+    $ref: "./resources/projects/projectLayoutByArea.yaml"
+
+
+  ############ COMMON AREAS ############
+
+
+  '/common-areas/type/{type_id}':
+    $ref: "./resources/commonAreas/commonAreasByType.yaml"
+
+  '/common-areas/types/{type_id}':
+    $ref: "./resources/commonAreas/commonAreasType.yaml"
+
+  '/projects/common-areas/{common_area_id}':
+    $ref: "./resources/commonAreas/commonArea.yaml"
+
+  '/projects/{project_id}/common-areas':
+    $ref: "./resources/commonAreas/commonAreas.yaml"
+
+  '/projects/{project_id}/common-area/type':
+    $ref: "./resources/commonAreas/commonAreaByProject.yaml"
+
+  '/projects/{project_id}/common-area/type/{type_id}':
+    $ref: "./resources/commonAreas/commonAreaByType.yaml"
+
+  '/projects/{project_id}/common-area/type/{type_id}/first-level-location/{location_id}':
+    $ref: "./resources/commonAreas/commonAreaByLocation.yaml"
+
+  '/projects/{project_id}/common-areas-filtered':
+    $ref: "./resources/commonAreas/commonAreasFilteredByProject.yaml"
+
+  '/projects/common-area/type/{type_id}':
+    $ref: "./resources/commonAreas/commonAreaType.yaml"
+
+  '/project/{project_id}/common-area/bookings':
+    $ref: "./resources/commonAreas/commonAreaBookingsByUser.yaml"
+
+  '/project/{project_id}/common-area/booking/groups':
+    $ref: "./resources/commonAreas/commonAreaBookingGroupsByCommunity.yaml"
+
+  '/common-area/{commonAreaId}/time-overlap':
+    $ref: "./resources/commonAreas/ListCommonAreaTimeOverlap.yaml"
+  '/common-areas':
+    $ref: "./resources/commonAreas/removeMassiveCommonArea.yaml"
+
+  '/common-areas/bookings':
+    $ref: "./resources/commonAreas/removeMassiveCommonAreaBooking.yaml"
+
+  '/common-areas/{commonAreaId}/slots/{day}/availability':
+    $ref: "./resources/commonAreas/commonAreaSlotsAvailability.yaml"
+
+  "/common-areas/{commonAreaId}/booking-assignment":
+    $ref: "./resources/commonAreas/createCommonAreasFromAssetsManager.yaml"
+    
+  "/projects/{project_id}/common-areas/users":
+    $ref: "./resources/commonAreas/ListCommonAreaAndUserByProject.yaml"
+
+  "/common-areas/type/{type}/slots/{day}/availability":
+    $ref: "./resources/commonAreas/ListCommonAreaBookingSlotsByType.yaml"
+
+  "/common-areas/location/{location_id}/slots/{day}/availability":
+    $ref: "./resources/commonAreas/ListCommonAreaBookingSlotsByLocation.yaml"
+
+  "/projects/common-areas":
+    $ref: "./resources/commonAreas/ListCommonAreaFiltered.yaml"
+
+  "/projects/{projectId}/location/verticals":
+    $ref: "./resources/commonAreas/ListCommonAreaWithVertical.yaml"
+
+  '/projects/{projectId}/common-areas':
+    $ref: "./resources/commonAreas/createCommonAreas.yaml"
+
+  '/projects/common-areas/{commonAreaId}':
+    $ref: "./resources/commonAreas/updateCommonArea.yaml"
+
+  "/projects/{projectId}/common-areas/slots/{day}/availability":
+    $ref: "./resources/commonAreas/listCommonAreaBookingSlotsByProject.yaml"
+
+  ############ HOTELS ############
+
+
+  '/hotels/check-in/projects/{project_id}?page[number]=1&page[size]=5000':
+    $ref: "./resources/hotels/checkInByProject.yaml"
+
+  '/hotels/assets/check-in':
+    $ref: "./resources/hotels/checkIn.yaml"
+
+  '/hotels/assets/check-in/{accessUid}':
+    $ref: "./resources/hotels/editCheckIn.yaml"
+
+  ############ SUPPORT TICKETS CSV ############
+
+
+  '/support-tickets/download':
+    $ref: "./resources/supportTicketsCsv/download.yaml"
+
+
+  ############ ACADEMY ############
+
+
+  '/academy/docs/{folder}':
+    $ref: "./resources/academy/academyDocs.yaml"
+
+
+  ############ WEBAPP ACCESS ############
+
+
+  '/access/asset/{asset_id}':
+    $ref: "./resources/webApp/accessDetailByAssetId.yaml"
+
+  '/access/create':
+    $ref: "./resources/webApp/createAccess.yaml"
+
+  '/access/qr/project/{project_id}':
+    $ref: "./resources/webApp/listQRAccessByCommunity.yaml"
+
+  '/access/qr/{access_id}':
+    $ref: "./resources/webApp/crudQRAccess.yaml"
+
+  '/access/qr/asset/{asset_id}':
+    $ref: "./resources/webApp/QRAccessByAsset.yaml"
+
+  '/access/qr/{access_id}/validate':
+    $ref: "./resources/webApp/validateQRAccess.yaml"
+
+  '/access/qr/{access_id}/resend-email':
+    $ref: "./resources/webApp/resendQRAccessEmail.yaml"
+
+  ############ DATA ############
+
+
+  '/data/assets/time-series/{asset_id}/access-control':
+    $ref: "./resources/data/accessAssetControlLog.yaml"
+
+  '/data/projects/time-series/{project_id}/access-control':
+    $ref: "./resources/data/accessProjectControlLog.yaml"
+
+  '/data/devices/interactions':
+    $ref: "./resources/data/reportDevicesInteractions.yaml"
+
+  '/data/assets/{asset_id}/available-utilities-sensors':
+    $ref: "./resources/data/availableUtilitiesSensors.yaml"
+
+  '/data/sensors/utilities-summaries':
+    $ref: "./resources/data/utilitiesSummary.yaml"
+
+  '/data/buildings/dashboard/{project_id}':
+    $ref: "./resources/data/buildingsDashboard.yaml"
+
+  '/data/buildings/people-count/{project_id}':
+    $ref: "./resources/data/buildingsPeopleCount.yaml"
+
+
+  ############ CLIENTS ############
+
+
+  '/clients/{clientId}':
+    $ref: "./resources/clients/clientsById.yaml"
+
+  '/clients':
+    $ref: "./resources/clients/clients.yaml"
+
+
+  ############ GATEWAYS ############
+
+
+  '/gateways?page[number]=1&page[size]=5000&search=keyword&filter="field=value"':
+    $ref: "./resources/gateways/gateways.yaml"
+
+  '/gateways/{gateway_id}/devices':
+    $ref: "./resources/gateways/gatewayDevices.yaml"
+
+  '/gateways/{gateway_id}':
+    $ref: "./resources/gateways/gatewayById.yaml"
+
+  ########## EVENTS AND NEWS #######################
+
+  '/projects/{projectId}/events-news/unread':
+    $ref: "./resources/eventsAndNews/eventsNewsUnRead.yaml"
+
+  '/events/{eventId}':
+    $ref: "./resources/eventsAndNews/eventsNewsDetail.yaml"
+
+  '/projects/{projectId}/events-news':
+    $ref: "./resources/eventsAndNews/EventsAnNews.yaml"
+
+  '/projects/{projectId}/documents':
+    $ref: "./resources/documents/listDocumentsByProject.yaml"
+
+  '/assets/{assetId}/documents':
+    $ref: "./resources/documents/listDocumentsByAssets.yaml"
+
+
+  ############ QR ACCESS ############
+
+  '/qr/access/assets/{asset_id}':
+    $ref: "./resources/QRAccess/QRAccess.yaml"
+
+  '/qr/access/assets/{asset_id}/list':
+    $ref: "./resources/QRAccess/listQRAccess.yaml"
+
+  '/qr/access':
+    $ref: "./resources/QRAccess/createQRAccess.yaml"
+
+  '/qr/access/{qr_access_id}/revoke':
+    $ref: "./resources/QRAccess/revokeQRAccess.yaml"
+
+
+  ############ DEVICES ############
+
+  '/devices':
+    $ref: "./resources/devices/devices.yaml"
+
+  '/devices/{deviceid}':
+    $ref: "./resources/devices/deviceIndividual.yaml"
+
+  '/devices/access/project/{project_id}/list':
+    $ref: "./resources/devices/accessDevices.yaml"
+
+  '/devices/toggle/lock':
+    $ref: "./resources/devices/toggleLockDevices.yaml"
+
+  '/devices/status':
+    $ref: "./resources/devices/devicesStatus.yaml"
+
+  '/devices/enabled':
+    $ref: "./resources/devices/deviceEnabled.yaml"
+
+  ############ DEVICES HELP############
+
+  '/devices/help':
+    $ref: "./resources/deviceHelp/deviceHelp.yaml"
+
+  '/devices/help/{device_id}/gateways/{gateway_id}':
+    $ref: "./resources/deviceHelp/deviceHelpPath.yaml"
+
+  ############ UTILS ############
+
+  '/server-utc':
+    $ref: "./resources/utils/currentUtcTimestamp.yaml"
+
+  ############ BUNDLES ############
+  '/bundles':
+    $ref: "./resources/bundles/bundles.yaml"
+  '/bundles/{bundle_id}':
+    $ref: "./resources/bundles/getBundle.yaml"
+
+  ############ BUNDLES VERSION ############
+
+  '/bundle-version':
+    $ref: "./resources/bundle-versions/bundlesVersion.yaml"
+  '/bundle-version/{bundle_id}':
+    $ref: "./resources/bundle-versions/getBundlesVersion.yaml"
+
+  ############ CATEGORIES DEVICES ############
+
+  '/categories':
+    $ref: "./resources/alfredCategory/getCategories.yaml"
+  '/category/device/{deviceId}/gateway/{gatewayUid}':
+    $ref: "./resources/alfredCategory/assignCategoryToDevice.yaml"
+
+
+  ############ PAYMENTS ############
+
+  '/common-areas/booking/{commonAreaBookingId}/payments':
+    $ref: "./resources/payments/bookingPayments.yaml"
+  
+  '/common-area/booking/payment/group/{tuple_id}':
+    $ref: "./resources/payments/bookingPaymentDetail.yaml"
+
+  "/project/:project_id/common-area/booking/payment/group?filter='deposit=true'":
+    $ref: "./resources/payments/bookingCommunityPaymentGroup.yaml"
+  
+  '/payments/capture':
+    $ref: "./resources/payments/captureDeposit.yaml"
+
+
+    ############ NOTIFICATIONS ############
+
+  '/notifications/send':
+    $ref: "./resources/notifications/sendNotification.yaml"
+
+  ############ SENSORS ############
+
+  '/sensors/{sensor_id}':
+    $ref: "./resources/sensors/updateSensorById.yaml"
+
+components:
+  securitySchemes:
+    ApiKeyAuth:            # arbitrary name for the security scheme
+      type: apiKey
+      in: header
+      name: Authorization
+      description: 'Authorization: Bearer SESSION_TOKEN .  SESSION_TOKEN must be obtained via a login action. Any of these roles will grant access to the list: ROLE_ASSETS_MANAGER_SUPER_ADMIN, ROLE_ASSETS_MANAGER_ADMIN, ROLE_ASSETS_MANAGER_USER.'

@@ -1,0 +1,9 @@
+{
+  "low_threshold": 50.0,
+  "medium_threshold": 100.0,
+  "high_threshold": 200.0,
+  "low_threshold_pct": 2.0,
+  "medium_threshold_pct": 4.0,
+  "high_threshold_pct": 8.0,
+  "method": "config_direct"
+}

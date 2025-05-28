@@ -1,0 +1,26 @@
+{
+  "asset_id": "DDC28V3LS7M4C",
+  "consumption_type": "TRANSVERSAL_CONSUMPTION_LIST_TAG_NAME_DOMESTIC_HOT_WATER",
+  "total_records": 136,
+  "anomaly_records": 123,
+  "anomaly_percentage": 90.44117647058823,
+  "high_confidence": 43,
+  "medium_confidence": 80,
+  "low_confidence": 0,
+  "anomaly_types": {
+    "daily_max_exceeded": 121,
+    "percentage_change": 2
+  },
+  "threshold_method": "config",
+  "percentile": 95,
+  "processing_time": 0.19577,
+  "thresholds": {
+    "low_threshold": 0.49853129195531065,
+    "medium_threshold": 0.60447364748971,
+    "high_threshold": 0.7104160030241093,
+    "sudden_increase": 5.0,
+    "daily_max": 10.0,
+    "monthly_max": 200.0,
+    "method": "config_adjusted"
+  }
+}

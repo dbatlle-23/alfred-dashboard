@@ -225,6 +225,147 @@ class AuthService:
             "Authorization": f"Bearer {api_token}"
         }
     
+    def check_token_expiry_and_renew(self, token):
+        """
+        Verifica si un token está cerca de expirar y lo renueva si es necesario
+        
+        Args:
+            token: Token JWT a verificar
+            
+        Returns:
+            tuple: (is_valid, new_token_or_error_message)
+                - is_valid: True si el token es válido (renovado o no), False si hay error
+                - new_token_or_error_message: Nuevo token si se renovó, token original si está válido, mensaje de error si falló
+        """
+        try:
+            if not token:
+                logger.warning("No se proporcionó token para verificar expiración")
+                return False, "No se proporcionó token"
+            
+            # Verificar el token actual
+            user_data = self.verify_jwt_token(token)
+            if not user_data:
+                logger.info("Token expirado o inválido, necesita renovación")
+                return False, "Token JWT expirado"
+            
+            # Verificar si está cerca de expirar (menos de 5 minutos restantes)
+            import jwt
+            try:
+                # Decodificar sin verificar para obtener el tiempo de expiración
+                payload = jwt.decode(token, options={"verify_signature": False})
+                exp_timestamp = payload.get('exp')
+                if exp_timestamp:
+                    from datetime import datetime
+                    exp_time = datetime.fromtimestamp(exp_timestamp)
+                    now = datetime.now()
+                    time_remaining = exp_time - now
+                    
+                    # Si quedan menos de 5 minutos, considerarlo como "próximo a expirar"
+                    if time_remaining.total_seconds() < 300:  # 5 minutos
+                        logger.info(f"Token expira en {time_remaining.total_seconds()} segundos, pero aún es válido")
+                        # Por ahora, devolver el token como válido
+                        # En el futuro se podría implementar renovación automática aquí
+                        return True, token
+                
+            except Exception as decode_error:
+                logger.debug(f"Error al decodificar token para verificar expiración: {decode_error}")
+            
+            # Token válido y no próximo a expirar
+            logger.debug("Token válido y no próximo a expirar")
+            return True, token
+            
+        except Exception as e:
+            logger.error(f"Error al verificar expiración del token: {str(e)}")
+            return False, f"Error al verificar token: {str(e)}"
+    
+    def make_authenticated_request_with_retry(self, token, method, url, data=None, headers=None, max_retries=2):
+        """
+        Realiza una solicitud HTTP con reintentos automáticos en caso de token expirado
+        
+        Args:
+            token: Token JWT para autenticación
+            method: Método HTTP (GET, POST, etc.)
+            url: URL completa para la solicitud
+            data: Datos para enviar (para POST/PUT)
+            headers: Headers adicionales
+            max_retries: Máximo número de reintentos
+            
+        Returns:
+            tuple: (success, response_or_error)
+                - success: True si la solicitud fue exitosa, False si falló
+                - response_or_error: Objeto Response si exitoso, mensaje de error si falló
+        """
+        import requests
+        
+        for attempt in range(max_retries + 1):
+            try:
+                # Verificar y potencialmente renovar el token
+                is_valid, token_result = self.check_token_expiry_and_renew(token)
+                if not is_valid:
+                    logger.error(f"Token inválido en intento {attempt + 1}: {token_result}")
+                    return False, f"Token JWT expirado"
+                
+                # Usar el token (renovado o original)
+                current_token = token_result
+                
+                # Obtener headers de autenticación
+                auth_headers = self.get_auth_headers_from_token(current_token)
+                if not auth_headers:
+                    return False, "No se pudieron obtener headers de autenticación"
+                
+                # Combinar headers
+                final_headers = auth_headers.copy()
+                if headers:
+                    final_headers.update(headers)
+                
+                # Realizar la solicitud
+                logger.info(f"Realizando solicitud {method} a {url} (intento {attempt + 1})")
+                
+                if method.upper() == "GET":
+                    response = requests.get(url, headers=final_headers, timeout=10)
+                elif method.upper() == "POST":
+                    response = requests.post(url, headers=final_headers, json=data, timeout=10)
+                elif method.upper() == "PUT":
+                    response = requests.put(url, headers=final_headers, json=data, timeout=10)
+                elif method.upper() == "DELETE":
+                    response = requests.delete(url, headers=final_headers, timeout=10)
+                else:
+                    return False, f"Método HTTP no soportado: {method}"
+                
+                # Verificar respuesta
+                if response.status_code == 401:
+                    logger.warning(f"Error 401 en intento {attempt + 1}, token posiblemente expirado")
+                    if attempt < max_retries:
+                        logger.info(f"Reintentando... (intento {attempt + 2}/{max_retries + 1})")
+                        continue
+                    else:
+                        return False, "Token JWT expirado"
+                elif 200 <= response.status_code < 300:
+                    logger.info(f"Solicitud exitosa: HTTP {response.status_code}")
+                    return True, response
+                else:
+                    # Otros errores HTTP no relacionados con autenticación
+                    logger.error(f"Error HTTP {response.status_code}: {response.text}")
+                    return False, f"Error HTTP {response.status_code}: {response.text}"
+                    
+            except requests.exceptions.Timeout:
+                logger.warning(f"Timeout en intento {attempt + 1}")
+                if attempt < max_retries:
+                    continue
+                return False, "Timeout al realizar la solicitud"
+            except requests.exceptions.ConnectionError:
+                logger.warning(f"Error de conexión en intento {attempt + 1}")
+                if attempt < max_retries:
+                    continue
+                return False, "Error de conexión"
+            except Exception as e:
+                logger.error(f"Error inesperado en intento {attempt + 1}: {str(e)}")
+                if attempt < max_retries:
+                    continue
+                return False, f"Error inesperado: {str(e)}"
+        
+        return False, "Se agotaron los reintentos"
+    
     def has_permission(self, token, permission):
         """
         Verifica si el usuario tiene un permiso específico

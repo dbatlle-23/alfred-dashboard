@@ -13,6 +13,7 @@ import pickle
 import glob
 import shutil
 import time
+import logging
 
 logger = get_logger(__name__)
 
@@ -2572,112 +2573,101 @@ def get_devices_fallback(project_id=None):
 
 def get_nfc_code_value(device_id, sensor_id, jwt_token=None, gateway_id=None, asset_id=None):
     """
-    Obtiene el valor actual de un código NFC para un sensor específico
+    Obtiene el valor de un código NFC para un dispositivo y sensor específicos
     
     Args:
         device_id: ID del dispositivo
-        sensor_id: ID del sensor NFC
+        sensor_id: ID del sensor
         jwt_token: Token JWT para autenticación
-        gateway_id: ID del gateway (opcional, si no se proporciona se usará el device_id)
-        asset_id: ID del asset (usado para logs y para algunas URLs)
+        gateway_id: ID del gateway (requerido para construir la URL correcta)
+        asset_id: ID del asset (opcional, solo para logging)
         
     Returns:
-        str: Valor del código NFC
+        String con el valor del código NFC o None si hay error
     """
     try:
-        # Verificar autenticación
-        if not jwt_token:
-            logger.error("No hay token JWT disponible para obtener valor NFC")
+        # Verificar parámetros requeridos
+        if not device_id:
+            logger.error("Falta device_id para obtener código NFC")
             return None
             
-        if not auth_service.is_authenticated(jwt_token):
-            logger.error("Token JWT inválido para obtener valor NFC")
+        if not sensor_id:
+            logger.error("Falta sensor_id para obtener código NFC")
+            return None
+            
+        if not gateway_id:
+            logger.error(f"Falta gateway_id para el dispositivo {device_id}")
+            return None
+            
+        if not jwt_token:
+            logger.warning("No se proporcionó token JWT para obtener código NFC")
             return None
         
-        # Si no se proporciona gateway_id, usar device_id como fallback
-        if not gateway_id:
-            gateway_id = device_id
-            
+        # Verificar el formato del device_id y extraer el ID canónico para la URL
+        original_device_id = device_id
+        
+        # Manejar diferentes formatos de ID
+        if "_" in device_id:
+            # ID complejo como "RAYONICS_1_e9fc2d17a2ca" - usamos el número después del primer underscore
+            parts = device_id.split("_")
+            if len(parts) >= 2 and parts[1].isdigit():
+                device_id_for_url = parts[1]
+                logger.info(f"Extrayendo device_id canónico de complejo '{original_device_id}' → '{device_id_for_url}'")
+            else:
+                # Si no se puede extraer el número, usar el ID original y advertir
+                device_id_for_url = device_id
+                logger.warning(f"No se pudo extraer un device_id numérico de '{original_device_id}', usando valor original")
+        elif ":" in device_id:
+            # Para ID con formato "100: Dispositivo"
+            device_id_for_url = device_id.split(":")[0].strip()
+            logger.info(f"Extrayendo device_id canónico de '{original_device_id}' → '{device_id_for_url}'")
+        elif device_id.isdigit():
+            # Si ya es un ID numérico, usarlo directamente
+            device_id_for_url = device_id
+        else:
+            # En otros casos, intentar extraer cualquier parte numérica
+            import re
+            numeric_part = re.search(r'\d+', device_id)
+            if numeric_part:
+                device_id_for_url = numeric_part.group(0)
+                logger.info(f"Extrayendo parte numérica de '{original_device_id}' → '{device_id_for_url}'")
+            else:
+                # Si no hay parte numérica, usar el ID original y advertir
+                device_id_for_url = device_id
+                logger.warning(f"No se encontró parte numérica en '{original_device_id}', usando valor original")
+                
+        # Obtener headers de autenticación
         headers = get_auth_headers(jwt_token)
         
-        # Intentar varios formatos de URL posibles
-        urls_to_try = []
+        # Construir URL para la API
+        url = f"{BASE_URL}/gateways/{gateway_id}/devices/{device_id_for_url}/password/{sensor_id}"
+        logger.debug(f"URL para obtener código NFC: {url} (original device_id: {original_device_id})")
         
-        # Solo añadir URLs con asset_id si se proporciona
-        if asset_id:
-            # Formato 1: URL original
-            urls_to_try.append(f"{BASE_URL}/sensor-passwords/deployment/{asset_id}/device/{device_id}/sensor/{sensor_id}")
+        # Hacer solicitud a la API
+        response = requests.get(url, headers=headers, timeout=10)
         
-        # Añadir el resto de URLs
-        urls_to_try.extend([
-            # Formato 2: Nuevo formato basado en el ejemplo
-            f"{BASE_URL}/gateways/{gateway_id}/devices/{device_id}/sensors/{sensor_id}/password",
-            # Formato 3: Formato más RESTful
-            f"{BASE_URL}/api/gateways/{gateway_id}/devices/{device_id}/sensors/{sensor_id}/password",
-            # Formato 4: Otro posible formato
-            f"{BASE_URL}/api/devices/{device_id}/sensors/{sensor_id}/password"
-        ])
+        # Verificar si la respuesta es exitosa
+        if response.status_code != 200:
+            logger.error(f"Error al obtener código NFC para device_id={device_id_for_url}, sensor_id={sensor_id}: código {response.status_code}")
+            return None
         
-        # Intentar cada URL hasta que una funcione
-        for url in urls_to_try:
-            try:
-                logger.debug(f"Intentando obtener código NFC con URL: {url}")
-                response = requests.get(url, headers=headers)
-                
-                # Verificar si la operación fue exitosa (2xx)
-                if response.status_code >= 200 and response.status_code < 300:
-                    logger.info(f"Código NFC obtenido exitosamente con URL: {url}")
-                    
-                    # Intentar procesar la respuesta como JSON
-                    try:
-                        result = response.json()
-                        
-                        # Manejar diferentes formatos de respuesta posibles
-                        if isinstance(result, dict):
-                            # Formato 1: {"data": {"password": "valor"}}
-                            if "data" in result and isinstance(result["data"], dict) and "password" in result["data"]:
-                                return result["data"]["password"]
-                            
-                            # Formato 2: {"password": "valor"}
-                            if "password" in result:
-                                return result["password"]
-                            
-                            # Formato 3: {"value": "valor"}
-                            if "value" in result:
-                                return result["value"]
-                            
-                            # Si ningún formato conocido, devolver el primer valor string que encontremos
-                            for key, value in result.items():
-                                if isinstance(value, str):
-                                    logger.warning(f"Usando valor desconocido '{key}': {value}")
-                                    return value
-                            
-                            # Si todo falla, devolver el JSON completo como string
-                            logger.warning(f"No se pudo extraer valor NFC de la respuesta: {result}")
-                            return str(result)
-                        
-                        # Si es un string directo
-                        if isinstance(result, str):
-                            return result
-                        
-                        # Si es una lista, intentar obtener el primer elemento
-                        if isinstance(result, list) and len(result) > 0:
-                            return str(result[0])
-                            
-                    except ValueError:
-                        # Si no es JSON, devolver el texto plano
-                        if response.text:
-                            return response.text.strip()
-                
-                logger.warning(f"Error al intentar URL {url}: {response.status_code}")
-                
-            except Exception as e:
-                logger.warning(f"Excepción al intentar URL {url}: {str(e)}")
-                continue
+        # Parsear la respuesta como JSON
+        data = response.json()
         
-        # Si llegamos aquí, ninguna URL funcionó
-        logger.error("Todas las URLs para obtener el código NFC fallaron")
-        return None
+        # Verificar datos básicos
+        if not isinstance(data, dict) or 'data' not in data:
+            logger.error(f"Formato de respuesta incorrecto para código NFC: {data}")
+            return None
+            
+        # Obtener el valor del código NFC
+        nfc_code = data.get('data', {})
+        
+        if isinstance(nfc_code, dict) and 'password' in nfc_code:
+            # Extraer el valor del código NFC
+            return nfc_code.get('password')
+        else:
+            logger.error(f"No se encontró el valor 'password' en la respuesta: {nfc_code}")
+            return None
         
     except Exception as e:
         logger.error(f"Error al obtener código NFC: {str(e)}", exc_info=True)
@@ -2688,8 +2678,8 @@ def update_nfc_code_value(asset_id, device_id, sensor_id, new_value, jwt_token=N
     Actualiza el valor de un código NFC
     
     Args:
-        asset_id: ID del asset
-        device_id: ID del dispositivo
+        asset_id: ID del asset (opcional, usado solo para logs)
+        device_id: ID del dispositivo (debe ser el ID canónico)
         sensor_id: ID del sensor
         new_value: Nuevo valor del código NFC
         jwt_token: Token JWT para autenticación
@@ -2697,342 +2687,216 @@ def update_nfc_code_value(asset_id, device_id, sensor_id, new_value, jwt_token=N
         is_master_card: Booleano que indica si se está actualizando una tarjeta maestra (slot 7)
         
     Returns:
-        Tuple (success, response) donde success es un booleano y response es el detalle
+        Tuple (success, response) con el resultado de la operación
     """
     try:
-        # Verificar autenticación
-        if not jwt_token:
-            logger.error("No hay token JWT disponible para actualizar valor NFC")
-            return False, "No hay autenticación disponible"
+        # Verificar que tenemos todos los parámetros necesarios
+        if not device_id:
+            logger.error("Falta device_id para actualizar código NFC")
+            return False, "Falta ID del dispositivo"
             
-        if not auth_service.is_authenticated(jwt_token):
-            logger.error("Token JWT inválido para actualizar valor NFC")
-            return False, "Autenticación inválida"
-        
-        # Caso especial para el dispositivo con ID 127
-        if device_id == "127" and not gateway_id:
-            gateway_id = "1000000053eb1d68"
-            logger.info(f"Corregido: Asignando gateway_id específico para dispositivo 127: {gateway_id}")
-        
-        # Verificar si tenemos gateway_id (ahora obligatorio para el endpoint correcto)
+        if not sensor_id:
+            logger.error("Falta sensor_id para actualizar código NFC")
+            return False, "Falta ID del sensor"
+            
         if not gateway_id:
-            logger.error(f"Falta gateway_id para el dispositivo {device_id}. Este parámetro es obligatorio.")
-            return False, f"Error: Falta gateway_id para el dispositivo {device_id}"
+            logger.error(f"Falta gateway_id para el dispositivo {device_id}")
+            return False, f"Falta gateway_id para el dispositivo {device_id}"
             
-        # Normalizar formato de UUID para tarjetas maestras
-        # Convertir AABBCCDD a AA:BB:CC:DD si no tiene separadores
-        if is_master_card and ":" not in new_value and "-" not in new_value and len(new_value) == 8:
-            new_value = ":".join([new_value[i:i+2] for i in range(0, len(new_value), 2)])
-            logger.info(f"Formato de UUID de tarjeta maestra normalizado a: {new_value}")
-            
-        # Definir URLs a intentar - MODIFICADO PARA USAR EL ENDPOINT CORRECTO
-        urls_to_try = []
+        if not jwt_token:
+            logger.error("Falta token JWT para actualizar código NFC")
+            return False, "No hay autenticación disponible"
         
-        # El endpoint correcto ahora es la primera opción para todos los casos
-        primary_url = f"{BASE_URL}/gateways/{gateway_id}/devices/{device_id}/update-password/{sensor_id}"
-        urls_to_try.append(primary_url)
+        # Verificar el formato del device_id y extraer el ID canónico para la URL
+        original_device_id = device_id
         
-        # URLs adicionales como fallback (solo en caso de que el primero falle)
-        if is_master_card:
-            # Registro especial para tarjetas maestras
-            logger.info(f"Actualizando tarjeta maestra (slot {sensor_id}) para dispositivo {device_id}, gateway {gateway_id}, valor: {new_value}")
-            logger.info(f"Usando URL principal: {primary_url}")
+        # Manejar diferentes formatos de ID
+        if "_" in device_id:
+            # ID complejo como "RAYONICS_1_e9fc2d17a2ca" - usamos el número después del primer underscore
+            parts = device_id.split("_")
+            if len(parts) >= 2 and parts[1].isdigit():
+                device_id_for_url = parts[1]
+                logger.info(f"Extrayendo device_id canónico de complejo '{original_device_id}' → '{device_id_for_url}'")
+            else:
+                # Si no se puede extraer el número, usar el ID original y advertir
+                device_id_for_url = device_id
+                logger.warning(f"No se pudo extraer un device_id numérico de '{original_device_id}', usando valor original")
+        elif ":" in device_id:
+            # Para ID con formato "100: Dispositivo"
+            device_id_for_url = device_id.split(":")[0].strip()
+            logger.info(f"Extrayendo device_id canónico de '{original_device_id}' → '{device_id_for_url}'")
+        elif device_id.isdigit():
+            # Si ya es un ID numérico, usarlo directamente
+            device_id_for_url = device_id
         else:
-            # Para códigos NFC normales, mantener endpoint alternativo si tenemos asset_id
-            if asset_id:
-                urls_to_try.append(f"{BASE_URL}/sensor-passwords/deployment/{asset_id}/device/{device_id}/sensor/{sensor_id}")
+            # En otros casos, intentar extraer cualquier parte numérica
+            import re
+            numeric_part = re.search(r'\d+', device_id)
+            if numeric_part:
+                device_id_for_url = numeric_part.group(0)
+                logger.info(f"Extrayendo parte numérica de '{original_device_id}' → '{device_id_for_url}'")
+            else:
+                # Si no hay parte numérica, usar el ID original y advertir
+                device_id_for_url = device_id
+                logger.warning(f"No se encontró parte numérica en '{original_device_id}', usando valor original")
         
-        headers = get_auth_headers(jwt_token)
+        # Construir la URL para la actualización del código NFC
+        url = f"{BASE_URL}/gateways/{gateway_id}/devices/{device_id_for_url}/update-password/{sensor_id}"
+        logger.info(f"URL para actualizar código NFC: {url} (original device_id: {original_device_id})")
         
-        # Crear el payload según el formato que podría aceptar la API
+        # Preparar los datos para la solicitud con el formato correcto
         data = {
             "data": {
                 "password": new_value
             }
         }
+        logger.debug(f"Datos para actualizar código NFC: {data}")
         
-        # Intentar cada URL hasta que una funcione
-        max_retries = 3  # Número máximo de reintentos por URL
-        retry_delay = 1  # Segundos entre reintentos (se duplicará en cada intento)
+        # Preparar headers adicionales
+        additional_headers = {'Content-Type': 'application/json'}
         
-        for url in urls_to_try:
-            retries = 0
-            while retries < max_retries:
-                try:
-                    logger.debug(f"Intentando actualizar código NFC con URL: {url} (intento {retries+1}/{max_retries})")
-                    response = requests.post(url, json=data, headers=headers, timeout=10)  # Añadir timeout de 10 segundos
-                    
-                    # Verificar si la operación fue exitosa (2xx)
-                    if response.status_code >= 200 and response.status_code < 300:
-                        logger.info(f"Código NFC actualizado exitosamente con URL: {url}")
-                        
-                        # Algunos endpoints pueden devolver 204 No Content
-                        if response.status_code == 204 or not response.text:
-                            return True, "Código NFC actualizado exitosamente"
-                        
-                        # Intentar procesar la respuesta como JSON
-                        try:
-                            result = response.json()
-                            return True, result
-                        except:
-                            # Si no es JSON, devolver el texto plano
-                            return True, response.text
-                    
-                    # Si es un error 503 (Service Unavailable) o 502 (Bad Gateway), reintentar
-                    if response.status_code in [502, 503] and retries < max_retries - 1:
-                        retries += 1
-                        wait_time = retry_delay * (2 ** retries)  # Backoff exponencial
-                        logger.warning(f"Error {response.status_code} al intentar URL {url}. Reintentando en {wait_time} segundos...")
-                        time.sleep(wait_time)
-                        continue
-                    
-                    # Si es error 404 (Not Found) y no es la última URL, probar la siguiente
-                    if response.status_code == 404 and url != urls_to_try[-1]:
-                        logger.warning(f"URL {url} no encontrada (404). Probando siguiente URL alternativa.")
-                        break  # Salir del bucle de reintentos y probar la siguiente URL
-                    
-                    logger.warning(f"Error al intentar URL {url}: {response.status_code}")
-                    
-                    # Si la respuesta contiene texto, registrarlo para diagnóstico
-                    if hasattr(response, 'text') and response.text:
-                        try:
-                            logger.warning(f"Detalle de respuesta: {response.text[:500]}")
-                        except:
-                            pass
-                            
-                    break  # Salir del bucle de reintentos y probar la siguiente URL
-                    
-                except requests.exceptions.Timeout:
-                    logger.warning(f"Timeout al intentar URL {url}")
-                    if retries < max_retries - 1:
-                        retries += 1
-                        wait_time = retry_delay * (2 ** retries)
-                        logger.warning(f"Reintentando en {wait_time} segundos...")
-                        time.sleep(wait_time)
-                        continue
-                    break
-                    
-                except Exception as e:
-                    logger.warning(f"Excepción al intentar URL {url}: {str(e)}")
-                    break
+        # Usar el nuevo método con reintentos automáticos y manejo de token expirado
+        logger.info(f"Iniciando actualización de código NFC con manejo automático de token")
+        success, response = auth_service.make_authenticated_request_with_retry(
+            token=jwt_token,
+            method="POST",
+            url=url,
+            data=data,
+            headers=additional_headers,
+            max_retries=2
+        )
         
-        # Si llegamos aquí, ninguna URL funcionó
-        last_status_code = getattr(response, 'status_code', None) if 'response' in locals() else None
-        error_message = f"Todas las URLs para actualizar el código NFC fallaron."
-        
-        if last_status_code:
-            logger.error(f"{error_message} Último código de estado: {last_status_code}")
-            
-            # Mensajes de error más descriptivos según el código de estado
-            if last_status_code == 503:
-                return False, "Servicio no disponible temporalmente. Intente más tarde."
-            elif last_status_code == 401 or last_status_code == 403:
-                return False, "No tiene permisos para realizar esta operación."
-            elif last_status_code == 404:
-                # Error 404 más detallado
-                return False, f"El dispositivo o gateway especificado no existe. Verifique device_id={device_id}, gateway_id={gateway_id}"
-            elif last_status_code >= 500:
-                return False, f"Error del servidor ({last_status_code}). Intente más tarde."
-            else:
-                return False, f"Error al actualizar código NFC: Error {last_status_code}"
+        if success:
+                    logger.info(f"Actualización exitosa de código NFC para device_id={device_id}, sensor_id={sensor_id}, status={response.status_code}")
+                    
+            # Manejar diferentes códigos de respuesta exitosos
+                    if response.status_code == 204:
+                        return True, "OK (No Content)"
+                    
+                    try:
+                        return True, response.json()
+                    except:
+                        return True, "OK"
         else:
-            logger.error(f"{error_message} No se pudo conectar con el servidor.")
-            return False, "No se pudo conectar con el servidor. Verifique su conexión e intente nuevamente."
-        
-    except Exception as e:
-        logger.error(f"Error al actualizar código NFC: {str(e)}", exc_info=True)
-        return False, f"Error al actualizar código NFC: {str(e)}"
+            # El error ya está procesado por make_authenticated_request_with_retry
+            logger.error(f"Error al actualizar código NFC: {response}") 
+            
+            # Default error message
+            error_message = f"Error al actualizar código NFC: {str(response)}" # Initialize with a default
 
-def get_nfc_passwords(asset_id, jwt_token=None):
+            # Verificar si es un error de token expirado
+            if "Token JWT expirado" in str(response):
+                error_message = "Error de autenticación: Token expirado. Por favor, inicie sesión nuevamente."
+            elif "401" in str(response):
+                error_message = "Error de autenticación: Credenciales inválidas."
+            elif "404" in str(response):
+                error_message = f"Endpoint no encontrado. Verifique gateway_id={gateway_id} y device_id={device_id_for_url}."
+            elif "503" in str(response) or "500" in str(response):
+                error_message = "Error del servidor. Intente más tarde."
+            
+            return False, error_message
+    
+    except Exception as e:
+        logger.error(f"Error al actualizar código NFC: {str(e)}")
+        return False, str(e)
+
+def get_nfc_passwords(asset_id, jwt_token):
     """
-    Obtiene los códigos NFC para un asset específico
+    Obtiene todos los códigos NFC de un asset específico usando el endpoint /sensor-passwords/deployment/{asset_id}.
     
     Args:
         asset_id: ID del asset
         jwt_token: Token JWT para autenticación
         
     Returns:
-        Dictionary con los datos de códigos NFC o None si hay error
+        dict: Diccionario con la información de los dispositivos con códigos NFC,
+              formateado como {'data': {'devices': [list_of_device_objects_for_grid]}}
+              o None si hay error.
     """
+    import logging # Ensure logging is imported if not already at module level
+    logger = logging.getLogger(__name__)
+        
+    logger.info(f"=== GET_NFC_PASSWORDS (New Endpoint Method) START ===")
+    logger.info(f"Asset ID: {asset_id}")
+    logger.info(f"JWT Token present: {bool(jwt_token)}")
+        
     try:
-        from utils.auth import API_BASE_URL
-        
-        # Definir timeout para la solicitud
-        REQUEST_TIMEOUT = 10  # 10 segundos
-        
-        headers = get_auth_headers(jwt_token)
-        
-        if not headers:
-            logger.warning("No se proporcionó token JWT para obtener códigos NFC")
+        if not jwt_token:
+            logger.error("Token JWT no disponible para get_nfc_passwords.")
+            return None
+        if not asset_id:
+            logger.error("Asset ID no proporcionado para get_nfc_passwords.")
             return None
             
-        url = f"{API_BASE_URL}/sensor-passwords/deployment/{asset_id}"
-        logger.debug(f"Consultando códigos NFC para asset {asset_id} en URL: {url}")
-        
-        response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
-        
-        # Verificar que la respuesta sea exitosa
-        if response.status_code != 200:
-            logger.error(f"Error al obtener códigos NFC: código {response.status_code}, respuesta: {response.text[:500]}")
-            return None
+        endpoint = f"sensor-passwords/deployment/{asset_id}"
+        logger.info(f"Llamando al endpoint optimizado: {BASE_URL}/{endpoint}")
+
+        response_payload = auth_service.make_api_request(jwt_token, "GET", endpoint)
+
+        if not response_payload or not isinstance(response_payload, dict) or "data" not in response_payload:
+            logger.error(f"Respuesta inválida o vacía del endpoint {endpoint}. Respuesta: {response_payload}")
+            return {"data": {"devices": []}}
+
+        api_data_list = response_payload.get("data", [])
+        if not isinstance(api_data_list, list):
+            logger.error(f"La clave 'data' en la respuesta no es una lista. Contenido: {api_data_list}")
+            return {"data": {"devices": []}}
+
+        processed_devices_for_grid = []
+        for device_entry_from_api in api_data_list:
+            if not isinstance(device_entry_from_api, dict):
+                logger.warning(f"Item en 'data' no es un diccionario: {device_entry_from_api}")
+                continue
             
-        # Parsear la respuesta como JSON
-        data = response.json()
-        
-        # DEBUG ESPECIAL: Captura completa de la respuesta API para el problema reportado
-        try:
-            # Buscar dispositivo específico RAYONICS_1_F7E7221735CC en la respuesta
-            if isinstance(data, dict) and 'data' in data:
-                devices_to_check = data['data']
-                if isinstance(devices_to_check, list):
-                    for device in devices_to_check:
-                        if isinstance(device, dict) and 'device_name' in device:
-                            if 'F7E7221735CC' in device.get('device_name', ''):
-                                logger.critical(f"====== DATOS RAW API PARA DISPOSITIVO PROBLEMÁTICO ======")
-                                logger.critical(f"Asset ID: {asset_id}")
-                                logger.critical(f"Dispositivo encontrado en respuesta API: {device.get('device_name')}")
-                                logger.critical(f"Sensor passwords en respuesta: {json.dumps(device.get('sensor_passwords', []), indent=2)}")
-                                logger.critical(f"====================================================")
-        except Exception as debug_err:
-            logger.error(f"Error en debug especial: {str(debug_err)}")
-        
-        # Registrar el formato de los datos recibidos
-        logger.info(f"Datos NFC recibidos para asset {asset_id}: Tipo={type(data)}, Estructura={str(data)[:200]}...")
-        
-        # FORMATO 1: Data es un array con objetos que contienen 'sensor_passwords'
-        if isinstance(data, dict) and 'data' in data and isinstance(data['data'], list):
-            devices_list = data['data']
-            logger.debug(f"Formato detectado: data es un array con {len(devices_list)} elementos")
+            sensor_passwords_list = device_entry_from_api.get("sensor_passwords", [])
+            if not sensor_passwords_list:
+                logger.info(f"Dispositivo '{device_entry_from_api.get('device_name')}' no tiene 'sensor_passwords'. Omitiendo.")
+                continue
+
+            representative_device_id_for_row = None
+            representative_gateway_id_for_row = None
+
+            if sensor_passwords_list and isinstance(sensor_passwords_list[0], dict):
+                representative_device_id_for_row = sensor_passwords_list[0].get("device_id")
+                representative_gateway_id_for_row = sensor_passwords_list[0].get("gateway_id")
+
+            if not representative_device_id_for_row:
+                logger.warning(f"No se pudo determinar un representative_device_id para el dispositivo: {device_entry_from_api.get('device_name')}. Omitiendo.")
+                continue
             
-            devices_with_passwords = []
-            for device_entry in devices_list:
-                if 'sensor_passwords' in device_entry and isinstance(device_entry['sensor_passwords'], list):
-                    logger.debug(f"Procesando entrada con {len(device_entry['sensor_passwords'])} sensores")
-                    
-                    # DEBUG ESPECIAL: vigilancia dispositivo problemático
-                    if 'device_name' in device_entry and 'F7E7221735CC' in device_entry.get('device_name', ''):
-                        logger.info(f"DISPOSITIVO PROBLEMÁTICO: Procesando {device_entry.get('device_name')} con {len(device_entry['sensor_passwords'])} sensores")
-                    
-                    # Construir un nuevo formato de dispositivo
-                    device_info = {
-                        'device_id': device_entry.get('device_id'),  # Usar device_id del dispositivo si existe
-                        'device_name': device_entry.get('device_name', ''),
-                        'device_type': device_entry.get('device_type', ''),
-                        'sensor_passwords': []
-                    }
-                    
-                    # Procesar cada sensor_password
-                    has_nfc_sensors = False
-                    for sensor in device_entry['sensor_passwords']:
-                        # Si el device_id no está en el dispositivo pero sí en el sensor, usarlo
-                        if not device_info['device_id'] and sensor.get('device_id'):
-                            device_info['device_id'] = sensor.get('device_id')
-                        
-                        # DEBUG ESPECIAL: vigilancia dispositivo problemático y sensores
-                        if 'device_name' in device_entry and 'F7E7221735CC' in device_entry.get('device_name', ''):
-                            logger.info(f"DISPOSITIVO PROBLEMÁTICO: Sensor {sensor.get('sensor_id')}, tipo={sensor.get('sensor_type')}, password={sensor.get('password')}")
-                        
-                        # Sólo añadir sensores NFC_CODE
-                        if sensor.get('sensor_type') == 'NFC_CODE':
-                            device_info['sensor_passwords'].append(sensor)
-                            has_nfc_sensors = True
-                    
-                    # Solo añadir el dispositivo si tiene al menos un sensor NFC_CODE
-                    if device_info['device_id'] and has_nfc_sensors:
-                        devices_with_passwords.append(device_info)
-                        logger.debug(f"Añadido dispositivo {device_info['device_id']} con {len(device_info['sensor_passwords'])} sensores NFC")
-                        
-                        # DEBUG ESPECIAL: vigilancia dispositivo problemático
-                        if 'device_name' in device_entry and 'F7E7221735CC' in device_entry.get('device_name', ''):
-                            logger.info(f"DISPOSITIVO PROBLEMÁTICO: Añadido con {len(device_info['sensor_passwords'])} sensores NFC")
-                            for s in device_info['sensor_passwords']:
-                                logger.info(f"  - Sensor final {s.get('sensor_id')}: {s.get('password')}")
-            
-            if devices_with_passwords:
-                result = {
-                    'data': {
-                        'devices': devices_with_passwords
-                    }
-                }
-                logger.info(f"Transformados {len(devices_with_passwords)} dispositivos con sensores NFC")
-                return result
-            else:
-                logger.warning(f"No se encontraron sensores NFC_CODE en los datos del asset {asset_id}")
-                return {'data': {'devices': []}}
-        
-        # CASO 1: Si es una lista directamente
-        if isinstance(data, list):
-            logger.info(f"Transformando lista directa a formato esperado")
-            result = {
-                'data': {
-                    'devices': data
-                }
+            grid_device_object = {
+                "device_id": device_entry_from_api.get("device_name", f"Device {representative_device_id_for_row}"), 
+                "real_device_id": representative_device_id_for_row, 
+                "lock_name": device_entry_from_api.get("device_name", f"Device {representative_device_id_for_row}"), 
+                "device_type": device_entry_from_api.get("device_type"),
+                "gateway_id": representative_gateway_id_for_row, 
+                "asset_id": asset_id, 
             }
-            return result
+
+            has_nfc_code_sensor = False
+            for sp in sensor_passwords_list:
+                if isinstance(sp, dict) and sp.get("sensor_type") == "NFC_CODE":
+                    sensor_id = sp.get("sensor_id")
+                    password = sp.get("password", "")
+                    if sensor_id:
+                        grid_device_object[f"sensor_{sensor_id}"] = password 
+                        has_nfc_code_sensor = True
             
-        # CASO 2: Si es un diccionario que contiene 'data' como lista
-        elif isinstance(data, dict):
-            if 'data' in data:
-                if isinstance(data['data'], list):
-                    logger.info(f"Transformando 'data' como lista a formato esperado")
-                    result = {
-                        'data': {
-                            'devices': data['data']
-                        }
-                    }
-                    return result
-                # Si 'data' ya tiene la estructura esperada
-                elif isinstance(data['data'], dict) and 'devices' in data['data']:
-                    logger.info(f"'data' ya tiene la estructura esperada")
-                    return data
-                # Si 'data' es un diccionario pero no tiene 'devices'
-                elif isinstance(data['data'], dict):
-                    logger.info(f"'data' es un diccionario sin 'devices', transformando")
-                    result = {
-                        'data': {
-                            'devices': [data['data']] if 'device_id' in data['data'] else []
-                        }
-                    }
-                    return result
-            # Si el diccionario no tiene 'data' pero tiene 'devices'
-            elif 'devices' in data:
-                logger.info(f"Transformando diccionario con 'devices' a formato esperado")
-                result = {
-                    'data': {
-                        'devices': data['devices']
-                    }
-                }
-                return result
-            # Si es un diccionario simple que podría ser un dispositivo
-            elif 'device_id' in data:
-                logger.info(f"Transformando dispositivo único a formato esperado")
-                result = {
-                    'data': {
-                        'devices': [data]
-                    }
-                }
-                return result
-            # Cualquier otro diccionario
+            if has_nfc_code_sensor:
+                processed_devices_for_grid.append(grid_device_object)
+                logger.info(f"Dispositivo '{grid_device_object['device_id']}' (real ID: {representative_device_id_for_row}) procesado con sus contraseñas NFC.")
             else:
-                logger.info(f"Estructura de datos no reconocida, envolviendo en formato estándar")
-                result = {
-                    'data': {
-                        'devices': []
-                    }
-                }
-                return result
-                
-        # CASO 3: Cualquier otro tipo de datos
-        logger.warning(f"Tipo de datos no reconocido: {type(data)}")
-        return {
-            'data': {
-                'devices': []
-            }
-        }
-        
+                logger.info(f"Dispositivo '{device_entry_from_api.get('device_name')}' no tenía sensores NFC_CODE con contraseña. Omitiendo.")
+
+        logger.info(f"get_nfc_passwords (New Endpoint) finalizó. {len(processed_devices_for_grid)} dispositivos con NFC_CODE procesados para el grid.")
+        return {"data": {"devices": processed_devices_for_grid}} 
+
     except Exception as e:
-        logger.error(f"Error al obtener códigos NFC: {str(e)}")
-        return None
+        error_msg = f"Excepción en get_nfc_passwords (New Endpoint Method): {str(e)}"
+        logger.error(error_msg)
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        return None 
 
 def get_asset_devices(asset_id, jwt_token=None, device_types=None):
     """
@@ -3226,6 +3090,13 @@ def fetch_nfc_passwords_for_asset(asset_id, token):
                 "sensors": []
             }
             
+            # Asegurar que el gateway_id se incluya si está presente en los datos originales
+            if "gateway_id" in device:
+                processed_device["gateway_id"] = device["gateway_id"]
+                logger.debug(f"Gateway ID {device['gateway_id']} incluido para el dispositivo {device.get('device_id', '')}")
+            else:
+                logger.warning(f"Dispositivo {device.get('device_id', '')} no tiene gateway_id en los datos NFC")
+            
             # Extraer sensores NFC (sensor_passwords)
             sensor_passwords = device.get("sensor_passwords", [])
             if not isinstance(sensor_passwords, list):
@@ -3260,3 +3131,296 @@ def fetch_nfc_passwords_for_asset(asset_id, token):
     except Exception as e:
         logger.error(f"Error al obtener códigos NFC para asset_id={asset_id}: {str(e)}")
         return asset_id, []
+
+def get_device_sensors(asset_id, device_id, jwt_token=None, gateway_id=None):
+    """
+    Obtiene los sensores de un dispositivo específico con sus valores actuales
+    
+    Args:
+        asset_id: ID del asset al que pertenece el dispositivo
+        device_id: ID único del dispositivo
+        jwt_token: Token JWT para autenticación
+        gateway_id: ID del gateway (requerido para el endpoint correcto)
+        
+    Returns:
+        dict: Diccionario con sensor_id como clave y valor como valor
+    """
+    try:
+        # Si no tenemos jwt_token, no podemos hacer la llamada a la API
+        if not jwt_token:
+            logger.error("No se proporcionó token JWT para obtener sensores del dispositivo")
+            return {}
+            
+        # Verificar que tenemos el gateway_id
+        if not gateway_id:
+            logger.warning(f"No se proporcionó gateway_id para obtener sensores. Intentando usar el gateway_id del dispositivo.")
+            
+            # Intentar buscar el gateway_id del dispositivo
+            devices_info = get_devices(jwt_token=jwt_token)
+            for device in devices_info:
+                if str(device.get("device_id")) == str(device_id):
+                    gateway_id = device.get("gateway_id")
+                    logger.info(f"Se encontró gateway_id={gateway_id} para device_id={device_id}")
+                    break
+            
+            if not gateway_id:
+                logger.error(f"No se pudo encontrar gateway_id para device_id={device_id}")
+                return {}
+        
+        # Primero intentamos obtener los datos NFC del asset completo
+        # ya que es más eficiente que hacer una llamada por dispositivo
+        nfc_data = get_nfc_passwords(asset_id, jwt_token)
+        
+        # Validar respuesta
+        if not nfc_data or not isinstance(nfc_data, dict) or 'data' not in nfc_data:
+            logger.warning(f"No se obtuvieron datos NFC válidos para asset_id={asset_id}")
+            return {}
+        
+        # Procesar los datos para encontrar el dispositivo específico y sus sensores
+        data_section = nfc_data['data']
+        devices_data = []
+        
+        # Manejar diferentes formatos de respuesta
+        if isinstance(data_section, dict) and 'devices' in data_section and isinstance(data_section['devices'], list):
+            devices_data = data_section['devices']
+        elif isinstance(data_section, list):
+            devices_data = data_section
+        elif isinstance(data_section, dict) and 'device_id' in data_section:
+            devices_data = [data_section]
+            
+        # Buscar el dispositivo específico
+        sensors_dict = {}
+        device_found = False
+        
+        for device in devices_data:
+            if not isinstance(device, dict):
+                continue
+                
+            current_device_id = str(device.get('device_id', ''))
+            # Comparar IDs de dispositivo
+            if current_device_id == str(device_id):
+                device_found = True
+                logger.info(f"Dispositivo encontrado: {current_device_id}")
+                
+                # Extraer sensores
+                sensor_passwords = device.get('sensor_passwords', [])
+                if sensor_passwords and isinstance(sensor_passwords, list):
+                    for sensor_pw in sensor_passwords:
+                        if not isinstance(sensor_pw, dict):
+                            continue
+                            
+                        sensor_id = str(sensor_pw.get('sensor_id', ''))
+                        if not sensor_id:
+                            continue
+                            
+                        # Añadir sensor al diccionario
+                        password = sensor_pw.get('password', '')
+                        sensors_dict[sensor_id] = password
+                        
+                break  # Salir del bucle una vez encontrado el dispositivo
+        
+        # Si no encontramos el dispositivo, intentar obtener los datos directamente
+        if not device_found:
+            logger.warning(f"No se encontró el dispositivo {device_id} en los datos del asset. Intentando obtener directamente.")
+            
+            # Construir URL para obtener datos del dispositivo
+            url = f"{BASE_URL}/gateways/{gateway_id}/devices/{device_id}"
+            logger.info(f"URL para obtener datos del dispositivo: {url}")
+            
+            # Obtener headers de autenticación
+            headers = get_auth_headers(jwt_token)
+            
+            # Hacer la solicitud GET a la API
+            response = requests.get(url, headers=headers)
+            logger.debug(f"Respuesta de la API para obtener dispositivo: {response.status_code}")
+            
+            # Verificar la respuesta
+            if response.status_code == 200:
+                try:
+                    device_data = response.json()
+                    
+                    # Extraer sensores del dispositivo
+                    if isinstance(device_data, dict) and 'sensors' in device_data:
+                        sensors = device_data.get('sensors', [])
+                        for sensor in sensors:
+                            if not isinstance(sensor, dict):
+                                continue
+                                
+                            sensor_id = str(sensor.get('id', ''))
+                            if not sensor_id:
+                                continue
+                                
+                            # Añadir sensor al diccionario
+                            value = sensor.get('value', '')
+                            sensors_dict[sensor_id] = value
+                except Exception as e:
+                    logger.error(f"Error al procesar datos del dispositivo: {str(e)}")
+            else:
+                logger.error(f"Error {response.status_code} al obtener datos del dispositivo: {response.text}")
+        
+        logger.info(f"Se encontraron {len(sensors_dict)} sensores para el dispositivo {device_id}")
+        return sensors_dict
+        
+    except Exception as e:
+        logger.error(f"Excepción al obtener sensores del dispositivo: {str(e)}")
+        return {}
+
+def unassign_multiple_cards_for_lock(device, uuid_list_to_unassign, jwt_token):
+    """
+    Desasigna múltiples UUIDs de tarjetas NFC de una cerradura específica.
+    Itera sobre uuid_list_to_unassign y llama a la API para cada una.
+    
+    Args:
+        device (dict): Diccionario con datos de la cerradura. Necesita 'real_device_id', 'gateway_id', 'asset_id'.
+        uuid_list_to_unassign (list): Lista de strings UUID a desasignar. Si está vacía y el modo es 'all', 
+                                      se intentarán desasignar todos los slots con valor.
+        jwt_token (str): Token JWT para autenticación.
+
+    Returns:
+        tuple: (bool overall_success, str overall_message, list operation_details)
+               overall_success: True si al menos una operación (desasignación o tarjeta ya no estaba) fue exitosa o no necesaria.
+               overall_message: Mensaje resumen.
+               operation_details: Lista de diccionarios, cada uno con {"uuid", "slot", "status", "message"}
+    """
+    # +++ DIAGNOSTIC LOGGING START +++
+    logger.info(f"[UNASSIGN_API_HELPER_DEBUG] unassign_multiple_cards_for_lock CALLED.")
+    logger.info(f"[UNASSIGN_API_HELPER_DEBUG] Received device object keys: {list(device.keys()) if isinstance(device, dict) else 'Not a dict'}")
+    logger.info(f"[UNASSIGN_API_HELPER_DEBUG] device.get('real_device_id'): {device.get('real_device_id')}")
+    logger.info(f"[UNASSIGN_API_HELPER_DEBUG] device.get('device_id') (display name in source): {device.get('device_id')}")
+    logger.info(f"[UNASSIGN_API_HELPER_DEBUG] device.get('gateway_id'): {device.get('gateway_id')}")
+    logger.info(f"[UNASSIGN_API_HELPER_DEBUG] device.get('asset_id'): {device.get('asset_id')}")
+    logger.info(f"[UNASSIGN_API_HELPER_DEBUG] UUIDs to unassign list: {uuid_list_to_unassign}")
+    # +++ DIAGNOSTIC LOGGING END +++
+
+    # from utils.nfc_helper import check_card_exists # Not directly used here, logic is more direct.
+    # from utils.api import update_nfc_code_value, get_device_sensors # update_nfc_code_value is at module level
+
+    details = []
+    successful_ops_count = 0
+    failed_ops_count = 0
+    not_found_count = 0
+    auth_error_count = 0
+
+    # Asegurar que los parámetros esenciales del dispositivo están presentes
+    # El device_id para la API debe ser el numérico/real.
+    device_id_param_for_update = device.get('real_device_id', device.get('device_id')) 
+    gateway_id_param = device.get('gateway_id')
+    asset_id_param = device.get('asset_id')
+
+    # Log del ID de dispositivo que se usará en las llamadas a la API
+    logger.info(f"[UNASSIGN_API_HELPER_DEBUG] ID de dispositivo resuelto para llamadas API: '{device_id_param_for_update}'")
+
+    if not all([device_id_param_for_update, gateway_id_param, asset_id_param]):
+        missing = []
+        if not device_id_param_for_update: missing.append("device_id_for_api (real_device_id)")
+        if not gateway_id_param: missing.append("gateway_id")
+        if not asset_id_param: missing.append("asset_id")
+        error_msg = f"Datos de dispositivo incompletos ({ ', '.join(missing) }) para {device.get('device_name', 'ID desconocido')}. No se puede desasignar."
+        logger.error(f"[UNASSIGN_API_HELPER_DEBUG] {error_msg}")
+        # Si la lista de UUIDs está vacía, significa desasignar todas, pero no podemos sin device info
+        # Si hay UUIDs, todos fallarán para este dispositivo
+        num_potential_ops = len(uuid_list_to_unassign) if uuid_list_to_unassign else 1 # Asume 1 op si es 'all'
+        for _ in range(num_potential_ops):
+            details.append({"uuid": uuid_list_to_unassign[_] if uuid_list_to_unassign else "TODAS", "slot": "N/A", "status": "failed", "message": error_msg})
+            failed_ops_count += 1
+        return False, error_msg, details
+
+    # Obtener el estado actual de los sensores/passwords para este dispositivo
+    # get_device_sensors devuelve un dict: {sensor_id_str: password_str}
+    current_sensor_passwords = get_device_sensors(asset_id_param, device_id_param_for_update, jwt_token, gateway_id_param)
+    logger.info(f"[UNASSIGN_API_HELPER_DEBUG] Contraseñas actuales para {device_id_param_for_update} (desde get_device_sensors): {current_sensor_passwords}")
+
+    slots_to_clear_for_api = []
+
+    if not uuid_list_to_unassign: # Modo: Desasignar todas las tarjetas con valor
+        logger.info(f"[UNASSIGN_API_HELPER_DEBUG] Modo TODAS: Buscando slots con valor en {device_id_param_for_update}.")
+        if isinstance(current_sensor_passwords, dict) and current_sensor_passwords:
+            for slot_id, pwd_value in current_sensor_passwords.items():
+                if pwd_value and pwd_value.strip():
+                    slots_to_clear_for_api.append(slot_id)
+                    logger.info(f"[UNASSIGN_API_HELPER_DEBUG] Modo TODAS: Slot {slot_id} (valor: '{pwd_value}') se desasignará.")
+            if not slots_to_clear_for_api:
+                logger.info(f"[UNASSIGN_API_HELPER_DEBUG] Modo TODAS: No se encontraron slots con valor para desasignar en {device_id_param_for_update}.")
+                details.append({"uuid": "TODAS", "slot": "N/A", "status": "success", "message": "No había tarjetas asignadas"})
+                successful_ops_count += 1 # Considerado éxito ya que no había nada que hacer
+        else:
+            logger.info(f"[UNASSIGN_API_HELPER_DEBUG] Modo TODAS: No hay datos de sensores o está vacío para {device_id_param_for_update}. Nada que desasignar.")
+            details.append({"uuid": "TODAS", "slot": "N/A", "status": "success", "message": "No hay datos de sensores o dispositivo ya limpio"})
+            successful_ops_count += 1
+    else: # Modo: Desasignar UUIDs específicos de la lista
+        for uuid_to_unassign in uuid_list_to_unassign:
+            normalized_uuid_to_unassign = normalize_uuid(uuid_to_unassign) # normalize_uuid debe estar en scope
+            logger.info(f"[UNASSIGN_API_HELPER_DEBUG] Procesando UUID específico: '{uuid_to_unassign}' (Normalizado: '{normalized_uuid_to_unassign}')")
+            found_this_uuid = False
+            if isinstance(current_sensor_passwords, dict):
+                for slot_id, existing_pwd in current_sensor_passwords.items():
+                    normalized_existing_pwd = normalize_uuid(existing_pwd)
+                    logger.debug(f"[UNASSIGN_API_HELPER_DEBUG]   Comparando con slot {slot_id} (valor: '{existing_pwd}', normalizado: '{normalized_existing_pwd}')")
+                    if normalized_existing_pwd == normalized_uuid_to_unassign and normalized_existing_pwd != "": # Asegurar que no coincida con vacíos
+                        slots_to_clear_for_api.append(slot_id)
+                        found_this_uuid = True
+                        logger.info(f"[UNASSIGN_API_HELPER_DEBUG]   UUID '{uuid_to_unassign}' ENCONTRADO en slot {slot_id}. Marcado para desasignación.")
+                        # No hacer break, la misma tarjeta podría (aunque improbable) estar en varios slots.
+            
+            if not found_this_uuid:
+                logger.info(f"[UNASSIGN_API_HELPER_DEBUG]   UUID '{uuid_to_unassign}' NO encontrado en dispositivo {device_id_param_for_update}.")
+                details.append({"uuid": uuid_to_unassign, "slot": "N/A", "status": "not_found", "message": "Tarjeta no encontrada en este dispositivo"})
+                not_found_count += 1
+    
+    # Eliminar duplicados de slots_to_clear_for_api (por si acaso)
+    unique_slots_to_clear = sorted(list(set(slots_to_clear_for_api)))
+    if unique_slots_to_clear:
+        logger.info(f"[UNASSIGN_API_HELPER_DEBUG] Slots únicos a desasignar para {device_id_param_for_update}: {unique_slots_to_clear}")
+
+    for slot_to_clear in unique_slots_to_clear:
+        original_uuid_for_detail = "DESCONOCIDO"
+        if isinstance(current_sensor_passwords, dict):
+            original_uuid_for_detail = current_sensor_passwords.get(slot_to_clear, "DESCONOCIDO")
+        
+        logger.info(f"[UNASSIGN_API_HELPER_DEBUG] Intentando desasignar (poner a vacío) slot {slot_to_clear} en dispositivo {device_id_param_for_update}")
+        api_success, api_response = update_nfc_code_value(
+            asset_id_param, 
+            device_id_param_for_update, 
+            slot_to_clear, 
+            "", # new_value es vacío para desasignar
+            jwt_token, 
+            gateway_id_param
+        )
+        
+        if api_success:
+            logger.info(f"[UNASSIGN_API_HELPER_DEBUG] Slot {slot_to_clear} desasignado exitosamente para {device_id_param_for_update}.")
+            details.append({"uuid": original_uuid_for_detail, "slot": slot_to_clear, "status": "success", "message": "Desasignada correctamente"})
+            successful_ops_count += 1
+        else:
+            logger.error(f"[UNASSIGN_API_HELPER_DEBUG] Falló la desasignación del slot {slot_to_clear} para {device_id_param_for_update}. Respuesta API: {api_response}")
+            status_detail = "failed"
+            if "autenticación" in str(api_response).lower() or "token" in str(api_response).lower():
+                auth_error_count += 1
+                status_detail = "auth_error"
+            else:
+                failed_ops_count += 1
+            details.append({"uuid": original_uuid_for_detail, "slot": slot_to_clear, "status": status_detail, "message": str(api_response)})
+
+    # Determinar el mensaje y éxito general para este dispositivo
+    total_attempted_slots = len(unique_slots_to_clear)
+    overall_op_success_for_device = (successful_ops_count + not_found_count) > 0 and failed_ops_count == 0 and auth_error_count == 0
+    if not uuid_list_to_unassign and not unique_slots_to_clear: # Modo TODAS y no había nada que limpiar
+        overall_op_success_for_device = True # Considerar éxito
+        if not details: # Añadir un detalle si no se hizo ya
+             details.append({"uuid": "TODAS", "slot": "N/A", "status": "success", "message": "No había tarjetas asignadas"})
+
+    message_parts = []
+    if successful_ops_count > 0: message_parts.append(f"{successful_ops_count} desasignada(s)")
+    if not_found_count > 0: message_parts.append(f"{not_found_count} no encontrada(s)")
+    if failed_ops_count > 0: message_parts.append(f"{failed_ops_count} con error")
+    if auth_error_count > 0: message_parts.append(f"{auth_error_count} con error de auth")
+
+    if not message_parts and overall_op_success_for_device:
+        final_message_for_device = "Operación completada (sin cambios necesarios o todas no encontradas)."
+    elif not message_parts and not overall_op_success_for_device:
+        final_message_for_device = "No se realizaron operaciones o todas fallaron sin categorizar."
+    else:
+        final_message_for_device = ", ".join(message_parts) + "."
+
+    logger.info(f"[UNASSIGN_API_HELPER_DEBUG] Resumen para dispositivo {device.get('device_name', device_id_param_for_update)}: {final_message_for_device}")
+    return overall_op_success_for_device, final_message_for_device, details

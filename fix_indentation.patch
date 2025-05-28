@@ -1,0 +1,13 @@
+--- layouts/smart_locks.py.orig	2025-04-29 13:15:00
++++ layouts/smart_locks.py	2025-04-29 13:15:00
+@@ -2266,7 +2266,7 @@
+                                 elif i == row_index:
+                                     # Si es la fila actual pero no hay valor
+                                     row[cell_id] = "No asignado"
+                                 else:
+                                     # Para otras filas, marcar como N/A
+-                                row[cell_id] = "N/A"
++                                    row[cell_id] = "N/A"
+         
+                             # Crear nueva columna en la definición de columnas
+                             column_name = f"🔑 {sensor_name} ({sensor_pw.get('sensor_type', 'NFC_CODE')})" 
