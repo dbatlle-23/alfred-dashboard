@@ -20,15 +20,22 @@ if ! [[ "$PORT" =~ ^[0-9]+$ ]] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; th
     export PORT=8050
 fi
 
-echo "Iniciando servidor en puerto $PORT..."
-echo "Comando: gunicorn app:server --bind 0.0.0.0:$PORT --timeout 120 --workers 1 --max-requests 1000 --preload"
+# Configuración optimizada de Gunicorn para Railway
+echo "Iniciando servidor en puerto $PORT con configuración optimizada..."
+echo "Comando: gunicorn app:server --bind 0.0.0.0:$PORT --timeout 300 --workers 2 --worker-class sync --max-requests 10000 --max-requests-jitter 1000 --worker-connections 1000 --keep-alive 5 --preload"
 
-# Ejecutar Gunicorn
+# Ejecutar Gunicorn con configuración optimizada
 exec gunicorn app:server \
     --bind 0.0.0.0:$PORT \
-    --timeout 120 \
-    --workers 1 \
-    --max-requests 1000 \
+    --timeout 300 \
+    --workers 2 \
+    --worker-class sync \
+    --max-requests 10000 \
+    --max-requests-jitter 1000 \
+    --worker-connections 1000 \
+    --keep-alive 5 \
     --preload \
     --access-logfile - \
-    --error-logfile - 
+    --error-logfile - \
+    --log-level info \
+    --capture-output 
