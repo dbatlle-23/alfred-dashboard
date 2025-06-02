@@ -5,10 +5,61 @@ import dash
 
 # Layout para la página de Lock
 layout = html.Div([
+    # Stores locales para datos
+    dcc.Store(id="lock-filters-store", data={"client_id": "all", "project_id": "all"}),
+    
     dbc.Row([
         dbc.Col([
             html.H1("Lock Management", className="mb-4"),
             html.P("Gestiona y monitorea los accesos y cerraduras inteligentes.", className="lead mb-4"),
+            
+            # Sección de Filtros
+            dbc.Card([
+                dbc.CardBody([
+                    dbc.Row([
+                        # Filtro de cliente
+                        dbc.Col([
+                            html.Label("Cliente"),
+                            dcc.Dropdown(
+                                id="lock-client-filter",
+                                placeholder="Seleccione un cliente",
+                                clearable=False,
+                                value="all"
+                            )
+                        ], width=4),
+                        
+                        # Filtro de proyecto
+                        dbc.Col([
+                            html.Label("Proyecto"),
+                            dcc.Dropdown(
+                                id="lock-project-filter",
+                                placeholder="Seleccione un proyecto",
+                                clearable=False,
+                                disabled=True,
+                                value="all"
+                            )
+                        ], width=4),
+                        
+                        # Botones de acción
+                        dbc.Col([
+                            html.Div([
+                                dbc.Button(
+                                    "Aplicar Filtros",
+                                    id="lock-apply-filters-button",
+                                    color="primary",
+                                    className="me-2"
+                                ),
+                                dbc.Button(
+                                    html.I(className="fas fa-sync"), 
+                                    id="refresh-locks-button",
+                                    color="light",
+                                    title="Actualizar datos"
+                                ),
+                            ], className="d-flex justify-content-end align-items-end", style={"height": "100%"})
+                        ], width=4)
+                    ])
+                ])
+            ], className="mb-4"),
             
             # Indicador de filtro activo
             html.Div(id="lock-filter-indicator", className="mb-3"),
@@ -55,12 +106,6 @@ layout = html.Div([
                     dbc.Card([
                         dbc.CardHeader([
                             html.H5("Cerraduras", className="mb-0 d-inline"),
-                            dbc.Button(
-                                [html.I(className="fas fa-sync-alt")],
-                                color="link",
-                                className="float-end",
-                                id="refresh-locks-button"
-                            )
                         ]),
                         dbc.CardBody([
                             html.Div(id="locks-table-container")
@@ -117,10 +162,91 @@ layout = html.Div([
 
 # Registrar callbacks para la página de Lock
 def register_callbacks(app):
+    from utils.api import get_clientes, get_projects
+    
+    # Callback para cargar clientes
+    @app.callback(
+        Output("lock-client-filter", "options"),
+        [Input("jwt-token-store", "data")],
+        prevent_initial_call=False
+    )
+    def load_lock_clients(token_data):
+        try:
+            token = token_data.get('token') if token_data else None
+            if not token:
+                return [{"label": "Todos los clientes", "value": "all"}]
+            
+            clientes = get_clientes(jwt_token=token)
+            client_options = [{"label": "Todos los clientes", "value": "all"}]
+            
+            for cliente in clientes:
+                if isinstance(cliente, dict):
+                    nombre = None
+                    id_cliente = None
+                    
+                    for key in ['nombre', 'name', 'client_name']:
+                        if key in cliente:
+                            nombre = cliente[key]
+                            break
+                    
+                    for key in ['id', 'client_id', 'id_cliente']:
+                        if key in cliente:
+                            id_cliente = cliente[key]
+                            break
+                    
+                    if nombre and id_cliente is not None:
+                        client_options.append({"label": nombre, "value": str(id_cliente)})
+            
+            return client_options
+        except Exception as e:
+            return [{"label": "Error al cargar", "value": "all"}]
+    
+    # Callback para actualizar proyectos según cliente seleccionado
+    @app.callback(
+        [Output("lock-project-filter", "options"), Output("lock-project-filter", "disabled")],
+        [Input("lock-client-filter", "value"), Input("jwt-token-store", "data")],
+        prevent_initial_call=False
+    )
+    def update_lock_project_options(client_id, token_data):
+        if client_id == "all":
+            return [{"label": "Todos los proyectos", "value": "all"}], True
+        
+        try:
+            token = token_data.get('token') if token_data else None
+            if not token:
+                return [{"label": "Todos los proyectos", "value": "all"}], False
+            
+            projects = get_projects(client_id=client_id, jwt_token=token)
+            project_options = [{"label": "Todos los proyectos", "value": "all"}]
+            
+            for project in projects:
+                if isinstance(project, dict):
+                    nombre = project.get("name")
+                    id_proyecto = project.get("id")
+                    
+                    if nombre and id_proyecto is not None:
+                        project_options.append({"label": nombre, "value": id_proyecto})
+            
+            return project_options, False
+        except Exception as e:
+            return [{"label": "Error al cargar", "value": "all"}], False
+    
+    # Callback para aplicar filtros
+    @app.callback(
+        Output("lock-filters-store", "data"),
+        [Input("lock-apply-filters-button", "n_clicks")],
+        [State("lock-client-filter", "value"), State("lock-project-filter", "value")],
+        prevent_initial_call=True
+    )
+    def apply_lock_filters(n_clicks, client_id, project_id):
+        if n_clicks:
+            return {"client_id": client_id or "all", "project_id": project_id or "all"}
+        return dash.no_update
+    
     # Callback para actualizar el indicador de filtro
     @app.callback(
         Output("lock-filter-indicator", "children"),
-        [Input("selected-client-store", "data")]
+        [Input("lock-filters-store", "data")]
     )
     def update_filter_indicator(selection_data):
         client_id = selection_data.get("client_id", "all")
@@ -132,23 +258,21 @@ def register_callbacks(app):
                 "Mostrando datos globales de todos los clientes y proyectos"
             ], className="alert alert-info")
         
-        from utils.api import get_clientes, get_projects
-        
         # Obtener nombre del cliente
         client_name = "Todos los clientes"
         if client_id != "all":
             clientes = get_clientes()
-            client_match = next((c for c in clientes if c["id"] == client_id), None)
+            client_match = next((c for c in clientes if c.get("id") == client_id or c.get("client_id") == client_id), None)
             if client_match:
-                client_name = client_match["nombre"]
+                client_name = client_match.get("nombre") or client_match.get("name", f"Cliente {client_id}")
         
         # Obtener nombre del proyecto
         project_name = "Todos los proyectos"
         if project_id != "all":
             projects = get_projects(client_id if client_id != "all" else None)
-            project_match = next((p for p in projects if p["id"] == project_id), None)
+            project_match = next((p for p in projects if p.get("id") == project_id), None)
             if project_match:
-                project_name = project_match["nombre"]
+                project_name = project_match.get("name", f"Proyecto {project_id}")
         
         if project_id == "all":
             return html.Div([
@@ -171,7 +295,7 @@ def register_callbacks(app):
             Output("lock-alertas", "children"),
             Output("lock-alertas-status", "children")
         ],
-        [Input("selected-client-store", "data")]
+        [Input("lock-filters-store", "data")]
     )
     def update_metrics(selection_data):
         client_id = selection_data.get("client_id", "all")
@@ -191,51 +315,36 @@ def register_callbacks(app):
         # Si hay un cliente seleccionado
         if client_id != "all":
             # Datos de ejemplo para el cliente seleccionado
-            if client_id == 1:
+            if client_id == "1":
                 cerraduras_activas = "15"
                 accesos_hoy = "45"
-            elif client_id == 2:
+            elif client_id == "2":
                 cerraduras_activas = "12"
                 accesos_hoy = "38"
                 alertas = "1"
                 alertas_status = "1 alerta activa"
-            elif client_id == 3:
+            elif client_id == "3":
                 cerraduras_activas = "8"
                 accesos_hoy = "25"
-            elif client_id == 4:
+            elif client_id == "4":
                 cerraduras_activas = "7"
                 accesos_hoy = "20"
         
         # Si hay un proyecto seleccionado
         if project_id != "all":
             # Datos de ejemplo para el proyecto seleccionado
-            if project_id == 1:
-                cerraduras_activas = "8"
-                accesos_hoy = "25"
-            elif project_id == 2:
-                cerraduras_activas = "7"
-                accesos_hoy = "20"
-            elif project_id == 3:
-                cerraduras_activas = "6"
-                accesos_hoy = "18"
+            cerraduras_activas = "6"
+            accesos_hoy = "18"
+            if project_id in ["3"]:
                 alertas = "1"
                 alertas_status = "1 alerta activa"
-            elif project_id == 4:
-                cerraduras_activas = "6"
-                accesos_hoy = "20"
-            elif project_id == 5:
-                cerraduras_activas = "8"
-                accesos_hoy = "25"
-            elif project_id == 6:
-                cerraduras_activas = "7"
-                accesos_hoy = "20"
         
         return cerraduras_activas, cerraduras_activas_status, accesos_hoy, accesos_hoy_change, alertas, alertas_status
     
     # Callback para actualizar la tabla de cerraduras
     @app.callback(
         Output("locks-table-container", "children"),
-        [Input("selected-client-store", "data"), Input("refresh-locks-button", "n_clicks")]
+        [Input("lock-filters-store", "data"), Input("refresh-locks-button", "n_clicks")]
     )
     def update_locks_table(selection_data, n_clicks):
         client_id = selection_data.get("client_id", "all")
@@ -306,124 +415,79 @@ def register_callbacks(app):
     # Callback para actualizar el historial de accesos
     @app.callback(
         Output("access-history-container", "children"),
-        [Input("selected-client-store", "data"), Input("refresh-history-button", "n_clicks")]
+        [Input("lock-filters-store", "data"), Input("refresh-history-button", "n_clicks")]
     )
     def update_access_history(selection_data, n_clicks):
         client_id = selection_data.get("client_id", "all")
         project_id = selection_data.get("project_id", "all")
         
-        # Aquí implementarías la lógica real para obtener datos según los filtros
-        # Por ahora, usamos datos de ejemplo
-        
-        # Crear tabla de historial de accesos
-        history_table = html.Table([
-            html.Thead([
-                html.Tr([
-                    html.Th("ID"),
-                    html.Th("Usuario"),
-                    html.Th("Cerradura"),
-                    html.Th("Fecha/Hora"),
-                    html.Th("Tipo"),
-                    html.Th("Estado"),
-                    html.Th("Detalles")
-                ])
-            ]),
-            html.Tbody(id="history-table-body")
-        ], className="table table-striped table-hover")
-        
-        # Datos de ejemplo para la tabla
+        # Datos de ejemplo para el historial
         history_data = [
-            {"id": "A001", "usuario": "usuario1@example.com", "cerradura": "Puerta Principal", "fecha": "2025-03-04 12:30", "tipo": "App", "estado": "Exitoso"},
-            {"id": "A002", "usuario": "usuario2@example.com", "cerradura": "Oficina 101", "fecha": "2025-03-04 12:25", "tipo": "Tarjeta", "estado": "Exitoso"},
-            {"id": "A003", "usuario": "usuario3@example.com", "cerradura": "Sala de Reuniones", "fecha": "2025-03-04 12:15", "tipo": "App", "estado": "Fallido"},
-            {"id": "A004", "usuario": "usuario4@example.com", "cerradura": "Almacén", "fecha": "2025-03-04 12:10", "tipo": "PIN", "estado": "Exitoso"},
-            {"id": "A005", "usuario": "usuario5@example.com", "cerradura": "Oficina 202", "fecha": "2025-03-04 12:05", "tipo": "App", "estado": "Exitoso"},
+            {"fecha": "2025-03-04 12:30", "usuario": "Juan Pérez", "cerradura": "Puerta Principal", "tipo": "Acceso", "metodo": "Tarjeta"},
+            {"fecha": "2025-03-04 11:45", "usuario": "María García", "cerradura": "Oficina 101", "tipo": "Acceso", "metodo": "Pin"},
+            {"fecha": "2025-03-04 10:15", "usuario": "Carlos López", "cerradura": "Sala de Reuniones", "tipo": "Acceso", "metodo": "Tarjeta"},
+            {"fecha": "2025-03-04 09:30", "usuario": "Ana Martín", "cerradura": "Oficina 202", "tipo": "Acceso", "metodo": "Pin"},
+            {"fecha": "2025-03-03 18:20", "usuario": "Pedro Ruiz", "cerradura": "Almacén", "tipo": "Acceso", "metodo": "Tarjeta"}
         ]
         
-        # Filtrar datos según cliente/proyecto
+        # Filtrar según los filtros seleccionados
         if client_id != "all" or project_id != "all":
-            # En un caso real, filtrarías los datos según el cliente/proyecto
-            # Por ahora, simplemente reducimos la lista para simular el filtrado
-            history_data = history_data[:3] if client_id != "all" else history_data
-            history_data = history_data[:2] if project_id != "all" else history_data
+            history_data = history_data[:3]  # Simular filtrado
         
-        # Crear filas de la tabla
+        # Crear tabla
         rows = []
         for access in history_data:
-            row = html.Tr([
-                html.Td(access["id"]),
+            rows.append(html.Tr([
+                html.Td(access["fecha"]),
                 html.Td(access["usuario"]),
                 html.Td(access["cerradura"]),
-                html.Td(access["fecha"]),
-                html.Td(html.Span(access["tipo"], className="badge bg-info")),
-                html.Td(html.Span("Exitoso", className="badge bg-success") if access["estado"] == "Exitoso" else html.Span("Fallido", className="badge bg-danger")),
-                html.Td([
-                    dbc.Button([html.I(className="fas fa-info-circle")], color="link", size="sm")
+                html.Td(html.Span(access["tipo"], className="badge bg-success")),
+                html.Td(access["metodo"])
+            ]))
+        
+        return html.Table([
+            html.Thead([
+                html.Tr([
+                    html.Th("Fecha/Hora"),
+                    html.Th("Usuario"),
+                    html.Th("Cerradura"),
+                    html.Th("Tipo"),
+                    html.Th("Método")
                 ])
-            ])
-            rows.append(row)
-        
-        # Actualizar el cuerpo de la tabla
-        history_table.children[1].children = rows
-        
-        return history_table
+            ]),
+            html.Tbody(rows)
+        ], className="table table-striped table-hover")
     
     # Callback para actualizar los gráficos
     @app.callback(
         [Output("lock-graph-1", "figure"), Output("lock-graph-2", "figure")],
-        [Input("selected-client-store", "data")]
+        [Input("lock-filters-store", "data")]
     )
     def update_graphs(selection_data):
-        client_id = selection_data.get("client_id", "all")
-        project_id = selection_data.get("project_id", "all")
+        # Datos de ejemplo para los gráficos
+        import plotly.graph_objs as go
         
-        # Aquí implementarías la lógica real para obtener datos según los filtros
-        # Por ahora, usamos datos de ejemplo
+        # Gráfico 1: Accesos por hora
+        hours = list(range(24))
+        accesos = [2, 1, 0, 0, 1, 3, 8, 12, 15, 18, 20, 22, 25, 18, 16, 14, 12, 10, 8, 6, 4, 3, 2, 1]
         
-        # Gráfico 1: Accesos por Hora
-        figure1 = {
-            'data': [
-                {'x': ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'], 
-                 'y': [5, 12, 18, 15, 22, 10, 14, 16, 19, 23, 17, 8], 
-                 'type': 'bar', 
-                 'name': 'Accesos'}
-            ],
-            'layout': {
-                'title': f'Accesos por Hora {"Global" if client_id == "all" else "por Cliente" if project_id == "all" else "por Proyecto"}',
-                'height': 300,
-                'margin': {'l': 40, 'r': 10, 't': 40, 'b': 30}
-            }
+        graph1 = {
+            'data': [go.Bar(x=hours, y=accesos, name='Accesos')],
+            'layout': go.Layout(
+                title='Accesos por Hora',
+                xaxis={'title': 'Hora del día'},
+                yaxis={'title': 'Número de accesos'},
+                showlegend=False
+            )
         }
         
-        # Gráfico 2: Tipos de Acceso
-        figure2 = {
-            'data': [
-                {'labels': ['App', 'Tarjeta', 'PIN', 'Biométrico'], 
-                 'values': [45, 30, 15, 10], 
-                 'type': 'pie', 
-                 'name': 'Tipos de Acceso'}
-            ],
-            'layout': {
-                'title': f'Tipos de Acceso {"Global" if client_id == "all" else "por Cliente" if project_id == "all" else "por Proyecto"}',
-                'height': 300,
-                'margin': {'l': 40, 'r': 10, 't': 40, 'b': 30}
-            }
+        # Gráfico 2: Tipos de acceso
+        tipos = ['Tarjeta', 'Pin', 'Biométrico', 'App Móvil']
+        valores = [45, 35, 15, 5]
+        
+        graph2 = {
+            'data': [go.Pie(labels=tipos, values=valores)],
+            'layout': go.Layout(title='Distribución por Tipo de Acceso')
         }
         
-        # Modificar datos según el filtro seleccionado
-        if client_id != "all" or project_id != "all":
-            # Ajustar los datos de ejemplo para mostrar diferencias
-            multiplier = 0.8 if client_id != "all" else 1
-            multiplier = 0.6 if project_id != "all" else multiplier
-            
-            # Ajustar gráfico 1
-            for trace in figure1['data']:
-                trace['y'] = [int(val * multiplier) for val in trace['y']]
-            
-            # Ajustar gráfico 2
-            if client_id != "all":
-                figure2['data'][0]['values'] = [50, 25, 15, 10]
-            if project_id != "all":
-                figure2['data'][0]['values'] = [60, 20, 15, 5]
-        
-        return figure1, figure2 
+        return graph1, graph2 

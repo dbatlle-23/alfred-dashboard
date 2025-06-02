@@ -10,25 +10,75 @@ import math
 import numpy as np
 from utils.pdf_export import generate_spaces_report_pdf
 import base64
+from utils.api import get_clientes, get_projects
 
 # Configurar logger
 logger = get_logger(__name__)
 
 # Layout para la página de Spaces
 layout = html.Div([
+    # Stores locales para datos
+    dcc.Store(id="spaces-filters-store", data={"client_id": "all", "project_id": "all"}),
+    dcc.Store(id="page-number", data=1),
+    dcc.Store(id="rows-per-page", data=10),
+    dcc.Store(id="weekly-occupation-data", data={}),  # Store para datos de ocupación semanal
+    dcc.Store(id="spaces-reservations-data", data={}),  # Nuevo Store para datos de espacios por reservas
+    
     dbc.Row([
         dbc.Col([
             html.H1("Gestión de Reservas de Espacios", className="mb-4"),
             html.P("Gestiona y monitorea las reservas de espacios comunes en tu organización.", className="lead mb-4"),
             
+            # Sección de Filtros de Cliente/Proyecto
+            dbc.Card([
+                dbc.CardBody([
+                    dbc.Row([
+                        # Filtro de cliente
+                        dbc.Col([
+                            html.Label("Cliente"),
+                            dcc.Dropdown(
+                                id="spaces-client-filter",
+                                placeholder="Seleccione un cliente",
+                                clearable=False,
+                                value="all"
+                            )
+                        ], width=4),
+                        
+                        # Filtro de proyecto
+                        dbc.Col([
+                            html.Label("Proyecto"),
+                            dcc.Dropdown(
+                                id="spaces-project-filter",
+                                placeholder="Seleccione un proyecto",
+                                clearable=False,
+                                disabled=True,
+                                value="all"
+                            )
+                        ], width=4),
+                        
+                        # Botones de acción
+                        dbc.Col([
+                            html.Div([
+                                dbc.Button(
+                                    "Aplicar Filtros",
+                                    id="spaces-apply-filters-button",
+                                    color="primary",
+                                    className="me-2"
+                                ),
+                                dbc.Button(
+                                    html.I(className="fas fa-sync"), 
+                                    id="refresh-spaces-button",
+                                    color="light",
+                                    title="Actualizar datos"
+                                ),
+                            ], className="d-flex justify-content-end align-items-end", style={"height": "100%"})
+                        ], width=4)
+                    ])
+                ])
+            ], className="mb-4"),
+            
             # Indicador de filtro activo
             html.Div(id="spaces-filter-indicator", className="mb-3"),
-            
-            # Componentes ocultos para paginación
-            dcc.Store(id="page-number", data=1),
-            dcc.Store(id="rows-per-page", data=10),
-            dcc.Store(id="weekly-occupation-data", data={}),  # Store para datos de ocupación semanal
-            dcc.Store(id="spaces-reservations-data", data={}),  # Nuevo Store para datos de espacios por reservas
             
             # Tarjetas de resumen
             dbc.Row([
@@ -122,8 +172,7 @@ layout = html.Div([
                                     html.Label("Acciones"),
                         html.Div([
                             dbc.Button([html.I(className="fas fa-filter me-1"), "Aplicar Filtros"], id="apply-space-filters", color="primary", className="me-2"),
-                            dbc.Button([html.I(className="fas fa-redo me-1"), "Reiniciar"], id="reset-space-filters", color="secondary", className="me-2"),
-                            dbc.Button([html.I(className="fas fa-sync me-1"), "Actualizar"], id="refresh-spaces-button", color="success")
+                            dbc.Button([html.I(className="fas fa-redo me-1"), "Reiniciar"], id="reset-space-filters", color="secondary")
                         ], className="d-flex")
                     ], md=4)
                 ], className="mb-4")
@@ -266,10 +315,91 @@ layout = html.Div([
 
 # Registrar callbacks para la página de Spaces
 def register_callbacks(app):
+    from utils.api import get_clientes, get_projects
+    
+    # Callback para cargar clientes
+    @app.callback(
+        Output("spaces-client-filter", "options"),
+        [Input("jwt-token-store", "data")],
+        prevent_initial_call=False
+    )
+    def load_spaces_clients(token_data):
+        try:
+            token = token_data.get('token') if token_data else None
+            if not token:
+                return [{"label": "Todos los clientes", "value": "all"}]
+            
+            clientes = get_clientes(jwt_token=token)
+            client_options = [{"label": "Todos los clientes", "value": "all"}]
+            
+            for cliente in clientes:
+                if isinstance(cliente, dict):
+                    nombre = None
+                    id_cliente = None
+                    
+                    for key in ['nombre', 'name', 'client_name']:
+                        if key in cliente:
+                            nombre = cliente[key]
+                            break
+                    
+                    for key in ['id', 'client_id', 'id_cliente']:
+                        if key in cliente:
+                            id_cliente = cliente[key]
+                            break
+                    
+                    if nombre and id_cliente is not None:
+                        client_options.append({"label": nombre, "value": str(id_cliente)})
+            
+            return client_options
+        except Exception as e:
+            return [{"label": "Error al cargar", "value": "all"}]
+    
+    # Callback para actualizar proyectos según cliente seleccionado
+    @app.callback(
+        [Output("spaces-project-filter", "options"), Output("spaces-project-filter", "disabled")],
+        [Input("spaces-client-filter", "value"), Input("jwt-token-store", "data")],
+        prevent_initial_call=False
+    )
+    def update_spaces_project_options(client_id, token_data):
+        if client_id == "all":
+            return [{"label": "Todos los proyectos", "value": "all"}], True
+        
+        try:
+            token = token_data.get('token') if token_data else None
+            if not token:
+                return [{"label": "Todos los proyectos", "value": "all"}], False
+            
+            projects = get_projects(client_id=client_id, jwt_token=token)
+            project_options = [{"label": "Todos los proyectos", "value": "all"}]
+            
+            for project in projects:
+                if isinstance(project, dict):
+                    nombre = project.get("name")
+                    id_proyecto = project.get("id")
+                    
+                    if nombre and id_proyecto is not None:
+                        project_options.append({"label": nombre, "value": id_proyecto})
+            
+            return project_options, False
+        except Exception as e:
+            return [{"label": "Error al cargar", "value": "all"}], False
+    
+    # Callback para aplicar filtros de cliente/proyecto
+    @app.callback(
+        Output("spaces-filters-store", "data"),
+        [Input("spaces-apply-filters-button", "n_clicks")],
+        [State("spaces-client-filter", "value"), State("spaces-project-filter", "value")],
+        prevent_initial_call=True
+    )
+    def apply_spaces_filters(n_clicks, client_id, project_id):
+        if n_clicks:
+            return {"client_id": client_id or "all", "project_id": project_id or "all"}
+        return dash.no_update
+    
     # Callback para actualizar el indicador de filtro
     @app.callback(
         Output("spaces-filter-indicator", "children"),
-        [Input("selected-client-store", "data")]
+        [Input("spaces-filters-store", "data")]
     )
     def update_filter_indicator(selection_data):
         client_id = selection_data.get("client_id", "all")
@@ -280,20 +410,38 @@ def register_callbacks(app):
                 html.I(className="fas fa-info-circle me-2"),
                 "Mostrando datos globales de todas las reservas de espacios"
             ], className="alert alert-info py-2")
-        elif client_id != "all" and project_id == "all":
+        
+        # Obtener nombre del cliente
+        client_name = "Todos los clientes"
+        if client_id != "all":
+            try:
+                clientes = get_clientes()
+                client_match = next((c for c in clientes if c.get("id") == client_id or c.get("client_id") == client_id), None)
+                if client_match:
+                    client_name = client_match.get("nombre") or client_match.get("name", f"Cliente {client_id}")
+            except:
+                client_name = f"Cliente {client_id}"
+        
+        # Obtener nombre del proyecto
+        project_name = "Todos los proyectos"
+        if project_id != "all":
+            try:
+                projects = get_projects(client_id if client_id != "all" else None)
+                project_match = next((p for p in projects if p.get("id") == project_id), None)
+                if project_match:
+                    project_name = project_match.get("name", f"Proyecto {project_id}")
+            except:
+                project_name = f"Proyecto {project_id}"
+        
+        if project_id == "all":
             return html.Div([
                 html.I(className="fas fa-filter me-2"),
-                f"Filtrando reservas por cliente: {client_id}"
-            ], className="alert alert-primary py-2")
-        elif client_id == "all" and project_id != "all":
-            return html.Div([
-                html.I(className="fas fa-filter me-2"),
-                f"Filtrando reservas por proyecto: {project_id}"
+                f"Filtrando reservas para: {client_name}"
             ], className="alert alert-primary py-2")
         else:
             return html.Div([
                 html.I(className="fas fa-filter me-2"),
-                f"Filtrando reservas por cliente: {client_id} y proyecto: {project_id}"
+                f"Filtrando reservas para: {client_name} / {project_name}"
             ], className="alert alert-primary py-2")
     
     # Callback para actualizar las métricas según el filtro seleccionado
@@ -306,7 +454,7 @@ def register_callbacks(app):
             Output("spaces-reservas", "children"),
             Output("spaces-reservas-change", "children")
         ],
-        [Input("selected-client-store", "data")]
+        [Input("spaces-filters-store", "data")]
     )
     def update_metrics(selection_data):
         client_id = selection_data.get("client_id", "all")
@@ -419,7 +567,7 @@ def register_callbacks(app):
             Output("pagination-container", "children")
         ],
         [
-            Input("selected-client-store", "data"), 
+            Input("spaces-filters-store", "data"), 
             Input("refresh-spaces-button", "n_clicks"),
             Input("apply-space-filters", "n_clicks"),
             Input("page-number", "data")
@@ -743,7 +891,7 @@ def register_callbacks(app):
     # Callback para actualizar los gráficos
     @app.callback(
         [Output("spaces-graph-1", "figure"), Output("spaces-graph-2", "figure")],
-        [Input("selected-client-store", "data")]
+        [Input("spaces-filters-store", "data")]
     )
     def update_graphs(selection_data):
         client_id = selection_data.get("client_id", "all")
@@ -840,7 +988,7 @@ def register_callbacks(app):
     # Callback para actualizar el calendario de reservas
     @app.callback(
         Output("spaces-calendar-container", "children"),
-        [Input("selected-client-store", "data")]
+        [Input("spaces-filters-store", "data")]
     )
     def update_calendar(selection_data):
         client_id = selection_data.get("client_id", "all")
@@ -1046,7 +1194,7 @@ def register_callbacks(app):
             Output("weekly-occupation-data", "data"),
             Output("spaces-reservations-data", "data")
         ],
-        [Input("selected-client-store", "data"), Input("analysis-period", "value")],
+        [Input("spaces-filters-store", "data"), Input("analysis-period", "value")],
         prevent_initial_call=True
     )
     def update_advanced_analytics(selection_data, period):
@@ -1505,7 +1653,7 @@ def register_callbacks(app):
         ],
         [Input("export-spaces-pdf", "n_clicks")],
         [
-            State("selected-client-store", "data"),
+            State("spaces-filters-store", "data"),
             State("analysis-period", "value"),
             State("weekly-bookings-chart", "figure"),
             State("daily-occupation-chart", "figure"),

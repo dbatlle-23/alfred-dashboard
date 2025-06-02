@@ -108,6 +108,8 @@ from layouts.water_consumption import register_callbacks as register_water_consu
 from layouts.carbon_footprint import register_callbacks as register_carbon_footprint_callbacks
 # Importar callbacks para gestión de cerraduras inteligentes
 from layouts.smart_locks import register_callbacks as register_smart_locks_callbacks
+# Importar callbacks para la página de exportaciones
+from layouts.exports import register_callbacks as register_exports_callbacks
 
 try:
     logger.info("Registrando callbacks de autenticación")
@@ -145,6 +147,10 @@ try:
     logger.info("Registrando callbacks para gestión de cerraduras inteligentes")
     register_smart_locks_callbacks(app)
     
+    # Registrar callbacks para la página de exportaciones
+    logger.info("Registrando callbacks para la página de exportaciones")
+    register_exports_callbacks(app)
+    
     # Proteger callbacks
     protect_callbacks(app)
 except Exception as e:
@@ -177,6 +183,8 @@ def display_page(pathname, token_data):
     from layouts.carbon_footprint import layout as carbon_footprint_layout
     # Importar layout para gestión de cerraduras inteligentes
     from layouts.smart_locks import layout as smart_locks_layout
+    # Importar layout para la página de exportaciones
+    from layouts.exports import layout as exports_layout
     
     logger.info(f"Navegando a la ruta: {pathname}")
     
@@ -227,6 +235,9 @@ def display_page(pathname, token_data):
             content = carbon_footprint_layout
         elif pathname == "/smart-locks":
             content = smart_locks_layout
+        elif pathname == "/exportaciones":
+            logger.info("Cargando layout de exportaciones")
+            content = exports_layout
         else:
             content = home_layout
         
