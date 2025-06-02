@@ -34,9 +34,17 @@ RUN adduser --disabled-password --gecos '' --shell /bin/bash user \
     && chown -R user:user /app
 USER user
 
-# Exponer el puerto (Railway asigna automáticamente)
+# Exponer el puerto por defecto
 EXPOSE 8050
 
-# Comando para ejecutar la aplicación con Gunicorn
-# Railway inyecta PORT automáticamente
-CMD ["sh", "-c", "gunicorn app:server --bind 0.0.0.0:${PORT:-8050} --timeout 120 --workers 1 --max-requests 1000 --preload"]
+# Script de inicio que maneja la variable PORT correctamente
+RUN echo '#!/bin/bash\n\
+if [ -z "$PORT" ]; then\n\
+    export PORT=8050\n\
+fi\n\
+echo "Starting server on port $PORT"\n\
+exec gunicorn app:server --bind 0.0.0.0:$PORT --timeout 120 --workers 1 --max-requests 1000 --preload\n\
+' > /app/start.sh && chmod +x /app/start.sh
+
+# Usar el script de inicio
+CMD ["/app/start.sh"]

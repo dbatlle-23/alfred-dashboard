@@ -1,6 +1,7 @@
-from dash import html, dcc, dash_table, callback_context
 import dash
 import dash_bootstrap_components as dbc
+import dash_core_components as dcc
+import dash_html_components as html
 from dash.dependencies import Input, Output, State, ALL
 from components.smart_locks.lock_list import create_locks_list
 from components.smart_locks.lock_table import create_locks_table
@@ -2392,207 +2393,165 @@ def register_callbacks(app):
                 logger.warning("No token for load_nfc_grid_data")
                 return current_table_data or [], current_columns or []
 
-            asset_ids = grid_data.get("asset_ids", [])
-            if not asset_ids:
+            asset_ids_to_process = grid_data.get("asset_ids", [])
+            asset_names_map = grid_data.get("asset_names", {})
+            if not asset_ids_to_process:
                 logger.warning("No asset_ids in grid_data for load_nfc_grid_data")
                 return current_table_data or [], current_columns or []
 
-            # 1. Get consolidated_devices from smart_locks_store_data
             consolidated_devices_for_lookup = smart_locks_store_data if smart_locks_store_data else []
-
-            # 2. Create lookup map for gateway_id
+            
+            # Create a lookup for staircase/apartment info per asset_id from smart_locks_store_data
+            # This will pick the first device's info for an asset as representative
+            asset_representative_info_lookup = {}
+            for dev_lookup in consolidated_devices_for_lookup:
+                asset_id_of_dev = str(dev_lookup.get("asset_id", ""))
+                if asset_id_of_dev and asset_id_of_dev not in asset_representative_info_lookup:
+                    asset_representative_info_lookup[asset_id_of_dev] = {
+                        "staircase": dev_lookup.get("staircase", ""),
+                        "apartment": dev_lookup.get("apartment", "")
+                    }
+            
             gateway_lookup = {}
             for dev_lookup in consolidated_devices_for_lookup:
-                # Use real_device_id if available, otherwise device_id as key
                 lookup_key = dev_lookup.get('real_device_id', dev_lookup.get('device_id'))
                 gw_id = dev_lookup.get('gateway_id')
-                if lookup_key and gw_id: # Only store if both key and gateway_id are present
-                    gateway_lookup[str(lookup_key)] = gw_id # Ensure key is string for matching
+                if lookup_key and gw_id: 
+                    gateway_lookup[str(lookup_key)] = gw_id 
             
             logger.debug(f"Gateway lookup map created with {len(gateway_lookup)} entries.")
-            if len(gateway_lookup) < 20: # Log content only if it's not too large
-                logger.debug(f"Gateway lookup content: {gateway_lookup}")
 
-
-            from utils.nfc_helper import fetch_for_asset # Already imported at top level, but good for clarity
+            from utils.nfc_helper import fetch_for_asset 
             from components.smart_locks.nfc_grid.nfc_display_grid import format_nfc_value
 
             new_table_data = []
-            all_sensor_ids_from_api = set()
+            all_sensor_ids_found_across_all_devices = set() # To collect all sensor IDs for column creation
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            # Fetch all NFC data in parallel first
+            nfc_data_by_asset = {}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor: # Increased max_workers slightly
                 future_to_asset = {
-                    executor.submit(fetch_for_asset, asset_id, token): asset_id 
-                    for asset_id in asset_ids
+                    executor.submit(fetch_for_asset, asset_id_iter, token): asset_id_iter 
+                    for asset_id_iter in asset_ids_to_process
                 }
-                
                 for future in concurrent.futures.as_completed(future_to_asset):
-                    current_asset_id_processed = future_to_asset[future]
+                    current_asset_id_iter = future_to_asset[future]
                     try:
-                        success, devices_from_fetch = future.result()
-                        logger.info(f"NFC data received for asset {current_asset_id_processed}: {len(devices_from_fetch) if success else 'Failed or no'} devices")
-                        
-                        if not success or not devices_from_fetch:
+                        success, devices_from_fetch_iter = future.result()
+                        nfc_data_by_asset[current_asset_id_iter] = devices_from_fetch_iter if success else []
+                        logger.info(f"NFC data fetched for asset {current_asset_id_iter}: {len(nfc_data_by_asset[current_asset_id_iter])} devices")
+                    except Exception as e_fetch:
+                        logger.error(f"Error fetching NFC data for asset {current_asset_id_iter}: {str(e_fetch)}")
+                        nfc_data_by_asset[current_asset_id_iter] = [] # Ensure it's an empty list on error
+
+            # Now iterate through the assets that are supposed to be in the grid
+            for current_asset_id_processed in asset_ids_to_process:
+                devices_from_fetch_for_this_asset = nfc_data_by_asset.get(current_asset_id_processed, [])
+                asset_display_name = asset_names_map.get(current_asset_id_processed, current_asset_id_processed)
+                rep_info = asset_representative_info_lookup.get(current_asset_id_processed, {"staircase": "N/A", "apartment": "N/A"})
+
+
+                if devices_from_fetch_for_this_asset: # If there ARE devices with NFC data for this asset
+                    for device_from_nfc_api in devices_from_fetch_for_this_asset:
+                        nfc_api_device_id = device_from_nfc_api.get("device_id") # This is the real_device_id from fetch_for_asset
+                        if not nfc_api_device_id:
+                            logger.warning(f"Device from fetch_for_asset for asset {current_asset_id_processed} is missing internal device_id: {device_from_nfc_api}")
                             continue
+                        
+                        nfc_api_device_id_str = str(nfc_api_device_id)
 
-                        for device_from_nfc_api in devices_from_fetch:
-                            nfc_api_device_id = device_from_nfc_api.get("device_id") # This is the real_device_id
-                            if not nfc_api_device_id:
-                                logger.warning(f"Device from fetch_for_asset for asset {current_asset_id_processed} is missing device_id: {device_from_nfc_api}")
-                                continue
-                            
-                            nfc_api_device_id_str = str(nfc_api_device_id) # Ensure string for lookup
+                        nfc_api_gateway_id = device_from_nfc_api.get("gateway_id")
+                        final_gateway_id_for_row = nfc_api_gateway_id
 
-                            # Determine the authoritative gateway_id
-                            nfc_api_gateway_id = device_from_nfc_api.get("gateway_id")
-                            final_gateway_id_for_row = nfc_api_gateway_id
-
-                            if not final_gateway_id_for_row or final_gateway_id_for_row == "no_gateway":
-                                looked_up_gateway_id = gateway_lookup.get(nfc_api_device_id_str)
-                                if looked_up_gateway_id:
-                                    final_gateway_id_for_row = looked_up_gateway_id
-                                    logger.info(f"Used gateway_id ('{final_gateway_id_for_row}') from smart-locks-data-store for device {nfc_api_device_id_str} (asset {current_asset_id_processed}) as fetched was '{nfc_api_gateway_id}'.")
-                                else:
-                                    final_gateway_id_for_row = f"gw_unknown_{nfc_api_device_id_str[:4]}" # Fallback, include part of device_id for some uniqueness
-                                    logger.warning(f"Gateway_id for device {nfc_api_device_id_str} (asset {current_asset_id_processed}) not in fetched data ('{nfc_api_gateway_id}') or lookup map. Using fallback '{final_gateway_id_for_row}'.")
+                        if not final_gateway_id_for_row or final_gateway_id_for_row == "no_gateway":
+                            looked_up_gateway_id = gateway_lookup.get(nfc_api_device_id_str)
+                            if looked_up_gateway_id:
+                                final_gateway_id_for_row = looked_up_gateway_id
                             else:
-                                logger.debug(f"Using gateway_id ('{final_gateway_id_for_row}') from fetched NFC API data for device {nfc_api_device_id_str} (asset {current_asset_id_processed}).")
-                            
-                            real_device_id_for_row = nfc_api_device_id_str
-                            # Use current_asset_id_processed for the asset_id part of the composite ID
-                            composite_row_id = f"{current_asset_id_processed}-{final_gateway_id_for_row}-{real_device_id_for_row}"
-                            
-                            # --- MODIFICATION FOR STAIRCASE/APARTMENT SOURCE START ---
-                            # Get Staircase and Apartment from a device belonging to current_asset_id_processed
-                            asset_staircase_for_row = ""
-                            asset_apartment_for_row = ""
-                            representative_device_for_current_asset = next((
-                                dev for dev in consolidated_devices_for_lookup 
-                                if str(dev.get("asset_id")) == str(current_asset_id_processed)
-                            ), None)
+                                final_gateway_id_for_row = f"gw_unknown_{nfc_api_device_id_str[:4]}"
+                                logger.warning(f"Gateway_id for device {nfc_api_device_id_str} (asset {current_asset_id_processed}) not in fetched data ('{nfc_api_gateway_id}') or lookup map. Using fallback '{final_gateway_id_for_row}'.")
+                        
+                        real_device_id_for_row = nfc_api_device_id_str
+                        composite_row_id = f"{current_asset_id_processed}-{final_gateway_id_for_row}-{real_device_id_for_row}"
+                        
+                        display_label_from_store = f"Device {real_device_id_for_row}" # Default
+                        lock_name_from_store = device_from_nfc_api.get("device_name", "Sin nombre") # from fetch_for_asset
+                        
+                        # Try to get a richer display_label from consolidated_devices_for_lookup
+                        matching_device_for_display_label = next((
+                            d for d in consolidated_devices_for_lookup 
+                            if str(d.get("real_device_id", d.get("device_id"))) == real_device_id_for_row and \
+                               str(d.get("asset_id")) == str(current_asset_id_processed) and \
+                               str(d.get("gateway_id")) == str(final_gateway_id_for_row) # Match more precisely
+                        ), None)
 
-                            if representative_device_for_current_asset:
-                                asset_staircase_for_row = representative_device_for_current_asset.get("staircase", "")
-                                asset_apartment_for_row = representative_device_for_current_asset.get("apartment", "")
-                                logger.debug(f"For asset {current_asset_id_processed}, found representative staircase: '{asset_staircase_for_row}', apartment: '{asset_apartment_for_row}'")
-                            else:
-                                # Fallback: attempt to get from device_from_nfc_api if fields happen to exist there (unlikely for these)
-                                asset_staircase_for_row = device_from_nfc_api.get("asset_staircase", "")
-                                asset_apartment_for_row = device_from_nfc_api.get("asset_apartment", "")
-                                if not asset_staircase_for_row and not asset_apartment_for_row: # Only log warning if both fallbacks are empty
-                                     logger.warning(f"Could not find representative device for asset {current_asset_id_processed} in consolidated_devices_for_lookup to get staircase/apartment. API device also lacks these.")
-                            # --- MODIFICATION FOR STAIRCASE/APARTMENT SOURCE END ---
+                        if matching_device_for_display_label:
+                            params = matching_device_for_display_label.get("parameters", {})
+                            room = params.get("room", "")
+                            name = params.get("name", "")
+                            store_device_name = matching_device_for_display_label.get("device_name", "")
+                            if room and name: display_label_from_store = f"{room} - {name}"
+                            elif room: display_label_from_store = room
+                            elif name: display_label_from_store = name
+                            elif store_device_name: display_label_from_store = store_device_name
+                            lock_name_from_store = matching_device_for_display_label.get("device_name", lock_name_from_store)
 
-                            # Attempt to get richer display_label from smart_locks_store_data (consolidated_devices_for_lookup) matching the specific device
-                            display_label = device_from_nfc_api.get("device_name", f"Device {real_device_id_for_row}") # Default
-                            
-                            # IMPROVED: Multi-approach device matching with detailed logging
-                            matching_device_for_display_label = None
-                            matching_approach = "none"
-                            
-                            # FIXED: Filter devices by current asset first to avoid cross-asset matching
-                            asset_specific_devices = [d for d in consolidated_devices_for_lookup 
-                                                     if str(d.get("asset_id", "")) == str(current_asset_id_processed)]
-                            
-                            
-                            # Approach 1: Match by real_device_id within current asset
-                            matching_device_for_display_label = next((d for d in asset_specific_devices 
-                                                                     if str(d.get("real_device_id", "")) == real_device_id_for_row), None)
-                            if matching_device_for_display_label:
-                                matching_approach = "real_device_id"
-                            
-                            # Approach 2: Match by device_id within current asset if approach 1 failed
-                            if not matching_device_for_display_label:
-                                matching_device_for_display_label = next((d for d in asset_specific_devices 
-                                                                         if str(d.get("device_id", "")) == real_device_id_for_row), None)
-                                if matching_device_for_display_label:
-                                    matching_approach = "device_id"
-                            
-                            # Approach 3: Partial match within current asset (for cases where IDs are similar but not exact)
-                            if not matching_device_for_display_label:
-                                for candidate_device in asset_specific_devices:
-                                    candidate_real_id = str(candidate_device.get("real_device_id", ""))
-                                    candidate_device_id = str(candidate_device.get("device_id", ""))
-                                    
-                                    # Check for partial matches or similar IDs
-                                    if (real_device_id_for_row in candidate_real_id or 
-                                        candidate_real_id in real_device_id_for_row or
-                                        real_device_id_for_row in candidate_device_id or 
-                                        candidate_device_id in real_device_id_for_row):
-                                        matching_device_for_display_label = candidate_device
-                                        matching_approach = "partial_match"
-                                        break
-                            
-                            # Approach 4: Fallback - first device from the same asset (as last resort)
-                            if not matching_device_for_display_label and asset_specific_devices:
-                                matching_device_for_display_label = asset_specific_devices[0]
-                                matching_approach = "same_asset_fallback"
-                                logger.warning(f"Device {real_device_id_for_row} using same_asset_fallback approach in asset {current_asset_id_processed} - this may not be accurate")
-                            
-                            # Process the matched device for display_label
-                            if matching_device_for_display_label:
-                                params = matching_device_for_display_label.get("parameters", {})
-                                room = params.get("room", "")
-                                name = params.get("name", "")
-                                device_name = matching_device_for_display_label.get("device_name", "")
-                                
-                                if room and name:
-                                    display_label = f"{room} - {name}"
-                                elif room:
-                                    display_label = room
-                                elif name:
-                                    display_label = name
-                                elif device_name:
-                                    display_label = device_name
-                                
-                                logger.info(f"Device {real_device_id_for_row} enriched display_label: '{display_label}' using {matching_approach} approach in asset {current_asset_id_processed}")
-                            else:
-                                # Log detailed debugging info when no match is found
-                                logger.warning(f"Device {real_device_id_for_row} not found in asset {current_asset_id_processed}. Available devices in this asset:")
-                                for i, dev in enumerate(asset_specific_devices[:3]):  # Log first 3 devices only
-                                    logger.warning(f"  Device {i+1}: device_id='{dev.get('device_id')}', real_device_id='{dev.get('real_device_id')}', device_name='{dev.get('device_name')}'")
-                                if not asset_specific_devices:
-                                    logger.warning(f"  No devices found for asset {current_asset_id_processed}")
-                                logger.warning(f"Using API device_name fallback: '{display_label}'")
-                            
-                            lock_name_for_row = device_from_nfc_api.get("device_name", "Sin nombre")
 
-                            row = {
-                                "id": composite_row_id, 
-                                "device_id": display_label, 
-                                "real_device_id": real_device_id_for_row,
-                                "lock_name": lock_name_for_row,
-                                "asset_name": current_asset_id_processed, 
-                                "asset_staircase": asset_staircase_for_row, 
-                                "asset_apartment": asset_apartment_for_row, 
-                                "gateway_id": final_gateway_id_for_row,
-                                "asset_id": current_asset_id_processed 
-                            }
-                            
-                            # Add sensor values from device_from_nfc_api.get("sensors", [])
-                            # The sensors in device_from_nfc_api are expected to be { "sensor_id": "X", "password": "Y" }
-                            for sensor_detail in device_from_nfc_api.get("sensors", []):
-                                sensor_id_val = sensor_detail.get("sensor_id")
-                                if sensor_id_val:
-                                    all_sensor_ids_from_api.add(str(sensor_id_val))
-                                    password = sensor_detail.get("password", "")
-                                    row[f"sensor_{sensor_id_val}"] = format_nfc_value(password) if password else ""
-                            
-                            new_table_data.append(row)
-                            # logger.info(f"Added/Updated row for device {real_device_id_for_row} (asset {current_asset_id_processed}): ID='{composite_row_id}', GW='{final_gateway_id_for_row}'")
+                        row = {
+                            "id": composite_row_id, 
+                            "device_id": display_label_from_store, 
+                            "real_device_id": real_device_id_for_row,
+                            "lock_name": lock_name_from_store,
+                            "asset_name": asset_display_name, 
+                            "asset_staircase": rep_info["staircase"], 
+                            "asset_apartment": rep_info["apartment"], 
+                            "gateway_id": final_gateway_id_for_row,
+                            "asset_id": current_asset_id_processed 
+                        }
+                        
+                        # The sensors in device_from_nfc_api are already processed by fetch_for_asset
+                        # and are in the format: {"sensor_id": "X", "password": "Y", ... }
+                        for sensor_detail in device_from_nfc_api.get("sensors", []):
+                            sensor_id_val = sensor_detail.get("sensor_id")
+                            if sensor_id_val:
+                                all_sensor_ids_found_across_all_devices.add(str(sensor_id_val))
+                                password = sensor_detail.get("password", "")
+                                row[f"sensor_{sensor_id_val}"] = format_nfc_value(password) if password else ""
+                        
+                        new_table_data.append(row)
+                else: # No devices with NFC data returned for this asset by fetch_for_asset
+                    logger.info(f"No NFC devices returned by fetch_for_asset for asset {current_asset_id_processed}. Creating placeholder row.")
+                    # Create a placeholder row for the asset
+                    placeholder_row_id = f"{current_asset_id_processed}-NO_NFC_DEVICES"
+                    row = {
+                        "id": placeholder_row_id,
+                        "device_id": "No NFC Devices Reported", # Indication in the device display column
+                        "real_device_id": "N/A",
+                        "lock_name": "N/A",
+                        "asset_name": asset_display_name,
+                        "asset_staircase": rep_info["staircase"],
+                        "asset_apartment": rep_info["apartment"],
+                        "gateway_id": "N/A", # Cannot reliably determine a single gateway if no devices
+                        "asset_id": current_asset_id_processed
+                    }
+                    # Sensor columns will be blank by default if not set
+                    new_table_data.append(row)
 
-                    except Exception as e:
-                        logger.error(f"Error processing fetched NFC data for asset {current_asset_id_processed}: {str(e)}")
-            
-            if not new_table_data:
-                logger.warning("No data generated by load_nfc_grid_data after processing assets.")
-                # Return current data if nothing new was generated, or empty if current is also None
-                return current_table_data or [], current_columns or []
+            if not new_table_data and not asset_ids_to_process: # If truly no assets to process at all.
+                 logger.warning("No assets to process for the NFC grid.")
+                 return [], []
+            elif not new_table_data and asset_ids_to_process: # Assets were there, but all yielded no devices and no placeholders (edge case)
+                 logger.warning("All assets processed yielded no devices and no placeholders created; returning empty grid.")
+                 # Potentially create placeholder rows for all assets if this state is reached.
+                 # For now, returning empty as per current logic if new_table_data is empty.
+                 return [], []
 
-            # Dynamically create columns based on all sensor IDs found
-            # Include important sensors even if they have no data yet
-            important_sensors_ids = {"2", "8", "9", "10"}
-            final_sensor_ids_for_columns = sorted(list(all_sensor_ids_from_api.union(important_sensors_ids)), key=lambda x: int(x) if x.isdigit() else x)
+
+            important_sensors_ids = {"2", "7", "8", "9", "10"} # Make sure master card slot 7 is considered
+            final_sensor_ids_for_columns = sorted(
+                list(all_sensor_ids_found_across_all_devices.union(important_sensors_ids)), 
+                key=lambda x: int(x) if x.isdigit() else x
+            )
             
             base_columns = [
                 {"name": "Espacio", "id": "asset_name"},
@@ -2605,19 +2564,16 @@ def register_callbacks(app):
             sensor_columns_built = []
             for s_id in final_sensor_ids_for_columns:
                 name = f"NFC {s_id}"
-                # if s_id == "7": name = "Tarjeta Maestra" # Example of custom name
+                if s_id == "7": name = "Master Card" 
                 sensor_columns_built.append({"name": name, "id": f"sensor_{s_id}", "editable": True})
             
             all_columns_built = base_columns + sensor_columns_built
             
-            # Ensure all rows have all sensor columns, initialized to empty if not present
             for r in new_table_data:
                 for s_id_col in final_sensor_ids_for_columns:
-                    r.setdefault(f"sensor_{s_id_col}", "")
+                    r.setdefault(f"sensor_{s_id_col}", "") # Ensure all sensor columns exist in all rows
 
             logger.info(f"load_nfc_grid_data returning {len(new_table_data)} rows and {len(all_columns_built)} columns")
-            
-            
             return new_table_data, all_columns_built
                 
         except Exception as e:

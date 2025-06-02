@@ -1,1 +1,1 @@
-web: gunicorn app:server --bind 0.0.0.0:$PORT --timeout 120 --workers 1 --max-requests 1000 --preload 
+web: bash -c 'gunicorn app:server --bind 0.0.0.0:${PORT:-8050} --timeout 120 --workers 1 --max-requests 1000 --preload' 

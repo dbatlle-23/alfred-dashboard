@@ -1,0 +1,58 @@
+# Archivos grandes e innecesarios para Railway
+*.ifc
+*.dwg
+*.rvt
+
+# Archivos de desarrollo
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+.coverage
+.tox/
+
+# Archivos de datos temporales
+data/
+logs/
+*.log
+*.csv
+test_results/
+project_analysis_*/
+
+# Archivos de IDE y editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Archivos de Git
+.git/
+.gitignore
+
+# Node modules (si los hay)
+node_modules/
+
+# Archivos temporales
+tmp/
+temp/
+.tmp/
+.temp/
+
+# Archivos de backup
+*.bak
+*.backup
+
+# Archivos de configuración local
+config/database.ini
+.env
+.env.local
+
+# Archivos de prueba específicos
+test_*.py
+*_test.py
+tests/ 

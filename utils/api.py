@@ -2848,9 +2848,15 @@ def get_nfc_passwords(asset_id, jwt_token):
                 logger.warning(f"Item en 'data' no es un diccionario: {device_entry_from_api}")
                 continue
             
+            # +++ Added Detailed Logging Block Start +++
+            device_name_for_log = device_entry_from_api.get("device_name", "Unknown Device")
+            real_device_id_for_log = device_entry_from_api.get("real_device_id", "Unknown Real ID")
+            logger.info(f"Processing device_entry_from_api: Name='{device_name_for_log}', RealID='{real_device_id_for_log}', Keys={list(device_entry_from_api.keys())}")
+            # +++ Added Detailed Logging Block End +++
+
             sensor_passwords_list = device_entry_from_api.get("sensor_passwords", [])
             if not sensor_passwords_list:
-                logger.info(f"Dispositivo '{device_entry_from_api.get('device_name')}' no tiene 'sensor_passwords'. Omitiendo.")
+                logger.info(f"Dispositivo '{device_entry_from_api.get('device_name')}' (RealID: {device_entry_from_api.get('real_device_id')}) no tiene 'sensor_passwords' o está vacía. Omitiendo. Device Entry: {device_entry_from_api}")
                 continue
 
             representative_device_id_for_row = None
@@ -2861,7 +2867,7 @@ def get_nfc_passwords(asset_id, jwt_token):
                 representative_gateway_id_for_row = sensor_passwords_list[0].get("gateway_id")
 
             if not representative_device_id_for_row:
-                logger.warning(f"No se pudo determinar un representative_device_id para el dispositivo: {device_entry_from_api.get('device_name')}. Omitiendo.")
+                logger.warning(f"No se pudo determinar un representative_device_id para el dispositivo: {device_entry_from_api.get('device_name')}. Omitiendo. Device Entry: {device_entry_from_api}")
                 continue
             
             grid_device_object = {
@@ -2886,7 +2892,7 @@ def get_nfc_passwords(asset_id, jwt_token):
                 processed_devices_for_grid.append(grid_device_object)
                 logger.info(f"Dispositivo '{grid_device_object['device_id']}' (real ID: {representative_device_id_for_row}) procesado con sus contraseñas NFC.")
             else:
-                logger.info(f"Dispositivo '{device_entry_from_api.get('device_name')}' no tenía sensores NFC_CODE con contraseña. Omitiendo.")
+                logger.info(f"Dispositivo '{device_entry_from_api.get('device_name')}' (RealID: {representative_device_id_for_row}) no tenía sensores NFC_CODE con contraseña o la lista sensor_passwords estaba mal formada. Omitiendo. Device Entry: {device_entry_from_api}")
 
         logger.info(f"get_nfc_passwords (New Endpoint) finalizó. {len(processed_devices_for_grid)} dispositivos con NFC_CODE procesados para el grid.")
         return {"data": {"devices": processed_devices_for_grid}} 
