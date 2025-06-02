@@ -16,6 +16,11 @@ matplotlib==3.8.3
 pyjwt==2.8.0
 tqdm==4.66.1
 
+# Dependencias científicas y de análisis
+scipy==1.12.0
+seaborn==0.13.2
+openpyxl==3.1.2
+
 # Dependencias para desarrollo y pruebas
 pytest==8.0.2
 pytest-dash==2.1.2
