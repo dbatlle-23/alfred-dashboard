@@ -3,7 +3,6 @@ FROM python:3.9-slim
 # Variables de entorno
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
-ENV PORT=${PORT:-8050}
 
 WORKDIR /app
 
@@ -35,8 +34,9 @@ RUN adduser --disabled-password --gecos '' --shell /bin/bash user \
     && chown -R user:user /app
 USER user
 
-# Exponer el puerto dinámico
-EXPOSE $PORT
+# Exponer el puerto (Railway asigna automáticamente)
+EXPOSE 8050
 
 # Comando para ejecutar la aplicación con Gunicorn
-CMD gunicorn app:server --bind 0.0.0.0:$PORT --timeout 120 --workers 1 --max-requests 1000 --preload
+# Railway inyecta PORT automáticamente
+CMD ["sh", "-c", "gunicorn app:server --bind 0.0.0.0:${PORT:-8050} --timeout 120 --workers 1 --max-requests 1000 --preload"]
