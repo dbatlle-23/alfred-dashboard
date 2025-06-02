@@ -65,3 +65,22 @@ data/
 debug_log.txt
 test_regeneration.py
 logs/
+
+# Variables de entorno (CRÍTICO para Railway)
+.env
+.env.local
+.env.production
+.env.staging
+
+# Archivos específicos de Railway
+.railway/
+
+# Archivos de backup y análisis temporales
+asset_analysis_*/
+project_analysis_*/
+test_results/
+*.png
+*.html
+
+# Node modules (si los hay)
+node_modules/

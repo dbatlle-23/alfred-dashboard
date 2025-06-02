@@ -259,6 +259,9 @@ def display_page(pathname, token_data):
 # Crear carpetas necesarias
 os.makedirs("data/analyzed_data", exist_ok=True)
 
+# Configuración del servidor para producción (Railway/Gunicorn)
+server = app.server
+
 # Ejecutar la aplicación
 if __name__ == "__main__":
     try:
